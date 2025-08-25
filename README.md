@@ -4,7 +4,7 @@
 
 # Erebus
 
-Erebus is a modern initial access wrapper aimed at decreasing the development to deployment time when preparing for initial access operations. Erebus comes with multiple initial access techniques to craft complex chains and assist in bypassing the toughest security measures.
+Erebus is a modern initial access wrapper aimed at decreasing the development to deployment time, when preparing for intrusion operations. Erebus comes with multiple techniques out of the box to craft complex chains, and assist in bypassing the toughest security measures.
 
 This project is meant to be an extension to your offensive capabilities, and is by no means a silver bullet against all environments. If you would like to add your own techniques or modify the existing ones then check out the project's documentation page for more info.
 
