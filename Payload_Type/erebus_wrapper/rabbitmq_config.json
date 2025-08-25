@@ -1,0 +1,8 @@
+{
+  "rabbitmq_host": "100.127.2.2",
+  "rabbitmq_port": 5672,
+  "rabbitmq_password": "EGyKXVFjclDzYNtuaNk9fRr53lh539",
+  "mythic_server_host": "100.127.2.2",
+  "mythic_server_grpc_port": 17444,
+  "mythic_server_port": 7443
+}

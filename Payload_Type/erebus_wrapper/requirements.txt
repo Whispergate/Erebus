@@ -1,0 +1,5 @@
+mythic-container==0.5.32
+argparse==1.4.0
+pycryptodome==3.23.0
+pyfiglet==1.0.4
+rich==14.1.0

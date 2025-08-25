@@ -1,0 +1,14 @@
+{
+  "os": ["Windows", "Linux"],
+  "languages": ["C#", "C", "C++", "Python", "Go"] ,
+  "features": {
+    "mythic": ["wrapper"],
+    "custom": []
+  },
+  "payload_output": ["bin", "dll", "msi", "msix"],
+  "architectures": ["x86_64"],
+  "c2": [],
+  "mythic_version": "3.3.1-rc89",
+  "agent_version": "0.0.1",
+  "supported_wrappers": []
+}
