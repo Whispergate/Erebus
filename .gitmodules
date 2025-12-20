@@ -1,0 +1,3 @@
+[submodule "Payload_Type/erebus_wrapper/erebus_wrapper/agent_code/shellcrypt"]
+	path = Payload_Type/erebus_wrapper/erebus_wrapper/agent_code/shellcrypt
+	url = https://github.com/lavender-exe/Shellcrypt
