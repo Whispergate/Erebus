@@ -4,24 +4,23 @@ Returns:
     File: MSI File
 """
 
-import json, msilib, uuid, os, shutil, pathlib
+import json, pathlib, uuid, shutil, subprocess, tempfile
 
 REPO_ROOT     = pathlib.Path(__file__).resolve().parents[2]
 AGENT_CODE    = REPO_ROOT / "agent_code"
 CONTAINER_DIR = AGENT_CODE / "container"
 PAYLOAD_DIR   = AGENT_CODE / "payload"
-STAGING       = CONTAINER_DIR / "_stage"
-SPEC_FILE     = CONTAINER_DIR / "spec.json"
-CAB_FILE      = "erebus.cab"
 
-def build_msi(spec_name: str = "spec.json",
-                  out_dir_name: str = "msi") -> pathlib.Path:
-    with open(SPEC_FILE) as f:
-        spec = json.load(f)
+def build_msi(spec_name: str = "spec.json", out_dir_name: str = "msi") -> pathlib.Path:
+    """Generates an MSI Container
 
-    shutil.rmtree(STAGING, ignore_errors=True)
-    os.makedirs(STAGING, exist_ok=True)
+    Args:
+        spec_name (str, optional): Specification File Name. Defaults to "spec.json".
+        out_dir_name (str, optional): Output Directory. Defaults to "msi".
 
+    Returns:
+        pathlib.Path: Returns Container Path
+    """
     spec_path = CONTAINER_DIR / spec_name
     with open(spec_path) as f:
         spec = json.load(f)
@@ -31,39 +30,21 @@ def build_msi(spec_name: str = "spec.json",
     out_dir.mkdir()
 
     for dst, src in spec["files"].items():
-        src_path = AGENT_CODE / src
-        shutil.copy2(src_path, out_dir / dst)
-    
+        shutil.copy2(AGENT_CODE / src, out_dir / dst)
     shutil.copy2(PAYLOAD_DIR / spec["payload_name"], out_dir / spec["payload_name"])
 
-    db = msilib.init_database(
-        str(spec["msi_name"]),
-        schema=msilib.schema,
-        ProductName=spec["name"],
-        ProductVersion=spec["version"],
-        ProductCode=str(uuid.uuid4()),
-        Manufacturer=spec["author"])
+    wix_json = {
+        "name": spec["name"],
+        "version": spec["version"],
+        "manufacturer": spec["author"],
+        "upgrade_code": str(uuid.uuid4()),
+        "files": [{"source": str(out_dir / f), "name": f} for f in spec["files"]] +
+                  [{"source": str(out_dir / spec["payload_name"]), "name": spec["payload_name"]}]
+    }
 
-    msilib.add_data(db, "Directory",
-        [("TARGETDIR",   None, "SourceDir"),
-         ("ProgramFilesFolder", "TARGETDIR",   "."),
-         ("INSTALLFOLDER", "ProgramFilesFolder", spec["name"])])
-
-    msilib.add_data(db, "Feature",
-        [("DefaultFeature", None, None, 1, 1, "", "")])
-
-    msilib.add_data(db, "Media", [(1, 1, CAB_FILE, None, None)])
-
-    cab = msilib.CAB(CAB_FILE)
-    cab.append_staged_files(str(STAGING))
-    for f in spec["files"]:
-        msilib.add_data(db, "File",
-            [(f, "INSTALLFOLDER", f, 0)])
-
-    msilib.sequence.StandardInstallSequence(db)
-    db.Commit()
-    shutil.rmtree(STAGING, ignore_errors=True)
-    return CONTAINER_DIR / "msi" / spec["msi_name"]
-
-if __name__ == "__main__":
-    print("MSI created at:", build_msi())
+    tmp = tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False)
+    json.dump(wix_json, tmp); tmp.close()
+    msi_path = CONTAINER_DIR / spec["msi_name"]
+    subprocess.check_call(["wixl", "-o", str(msi_path), tmp.name])
+    pathlib.Path(tmp.name).unlink()
+    return msi_path
