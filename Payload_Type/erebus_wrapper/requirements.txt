@@ -7,3 +7,4 @@ py7zr
 pypdf2
 pefile
 jinja2
+python-msilib
