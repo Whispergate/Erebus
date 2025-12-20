@@ -8,6 +8,19 @@ Erebus is a modern initial access wrapper aimed at decreasing the development to
 
 This project is meant to be an extension to your offensive capabilities, and is by no means a silver bullet against all environments. If you would like to add your own techniques or modify the existing ones then check out the project's documentation page for more info.
 
+## Contributions
+
+This project would not be possible without the awesome support and tooling from these operators, thank you all!
+
+- Mariusz Banach ([Mgeeky](https://github.com/mgeeky)):
+  - [ProtectMyTooling](https://github.com/mgeeky/ProtectMyTooling)
+  - [PackMyPayload](https://github.com/mgeeky/PackMyPayload)
+- Jordan Jay ([0xLegacyy](https://github.com/iilegacyyii/)):
+  - [Shellcrypt](https://github.com/iilegacyyii/Shellcrypt)
+- Cody Thomas ([its-a-feature](https://github.com/its-a-feature)):
+  - [Mythic Red Team Framework](https://github.com/its-a-feature/Mythic)
+  - Helping out with my silly questions
+
 ## How to install an agent in this format within Mythic
 
 When it's time for you to test out your install or for another user to install your agent, it's pretty simple. Within Mythic you can run the `mythic-cli` binary to install this in one of three ways:

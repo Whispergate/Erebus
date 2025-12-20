@@ -1,0 +1,11 @@
+{
+  "name": "ErebusApp",
+  "msi_name" : "erebus.msi",
+  "clickonce_name": "setup.exe",
+  "version": "1.0.0",
+  "author": "Whispergate",
+  "files": {
+    "decoy.pdf": "decoys/decoy.pdf",
+    "shellcode.bin": "shellcode/obfuscated.bin"
+  }
+}
