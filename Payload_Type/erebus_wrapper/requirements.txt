@@ -3,14 +3,8 @@ argparse
 pycryptodome
 pyfiglet
 rich
-zipfile2
-pyminizip
 py7zr
-pycdlib
 pypdf2
-win32con
-win32api
-lznt1
 pefile
 jinja2
 msilib
