@@ -100,7 +100,7 @@ Erebus comes with multiple techniques out of the box to craft complex chains, an
     agent_type = AgentType.Wrapper
     agent_path = PurePath(".") / "erebus_wrapper"
     agent_icon_path = agent_path / "Erebus.svg"
-    agent_code_path = agent_path
+    agent_code_path = agent_path / "agent_code"
 
     environment = Environment(loader=FileSystemLoader("agent_code/templates/"))
 
@@ -219,7 +219,7 @@ Erebus comes with multiple techniques out of the box to craft complex chains, an
                   step_description = "Adding payload into chosen container"),
     ]
 
-    async def prepare_dllproxy(self, dll_type: str, dll_target, shellcode) -> None:
+    async def prepare_dllproxy(self, dll_type: str, dll_target, shellcode):
         """Prepares a DLL File for proxy'd hijacking
 
         Args:
@@ -248,7 +248,7 @@ Erebus comes with multiple techniques out of the box to craft complex chains, an
         with open(f"{self.agent_path}/agent_code/templates/dll_template.cpp", "w") as file:
             file.write(file_content)
 
-    async def generate_payload(self) -> None:
+    async def generate_payload(self):
         """Creates a payload based on the provided shellcode/agent
 
         Raises:
@@ -265,7 +265,7 @@ Erebus comes with multiple techniques out of the box to craft complex chains, an
         """
         raise NotImplementedError
 
-    async def create_triggers(self) -> None:
+    async def create_triggers(self):
         """Creates a trigger to execute the payload
 
         Raises:
@@ -279,7 +279,7 @@ Erebus comes with multiple techniques out of the box to craft complex chains, an
         """
         raise NotImplementedError
 
-    async def containerise_payload(self) -> None:
+    async def containerise_payload(self):
         """Creates a container and adds all files generated from the payload function inside of the given archive/media
 
         Raises:
@@ -295,7 +295,6 @@ Erebus comes with multiple techniques out of the box to craft complex chains, an
     async def build(self) -> BuildResponse:
         response = BuildResponse(status = BuildStatus.Error)
         output = ""
-
 
         try:
             agent_build_path = tempfile.TemporaryDirectory(suffix = self.uuid)
