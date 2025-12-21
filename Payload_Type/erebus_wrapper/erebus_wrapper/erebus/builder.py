@@ -387,7 +387,7 @@ Erebus comes with multiple techniques out of the box to craft complex chains, an
             response.build_message = "No leading MZ header for payload."
 
             cmd = [
-                r"/venv/bin/python", shellcrypt_path,
+                r"/venv/bin/python3", shellcrypt_path,
                 "-i", mythic_shellcode_path,
                 "-e", ENCRYPTION_METHODS[self.get_parameter("Encryption Type")],
                 "-f", SHELLCODE_FORMAT[self.get_parameter("Shellcode Format")],
