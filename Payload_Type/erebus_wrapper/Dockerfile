@@ -5,6 +5,8 @@ WORKDIR /Mythic/
 
 COPY [".", "."]
 
-RUN pip install -r requirements.txt
+RUN python3 -m venv /venv
 
-RUN ["python3", "main.py"]
+RUN /venv/bin/python -m pip install -r requirements.txt
+
+CMD ["/venv/bin/python", "main.py"]

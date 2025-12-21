@@ -12,13 +12,13 @@ TODO:
 
 '''
 from erebus_wrapper.erebus.modules.payload_dll import generate_proxies
-from erebus_wrapper.erebus.modules.payload_obfuscate_shellcode import ENCRYPTION, COMPRESSION, ENCODING, SHELLCRYPT, SHELLCODE_DIR
+from erebus_wrapper.erebus.modules.payload_obfuscate_shellcode import SHELLCRYPT, SHELLCODE_DIR
 from erebus_wrapper.erebus.modules.container_clickonce import build_clickonce
 from erebus_wrapper.erebus.modules.container_msi import build_msi
 
-from mythic_container.PayloadBuilder import PayloadType, BuildParameter, BuildParameterType, BuildResponse, BuildStatus, BuildStep, AgentType
+from mythic_container.PayloadBuilder import *
 from mythic_container.MythicCommandBase import *
-from mythic_container.MythicRPC import SendMythicRPCPayloadUpdatebuildStep, MythicRPCPayloadUpdateBuildStepMessage, SendMythicRPCFileGetContent, MythicRPCFileGetContentMessage
+from mythic_container.MythicRPC import *
 
 from pathlib import PurePath
 from distutils.dir_util import copy_tree
@@ -29,45 +29,45 @@ import asyncio
 import tempfile
 
 
-class ENCRYPTION_METHODS(Enum):
-    AES128_CBC  = "aes_128"
-    AES256_CBC  = "aes_cbc"
-    AES256_ECB  = "aes_ecb"
-    CHACHA20    = "chacha20"
-    RC4         = "rc4"
-    SALSA20     = "salsa20"
-    XOR         = "xor"
-    XOR_COMPLEX = "xor_complex"
+ENCRYPTION_METHODS = {
+    "AES128_CBC" :  "aes_128",
+    "AES256_CBC" :  "aes_cbc",
+    "AES256_ECB" :  "aes_ecb",
+    "CHACHA20"   :  "chacha20",
+    "RC4"        :  "rc4",
+    "SALSA20"    :  "salsa20",
+    "XOR"        :  "xor",
+    "XOR_COMPLEX":  "xor_complex",
+}
 
+COMPRESSION_METHODS = {
+    "LZNT1": "lznt",
+    "RLE"  : "rle",
+    "NONE" : ""
+}
 
-class ENCODING_METHODS(Enum):
-    ALPHA32  = "alpha32"
-    ASCII85  = "ascii85"
-    BASE64   = "base64"
-    WORDS256 = "words256"
-    NONE     = "None"
+ENCODING_METHODS = {
+    "ALPHA32" : "alpha",
+    "ASCII85" : "ascii85",
+    "BASE64"  : "base64",
+    "WORDS256": "words",
+    "NONE"    : ""
+}
 
-
-class COMPRESSION_METHODS(Enum):
-    LZNT1 = "lznt"
-    RLE   = "rle"
-    NONE     = "None"
-
-
-class SHELLCODE_FORMAT(Enum):
-    C          = "c"
-    CSharp     = "csharp"
-    Nim        = "nim"
-    Go         = "go"
-    Python     = "py"
-    Powershell = "ps1"
-    VBA        = "vba"
-    VBScript   = "vbscript"
-    Rust       = "rust"
-    JavaScript = "js"
-    Zig        = "zig"
-    Raw        = "raw"
-
+SHELLCODE_FORMAT = {
+    "C"          : "c",
+    "CSharp"     : "csharp",
+    "Nim"        : "nim",
+    "Go"         : "go",
+    "Python"     : "py",
+    "Powershell" : "ps1",
+    "VBA"        : "vba",
+    "VBScript"   : "vbs",
+    "Rust"       : "rust",
+    "JavaScript" : "js",
+    "Zig"        : "zig",
+    "Raw"        : "raw",
+}
 
 FINAL_PAYLOAD_EXTENSIONS = [
     "exe",
@@ -146,7 +146,11 @@ Erebus comes with multiple techniques out of the box to craft complex chains, an
             name = "Compression Type",
             parameter_type = BuildParameterType.ChooseOne,
             description = "Choose a compression type for the shellcode.",
-            choices = COMPRESSION_METHODS._member_names_,
+            choices = [
+                "LZNT1",
+                "RLE",
+                "NONE",
+            ],
             default_value="NONE"
         ),
 
@@ -154,7 +158,15 @@ Erebus comes with multiple techniques out of the box to craft complex chains, an
             name = "Encryption Type",
             parameter_type = BuildParameterType.ChooseOne,
             description = "Choose an encryption type for the shellcode.",
-            choices = ENCRYPTION_METHODS._member_names_,
+            choices = [
+                "AES128_CBC",
+                "AES256_CBC",
+                "AES256_ECB",
+                "CHACHA20",
+                "SALSA20",
+                "XOR",
+                "XOR_COMPLEX",
+            ],
         ),
 
         BuildParameter(
@@ -168,7 +180,13 @@ Erebus comes with multiple techniques out of the box to craft complex chains, an
             name = "Encoding Type",
             parameter_type = BuildParameterType.ChooseOne,
             description = "Choose an encoding type for the shellcode.",
-            choices = ENCODING_METHODS._member_names_,
+            choices = [
+                "ALPHA32",
+                "ASCII85",
+                "BASE64",
+                "WORDS256",
+                "NONE",
+            ],
             default_value="NONE"
         ),
 
@@ -176,7 +194,20 @@ Erebus comes with multiple techniques out of the box to craft complex chains, an
             name = "Shellcode Format",
             parameter_type = BuildParameterType.ChooseOne,
             description = """Choose a format for the final shellcode.""",
-            choices = SHELLCODE_FORMAT._member_names_,
+            choices = [
+                "C",
+                "CSharp",
+                "Nim",
+                "Go",
+                "Python",
+                "Powershell",
+                "VBA",
+                "VBScript",
+                "Rust",
+                "JavaScript",
+                "Zig",
+                "Raw",
+            ],
         ),
 
         # ProtectMyTooling
@@ -296,27 +327,44 @@ Erebus comes with multiple techniques out of the box to craft complex chains, an
         response = BuildResponse(status = BuildStatus.Error)
         output = ""
 
+        # Debug
+        # print(f"[!] Agent Path: {self.agent_path}\n[!] Agent Code Path: {self.agent_code_path}")
+
         try:
-            agent_build_path = tempfile.TemporaryDirectory(suffix = self.uuid)
-            copy_tree(str(self.agent_code_path), agent_build_path.name)
+            agent_build_path = tempfile.TemporaryDirectory(suffix = self.uuid).name
+            copy_tree(str(self.agent_code_path), agent_build_path)
 
-            mythic_shellcode_path = PurePath(agent_build_path.name) / "agent_code/shellcode/payload.bin"
+            mythic_shellcode_path = PurePath(agent_build_path) / "shellcode" / "payload.bin"
             mythic_shellcode_path = str(mythic_shellcode_path)
-            
-            obfuscated_shellcode_path = PurePath(agent_build_path.name) / "agent_code/shellcode/obfuscated.bin"
-            obfuscated_shellcode_path = str(mythic_shellcode_path)
 
+            obfuscated_shellcode_path = PurePath(agent_build_path) / "shellcode" / "obfuscated.bin"
+            obfuscated_shellcode_path = str(obfuscated_shellcode_path)
+            
+            shellcrypt_path = PurePath(agent_build_path) / "shellcrypt" / "shellcrypt.py"
+            shellcrypt_path = str(shellcrypt_path)
+
+            with open(mythic_shellcode_path, "wb") as file:
+                file.write(self.wrapped_payload)
+
+            if os.stat(mythic_shellcode_path) == 0:
+                response.status = BuildStatus.Error
+                response.build_stderr = "Failed to write Mythic Shellcode to placeholder file."
+                await SendMythicRPCPayloadUpdatebuildStep(MythicRPCPayloadUpdateBuildStepMessage(
+                        PayloadUUID=self.uuid,
+                        StepName="Gathering Files",
+                        StepStdout="Failed to write Mythic Shellcode to placeholder file.",
+                        StepSuccess=False
+                    ))
+                return response
+
+            response.status = BuildStatus.Success
+            response.build_message = "Files Gathered for Modification."
             await SendMythicRPCPayloadUpdatebuildStep(MythicRPCPayloadUpdateBuildStepMessage(
                 PayloadUUID = self.uuid,
                 StepName = "Gathering Files",
                 StepStdout = "Gathered files to obfuscate shellcode",
                 StepSuccess = True
             ))
-
-            with open(mythic_shellcode_path, "wb") as file:
-                file.write(self.wrapped_payload)
-                response.status = BuildStatus.Success
-                response.build_message = "Files Gathered for Conversion."
 
             with open(str(mythic_shellcode_path), "rb") as f:
                 header = f.read(2)
@@ -326,7 +374,7 @@ Erebus comes with multiple techniques out of the box to craft complex chains, an
                         PayloadUUID=self.uuid,
                         StepName="Header Check",
                         StepStdout="Found leading MZ header - supplied file wasn't shellcode",
-                        StepSuccess=True
+                        StepSuccess=False
                     ))
                     return response
             await SendMythicRPCPayloadUpdatebuildStep(MythicRPCPayloadUpdateBuildStepMessage(
@@ -338,44 +386,23 @@ Erebus comes with multiple techniques out of the box to craft complex chains, an
             response.status = BuildStatus.Success
             response.build_message = "No leading MZ header for payload."
 
-            # obfuscated = self.obfuscate_shellcode(
-            #     encryption=ENCRYPTION_METHODS._member_map_[self.build_parameters("Encryption Type")].value,
-            #     encryption_key=self.build_parameters("Encryption Key"),
-            #     encoding=ENCODING_METHODS._member_map_[self.build_parameters("Encoding Type")].value,
-            #     compression=COMPRESSION_METHODS._member_map_[self.build_parameters("Compression Type")].value,
-            #     shellcode=mythic_shellcode_path,
-            #     format=SHELLCODE_FORMAT._member_map_[self.build_parameters("Shellcode Format")].value)
-
-            # asyncio.run(obfuscated)
-
-            await SendMythicRPCPayloadUpdatebuildStep(MythicRPCPayloadUpdateBuildStepMessage(
-                PayloadUUID=self.uuid,
-                StepName="Shellcode Obfuscation",
-                StepStdout="Obfuscating Shellcode",
-                StepSuccess=True,
-            ))
-
             cmd = [
-                "python3",
-                str(SHELLCRYPT),
+                r"/venv/bin/python", shellcrypt_path,
                 "-i", mythic_shellcode_path,
-                "-e", ENCRYPTION_METHODS._member_map_[self.build_parameters("Encryption Type")].value,
-                "-f", SHELLCODE_FORMAT._member_map_[self.build_parameters("Shellcode Format")].value,
-                "-a", "shellcode"
+                "-e", ENCRYPTION_METHODS[self.get_parameter("Encryption Type")],
+                "-f", SHELLCODE_FORMAT[self.get_parameter("Shellcode Format")],
+                "-a", "shellcode",
             ]
-            if self.build_parameters("Compression Type") != "NONE":
-                cmd += ["-c", COMPRESSION_METHODS._member_map_[self.build_parameters("Compression Type")].value]
+            if self.get_parameter("Compression Type") != "NONE":
+                cmd += ["-c", COMPRESSION_METHODS[self.get_parameter("Compression Type")]]
 
-            if self.build_parameters("Encoding Type") != "NONE":
-                cmd += ["-d", ENCODING_METHODS._member_map_[self.build_parameters("Encoding Type")].value]
+            if self.get_parameter("Encoding Type") != "NONE":
+                cmd += ["-d", ENCODING_METHODS[self.get_parameter("Encoding Type")]]
 
-            # key handling
-            if self.build_parameters("Encryption Key"):
-                cmd += ["-k", self.build_parameters("Encryption Key")]
-            else:
-                cmd += ["-k", ""]
+            key = self.get_parameter("Encryption Key")
+            cmd += ["-k", key if key else ""]
 
-            cmd += ["-o", f"{SHELLCODE_DIR / 'obfuscated.bin'}"]
+            cmd += ["-o", obfuscated_shellcode_path]
 
             proc = await asyncio.create_subprocess_exec(
                 *cmd,
@@ -390,10 +417,17 @@ Erebus comes with multiple techniques out of the box to craft complex chains, an
                 output += f"[stderr]\n{stderr.decode()}"
 
             if os.path.exists(obfuscated_shellcode_path):
+                # Remove this line to continue to the next exec cycle (Triggers, Containers, etc.)
                 response.payload = open(obfuscated_shellcode_path, "rb").read()
+
                 response.status = BuildStatus.Success
                 response.build_message = "Shellcode Generated!"
-                return response
+                await SendMythicRPCPayloadUpdatebuildStep(MythicRPCPayloadUpdateBuildStepMessage(
+                    PayloadUUID=self.uuid,
+                    StepName="Shellcode Obfuscation",
+                    StepStdout="Obfuscating Shellcode",
+                    StepSuccess=True,
+                ))
             elif proc.returncode != 0:
                 response.payload = b""
                 await SendMythicRPCPayloadUpdatebuildStep(MythicRPCPayloadUpdateBuildStepMessage(
@@ -403,7 +437,8 @@ Erebus comes with multiple techniques out of the box to craft complex chains, an
                     StepSuccess=False,
                 ))
                 response.build_message = "Failed to obfuscate shellcode."
-                response.build_stderr = output + "\n" + obfuscated_shellcode_path                
+                response.build_stderr = output + "\n" + obfuscated_shellcode_path
+                return response
             else:
                 response.payload = b""
                 await SendMythicRPCPayloadUpdatebuildStep(MythicRPCPayloadUpdateBuildStepMessage(
@@ -414,6 +449,7 @@ Erebus comes with multiple techniques out of the box to craft complex chains, an
                 ))
                 response.build_message = "Failed to obfuscate shellcode."
                 response.build_stderr = output + "\n" + obfuscated_shellcode_path
+                return response
         except Exception as e:
             raise RuntimeError(str(e) + "\n" + output) from e
 

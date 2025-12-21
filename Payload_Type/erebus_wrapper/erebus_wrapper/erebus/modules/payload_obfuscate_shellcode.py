@@ -6,14 +6,14 @@ SHELLCRYPT = AGENT_CODE / "shellcrypt" / "shellcrypt.py"
 SHELLCODE_DIR = AGENT_CODE / "shellcode"
 
 ENCRYPTION = {
-    "AES128_CBC":  "aes",
-    "AES256_CBC":  "aes",
-    "AES256_ECB":  "aes",
+    "AES128_CBC":  "aes_128",
+    "AES256_CBC":  "aes_cbc",
+    "AES256_ECB":  "aes_ecb",
     "CHACHA20":    "chacha20",
     "RC4":         "rc4",
     "SALSA20":     "salsa20",
     "XOR":         "xor",
-    "XOR_COMPLEX": "xor",
+    "XOR_COMPLEX": "xor_complex",
 }
 
 COMPRESSION = {
