@@ -101,7 +101,7 @@ Erebus comes with multiple techniques out of the box to craft complex chains, an
     agent_icon_path = agent_path / "Erebus.svg"
     agent_code_path = agent_path / "agent_code"
 
-    # build_parameters = [
+    build_parameters = [
     #     BuildParameter(
     #         name = "Architecture",
     #         parameter_type = BuildParameterType.ChooseOne,
