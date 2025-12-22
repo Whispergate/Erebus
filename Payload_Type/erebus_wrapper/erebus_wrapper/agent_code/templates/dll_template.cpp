@@ -1,4 +1,4 @@
-#include <Windows.h>
+#include <windows.h>
 
 #ifndef _DEBUG
 #pragma comment(linker, "/ENTRY:entry")
