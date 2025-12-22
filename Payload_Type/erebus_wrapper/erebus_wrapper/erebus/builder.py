@@ -275,7 +275,7 @@ NOTE: Does not (currently) support encoded or compressed payloads.
         """Prepare DLL Template with proxied functions and shellcode
 
         Args:
-            dll_target (UUID): Uploaded DLL File to Proxy 
+            dll_target (UUID): Uploaded DLL File to Proxy
             shellcode (str): Shellcode
 
         Raises:
@@ -492,22 +492,11 @@ NOTE: Does not (currently) support encoded or compressed payloads.
             }
 
             dll_template = environment.get_template("dll_template.cpp")
-            file_content    = dll_template.render(**dll_placeholder)
+            file_content = dll_template.render(**dll_placeholder)
             with open(f"{dll_template}", "w") as file:
                 file.write(file_content)
 
-            if os.stat(f"{templates_path}/dll_template.cpp")[6] > 1598:
-                response.payload = open(obfuscated_shellcode_path, "rb").read()
-                response.status = BuildStatus.Success
-                response.build_message = "DLL Proxied! Compiling Payload..."
-                await SendMythicRPCPayloadUpdatebuildStep(MythicRPCPayloadUpdateBuildStepMessage(
-                    PayloadUUID=self.uuid,
-                    StepName="Gathering DLL Exports for Hijacking",
-                    StepStdout="DLL Proxied! Compiling Payload...",
-                    StepSuccess=True,
-                ))
-                return response
-            else:
+            if os.stat(f"{templates_path}/dll_template.cpp")[6] == 1598:
                 response.status = BuildStatus.Error
                 response.build_message = "Failed to proxy the given file."
                 await SendMythicRPCPayloadUpdatebuildStep(MythicRPCPayloadUpdateBuildStepMessage(
@@ -517,6 +506,20 @@ NOTE: Does not (currently) support encoded or compressed payloads.
                     StepSuccess=False,
                 ))
                 return response
+            else:
+                # Debugging
+                response.payload = open(f"{templates_path}/dll_template.cpp", "rb").read()
+                
+                response.status = BuildStatus.Success
+                response.build_message = "DLL Proxied! Compiling Payload..."
+                await SendMythicRPCPayloadUpdatebuildStep(MythicRPCPayloadUpdateBuildStepMessage(
+                    PayloadUUID=self.uuid,
+                    StepName="Gathering DLL Exports for Hijacking",
+                    StepStdout="DLL Proxied! Compiling Payload...",
+                    StepSuccess=True,
+                ))
+                return response
+
 
             # Compile as proxy'd dll name
 

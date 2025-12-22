@@ -5,7 +5,6 @@ weight = 100
 +++
 
 ## Summary
-
 Erebus is a modern initial access wrapper aimed at decreasing the development to deployment time, when preparing for intrusion operations. Erebus comes with multiple techniques out of the box to craft complex chains, and assist in bypassing the toughest security measures.
 
 ### Highlighted wrapper Features
