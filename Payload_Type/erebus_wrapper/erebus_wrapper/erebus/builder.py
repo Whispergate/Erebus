@@ -427,6 +427,7 @@ NOTE: Does not (currently) support encoded or compressed payloads.
                     response.payload = open(obfuscated_shellcode_path, "rb").read()
                     response.status = BuildStatus.Success
                     response.build_message = "Shellcode Generated!"
+                    response.build_stdout = output + "\n" + obfuscated_shellcode_path
                     await SendMythicRPCPayloadUpdatebuildStep(MythicRPCPayloadUpdateBuildStepMessage(
                         PayloadUUID=self.uuid,
                         StepName="Shellcode Obfuscation",
@@ -456,6 +457,7 @@ NOTE: Does not (currently) support encoded or compressed payloads.
                 return response
             else:
                 response.payload = b""
+                response.status = BuildStatus.Error
                 await SendMythicRPCPayloadUpdatebuildStep(MythicRPCPayloadUpdateBuildStepMessage(
                     PayloadUUID=self.uuid,
                     StepName="Shellcode Obfuscation",
@@ -466,10 +468,6 @@ NOTE: Does not (currently) support encoded or compressed payloads.
                 response.build_stderr = output + "\n" + obfuscated_shellcode_path
                 return response
             output = ""
-
-            target_name = SendMythicRPCFileSearch(MythicRPCFileSearchMessage(
-                AgentFileID=self.get_parameter("DLL Hijacking")
-            ))
 
             file_content = await getFileFromMythic(
                 agentFileId=self.get_parameter("DLL Hijacking")
@@ -535,20 +533,18 @@ NOTE: Does not (currently) support encoded or compressed payloads.
                 output += f"[stderr]\n{stderr.decode()}"
 
             if os.path.exists(f"{payload_path}/payload.dll"):
-                # Debug
-                response.payload = f"{payload_path}/payload.dll"
-
                 response.status = BuildStatus.Success
                 response.build_message = "DLL Compiled!"
+                response.build_stdout = output + "\n" + f"{payload_path}/payload.dll"
                 await SendMythicRPCPayloadUpdatebuildStep(MythicRPCPayloadUpdateBuildStepMessage(
                     PayloadUUID=self.uuid,
                     StepName="Compiling DLL Payload",
-                    StepStdout="DLL Proxied! Compiling Payload...",
+                    StepStdout="DLL Loader Compiled!",
                     StepSuccess=True,
                 ))
-                return response
             else:
                 response.status = BuildStatus.Error
+                response.payload = b""
                 response.build_message = "Failed to compile DLL"
                 response.build_stderr = output + "\n" + obfuscated_shellcode_path
                 await SendMythicRPCPayloadUpdatebuildStep(MythicRPCPayloadUpdateBuildStepMessage(
@@ -558,6 +554,8 @@ NOTE: Does not (currently) support encoded or compressed payloads.
                     StepSuccess=False,
                 ))
                 return response
+            output = ""
+
         except Exception as e:
             response.payload = b""
             response.status = BuildStatus.Error
