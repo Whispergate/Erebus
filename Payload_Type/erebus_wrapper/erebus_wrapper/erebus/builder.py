@@ -450,7 +450,6 @@ NOTE: Does not (currently) support encoded or compressed payloads.
                         StepStdout="Obfuscating Shellcode - Outputting as Raw Binary",
                         StepSuccess=True,
                     ))
-                    return response
                 else:
                     response.status = BuildStatus.Success
                     response.build_message = "Shellcode Generated!"
@@ -496,6 +495,7 @@ NOTE: Does not (currently) support encoded or compressed payloads.
             with open(f"{dll_template}", "w") as file:
                 file.write(file_content)
 
+            # Check if the file size stayed the same as the template
             if os.stat(f"{templates_path}/dll_template.cpp")[6] == 1598:
                 response.status = BuildStatus.Error
                 response.build_message = "Failed to proxy the given file."
@@ -509,7 +509,7 @@ NOTE: Does not (currently) support encoded or compressed payloads.
             else:
                 # Debugging
                 response.payload = open(f"{templates_path}/dll_template.cpp", "rb").read()
-                
+
                 response.status = BuildStatus.Success
                 response.build_message = "DLL Proxied! Compiling Payload..."
                 await SendMythicRPCPayloadUpdatebuildStep(MythicRPCPayloadUpdateBuildStepMessage(
