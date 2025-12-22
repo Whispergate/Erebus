@@ -438,27 +438,17 @@ NOTE: Does not (currently) support encoded or compressed payloads.
             if stderr:
                 output += f"[stderr]\n{stderr.decode()}"
 
-            if os.path.exists(obfuscated_shellcode_path):
-                if self.get_parameter("Shellcode Format") == "Raw":
-                    # Remove this line to continue to the next exec cycle (Triggers, Containers, etc.)
-                    response.payload = open(obfuscated_shellcode_path, "rb").read()
-                    response.status = BuildStatus.Success
-                    response.build_message = "Shellcode Generated!"
-                    await SendMythicRPCPayloadUpdatebuildStep(MythicRPCPayloadUpdateBuildStepMessage(
-                        PayloadUUID=self.uuid,
-                        StepName="Shellcode Obfuscation",
-                        StepStdout="Obfuscating Shellcode - Outputting as Raw Binary",
-                        StepSuccess=True,
-                    ))
-                else:
-                    response.status = BuildStatus.Success
-                    response.build_message = "Shellcode Generated!"
-                    await SendMythicRPCPayloadUpdatebuildStep(MythicRPCPayloadUpdateBuildStepMessage(
-                        PayloadUUID=self.uuid,
-                        StepName="Shellcode Obfuscation",
-                        StepStdout="Obfuscating Shellcode - Continuing to Next Step",
-                        StepSuccess=True,
-                    ))
+            if os.path.exists(obfuscated_shellcode_path) is False:
+                response.payload = b""
+                await SendMythicRPCPayloadUpdatebuildStep(MythicRPCPayloadUpdateBuildStepMessage(
+                    PayloadUUID=self.uuid,
+                    StepName="Shellcode Obfuscation",
+                    StepStdout="Failed to obfuscate shellcode",
+                    StepSuccess=False,
+                ))
+                response.build_message = "Failed to obfuscate shellcode."
+                response.build_stderr = output + "\n" + obfuscated_shellcode_path
+                return response
             elif proc.returncode != 0:
                 response.payload = b""
                 await SendMythicRPCPayloadUpdatebuildStep(MythicRPCPayloadUpdateBuildStepMessage(
@@ -470,17 +460,28 @@ NOTE: Does not (currently) support encoded or compressed payloads.
                 response.build_message = "Failed to obfuscate shellcode."
                 response.build_stderr = output + "\n" + obfuscated_shellcode_path
                 return response
-            else:
-                response.payload = b""
+
+            if self.get_parameter("Shellcode Format") == "Raw":
+                # Remove this line to continue to the next exec cycle (Triggers, Containers, etc.)
+                response.payload = open(obfuscated_shellcode_path, "rb").read()
+                response.status = BuildStatus.Success
+                response.build_message = "Shellcode Generated!"
                 await SendMythicRPCPayloadUpdatebuildStep(MythicRPCPayloadUpdateBuildStepMessage(
                     PayloadUUID=self.uuid,
                     StepName="Shellcode Obfuscation",
-                    StepStdout="Failed to obfuscate shellcode",
-                    StepSuccess=False,
+                    StepStdout="Obfuscating Shellcode - Outputting as Raw Binary",
+                    StepSuccess=True,
                 ))
-                response.build_message = "Failed to obfuscate shellcode."
-                response.build_stderr = output + "\n" + obfuscated_shellcode_path
                 return response
+            else:
+                response.status = BuildStatus.Success
+                response.build_message = "Shellcode Generated!"
+                await SendMythicRPCPayloadUpdatebuildStep(MythicRPCPayloadUpdateBuildStepMessage(
+                    PayloadUUID=self.uuid,
+                    StepName="Shellcode Obfuscation",
+                    StepStdout="Obfuscating Shellcode - Continuing to Next Step",
+                    StepSuccess=True,
+                ))
 
             pragmas = await self.prepare_dllproxy(dll_target=self.get_parameter("DLL Hijacking"),
                 shellcode=obfuscated_shellcode_path)
