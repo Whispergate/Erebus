@@ -5,16 +5,14 @@ weight = 100
 +++
 
 ## Summary
+![Erebus Banner](./assets/Erebus%20Banner%20Text.png)
 Erebus is a modern initial access wrapper aimed at decreasing the development to deployment time, when preparing for intrusion operations. Erebus comes with multiple techniques out of the box to craft complex chains, and assist in bypassing the toughest security measures.
 
 ### Highlighted Wrapper Features
 - Wraps shellcode with different initial access techniques such as:
   - MSI Packages
-  - MST Packages
-  - MSIX Installers
   - ClickOnce Payloads
   - AppDomain Injection Support
-  - XLAM Droppers
   - DLL Hijacking
 
 ### Authors & Contributors

