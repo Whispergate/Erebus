@@ -1,8 +1,8 @@
 +++
-title = "Development"
+title = "OPSEC"
 chapter = false
 weight = 15
-pre = "<b>3. </b>"
+pre = "<b>2. </b>"
 +++
 
 ## Modifying & Extending Existing Tools

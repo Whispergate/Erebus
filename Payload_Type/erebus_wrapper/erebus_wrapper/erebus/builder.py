@@ -12,7 +12,6 @@ TODO:
 
 '''
 from erebus_wrapper.erebus.modules.payload_dll_proxy import generate_proxies
-from erebus_wrapper.erebus.modules.payload_obfuscate_shellcode import SHELLCRYPT, SHELLCODE_DIR
 from erebus_wrapper.erebus.modules.container_clickonce import build_clickonce
 from erebus_wrapper.erebus.modules.container_msi import build_msi
 
@@ -106,8 +105,7 @@ Erebus comes with multiple techniques out of the box to craft complex chains, an
             name = "Main Payload Type",
             parameter_type = BuildParameterType.ChooseOne,
             description = """Select the main payload type (Shellcode Loader or DLL Hijack)
-NOTE: The shellcode loader is written in C# - Supplied shellcode format must be in the same language.
-NOTE: DLL Hijack Loader is written in C++.
+NOTE: Loaders are written in C++ - Supplied shellcode format must be raw for `Loader` and C for `Hijack`.
 """,
             choices = ["Loader", "Hijack"],
             default_value="Loader",
