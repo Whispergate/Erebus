@@ -13,7 +13,7 @@ pre = "<b>1. </b>"
 
 ### Modules
 #### Module Tempalate
-File Location: `erebus_wrapper/erebus/modules`
+Folder Location: `erebus_wrapper/erebus/modules`
 
 ```python
 import pefile, asyncio
@@ -44,4 +44,4 @@ if __name__ == "__main__": # <-- Test functionality by running the module alone 
 ```
 
 #### Agent Templates
-File Location: `erebus_wrapper/agent_code/templates`
+Folder Location: `erebus_wrapper/agent_code/templates`

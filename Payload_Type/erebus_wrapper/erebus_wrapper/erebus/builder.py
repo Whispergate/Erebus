@@ -111,6 +111,7 @@ NOTE: Loaders are written in C++ - Supplied shellcode format must be raw for `Lo
             default_value="Loader",
             hide_conditions = [
                 HideCondition(name="Shellcode Format", operand=HideConditionOperand.NotEQ, value="C"),
+                HideCondition(name="Shellcode Format", operand=HideConditionOperand.NotEQ, value="Raw"),
             ]
         ),
 
@@ -132,7 +133,7 @@ NOTE: Loaders are written in C++ - Supplied shellcode format must be raw for `Lo
             parameter_type = BuildParameterType.ChooseOne,
             description = "Select the loader's payload execution.",
             choices = ["Shellcode Injection", "ClickOnce Application"],
-            default_value = "EXE",
+            default_value = "Shellcode Injection",
             hide_conditions = [
                 HideCondition(name="Main Payload Type", operand=HideConditionOperand.NotEQ, value="Loader"),
                 # Change this if you are using a custom Loader written in another language
@@ -573,12 +574,13 @@ generated if none have been entered.""",
 
             cmd = [
                 "x86_64-w64-mingw32-gcc",
-                "-o", payload_path,
+                "-shared",
+                "-o",
+                payload_path,
                 dll_hijack_template_path,
                 dll_exports_path,
-                "-shared",
                 "-I/usr/x86_64-w64-mingw32/include",
-                "-L/usr/x86_64-w64-mingw32/lib",
+                "-L/usr/x86_64-w64-mingw32/lib"
             ]
             proc = await asyncio.create_subprocess_exec(
                 *cmd,

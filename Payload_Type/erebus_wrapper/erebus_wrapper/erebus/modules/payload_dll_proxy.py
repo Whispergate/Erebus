@@ -29,11 +29,12 @@ async def generate_proxies(dll_file, dll_file_name):
 
     if hasattr(dll_pe, 'DIRECTORY_ENTRY_EXPORT') and dll_pe.DIRECTORY_ENTRY_EXPORT:
         lines = ["EXPORTS"]
-        for exp in dll_pe.DIRECTORY_ENTRY_EXPORT.symbols:
-            if exp.name:
-                lines.append(f"{exp.name.decode()}={dll_file_name}.{exp.name.decode()} @{exp.ordinal}")
+        for exports in dll_pe.DIRECTORY_ENTRY_EXPORT.symbols:
+            if exports.name:
+                #  name=target.name @ordinal
+                lines.append(f"{exports.name.decode()}={dll_file_name}.{exports.name.decode()} @{exports.ordinal}")
             else:
-                lines.append(f"@{exp.ordinal}={dll_file_name}.@{exp.ordinal} NONAME")
+                lines.append(f"@{exports.ordinal}={dll_file_name}.@{exports.ordinal} NONAME")
         return "\n".join(lines)
 
 # Test to see if the function generates anything
