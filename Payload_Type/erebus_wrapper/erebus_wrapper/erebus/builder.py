@@ -80,10 +80,11 @@ FINAL_PAYLOAD_EXTENSIONS = [
 
 class ErebusWrapper(PayloadType):
     name = "erebus_wrapper"
-    file_extension = "zip"
     author = "@Lavender-exe"
-    note = """Erebus is a modern initial access wrapper aimed at decreasing the development to deployment time, when preparing for intrusion operations.
-Erebus comes with multiple techniques out of the box to craft complex chains, and assist in bypassing the toughest security measures."""
+    semver = "0.0.1"
+    note = f"An Initial Access Toolkit. Version: {semver}."
+
+    file_extension = "zip"
     supported_os = [
         SupportedOS.Windows
         # SupportedOS.Linux, Not Supported Yet
@@ -91,7 +92,6 @@ Erebus comes with multiple techniques out of the box to craft complex chains, an
 
     wrapper = True
     wrapped_payloads = []
-
     supports_dynamic_loading = True
     c2_profiles = []
 
@@ -124,22 +124,23 @@ NOTE: Loaders are written in C++ - Supplied shellcode format must be raw for `Lo
             hide_conditions = [
                 HideCondition(name="Main Payload Type", operand=HideConditionOperand.NotEQ, value="Loader"),
                 # Change this if you are using a custom Loader written in another language
-                HideCondition(name="Shellcode Format", operand=HideConditionOperand.NotEQ, value="CSharp"),
+                HideCondition(name="Shellcode Format", operand=HideConditionOperand.NotEQ, value="Raw"),
             ]
         ),
 
-        BuildParameter(
-            name = "Loader Technique",
-            parameter_type = BuildParameterType.ChooseOne,
-            description = "Select the loader's payload execution.",
-            choices = ["Shellcode Injection", "ClickOnce Application"],
-            default_value = "Shellcode Injection",
-            hide_conditions = [
-                HideCondition(name="Main Payload Type", operand=HideConditionOperand.NotEQ, value="Loader"),
-                # Change this if you are using a custom Loader written in another language
-                HideCondition(name="Shellcode Format", operand=HideConditionOperand.NotEQ, value="CSharp"),
-            ]
-        ),
+        # BuildParameter(
+        #     name = "Loader Technique",
+        #     parameter_type = BuildParameterType.ChooseOne,
+        #     description = "Select the loader's payload execution.",
+        #     choices = ["Shellcode Injection", "ClickOnce Application"],
+        #     default_value = "Shellcode Injection",
+        #     hide_conditions = [
+        #         HideCondition(name="Main Payload Type", operand=HideConditionOperand.NotEQ, value="Loader"),
+        #         # Change this if you are using a custom Loader written in another language
+        #         HideCondition(name="Shellcode Format", operand=HideConditionOperand.NotEQ, value="Raw"),
+        #         HideCondition(name="Shellcode Format", operand=HideConditionOperand.NotEQ, value="CSharp"),
+        #     ]
+        # ),
 
         BuildParameter(
             name = "DLL Hijacking",
