@@ -112,7 +112,6 @@ NOTE: Loaders are written in C++ - Supplied shellcode format must be raw for `Lo
             choices = ["Loader", "Hijack"],
             default_value="Loader",
             hide_conditions = [
-                HideCondition(name="Shellcode Format", operand=HideConditionOperand.NotEQ, value="C"),
                 HideCondition(name="Shellcode Format", operand=HideConditionOperand.NotEQ, value="Raw"),
             ]
         ),
@@ -409,7 +408,8 @@ generated if none have been entered.""",
 
             response.status = BuildStatus.Success
             response.build_message = "Files Gathered for Modification."
-            await SendMythicRPCPayloadUpdatebuildStep(MythicRPCPayloadUpdateBuildStepMessage(
+            await SendMythicRPCPayloadUpdatebuildStep(
+                MythicRPCPayloadUpdateBuildStepMessage(
                 PayloadUUID = self.uuid,
                 StepName = "Gathering Files",
                 StepStdout = "Gathered files to obfuscate shellcode",
@@ -421,7 +421,8 @@ generated if none have been entered.""",
                 if header == b"\x4d\x5a":
                     response.status = BuildStatus.Error
                     response.build_stderr = "Supplied payload is a PE instead of raw shellcode."
-                    await SendMythicRPCPayloadUpdatebuildStep(MythicRPCPayloadUpdateBuildStepMessage(
+                    await SendMythicRPCPayloadUpdatebuildStep(
+                        MythicRPCPayloadUpdateBuildStepMessage(
                         PayloadUUID=self.uuid,
                         StepName="Header Check",
                         StepStdout="Found leading MZ header - supplied file was not shellcode",
@@ -430,7 +431,8 @@ generated if none have been entered.""",
                     return response
             response.status = BuildStatus.Success
             response.build_message = "No leading MZ header found in payload."
-            await SendMythicRPCPayloadUpdatebuildStep(MythicRPCPayloadUpdateBuildStepMessage(
+            await SendMythicRPCPayloadUpdatebuildStep(
+                MythicRPCPayloadUpdateBuildStepMessage(
                 PayloadUUID=self.uuid,
                 StepName="Header Check",
                 StepStdout="No leading MZ header found in payload",
@@ -438,7 +440,7 @@ generated if none have been entered.""",
             ))
 
             cmd = [
-                "/venv/bin/python3", shellcrypt_path,
+                "python", shellcrypt_path,
                 "-i", mythic_shellcode_path,
                 "-e", ENCRYPTION_METHODS[self.get_parameter("Encryption Type")],
                 "-f", SHELLCODE_FORMAT[self.get_parameter("Shellcode Format")],
@@ -489,12 +491,13 @@ generated if none have been entered.""",
                     with open(encryption_key_path, "w") as file:
                         file.write(key_array)
 
-                    response.payload = open(obfuscated_shellcode_path, "rb").read()
+                    # response.payload = open(obfuscated_shellcode_path, "rb").read()
                     response.status = BuildStatus.Success
                     response.build_message = "Shellcode Generated!"
                     response.build_stdout = output + "\n" + obfuscated_shellcode_path
                     response.updated_filename = "erebus_wrapper.bin"
-                    await SendMythicRPCPayloadUpdatebuildStep(MythicRPCPayloadUpdateBuildStepMessage(
+                    await SendMythicRPCPayloadUpdatebuildStep(
+                        MythicRPCPayloadUpdateBuildStepMessage(
                         PayloadUUID=self.uuid,
                         StepName="Shellcode Obfuscation",
                         StepStdout="Obfuscating Shellcode - Continuing to Shellcode Loader",
@@ -505,7 +508,8 @@ generated if none have been entered.""",
                 else:
                     response.status = BuildStatus.Success
                     response.build_message = "Shellcode Generated!"
-                    await SendMythicRPCPayloadUpdatebuildStep(MythicRPCPayloadUpdateBuildStepMessage(
+                    await SendMythicRPCPayloadUpdatebuildStep(
+                        MythicRPCPayloadUpdateBuildStepMessage(
                         PayloadUUID=self.uuid,
                         StepName="Shellcode Obfuscation",
                         StepStdout="Obfuscating Shellcode - Continuing to DLL Loader",
@@ -513,7 +517,8 @@ generated if none have been entered.""",
                     ))
             elif proc.returncode != 0:
                 response.payload = b""
-                await SendMythicRPCPayloadUpdatebuildStep(MythicRPCPayloadUpdateBuildStepMessage(
+                await SendMythicRPCPayloadUpdatebuildStep(
+                    MythicRPCPayloadUpdateBuildStepMessage(
                     PayloadUUID=self.uuid,
                     StepName="Shellcode Obfuscation",
                     StepStdout="Failed to obfuscate shellcode",
@@ -558,7 +563,7 @@ generated if none have been entered.""",
                 with open(dll_target_path, "wb") as file:
                     file.write(file_content)
 
-                exports = await generate_proxies(dll_file=dll_target_path, dll_file_name=dll_file_name)
+                exports = await generate_proxies(dll_file=dll_target_path,dll_file_name=dll_file_name)
 
                 with open(obfuscated_shellcode_path, "r") as file:
                     shellcode_content = file.read()
@@ -586,7 +591,8 @@ generated if none have been entered.""",
                 if os.stat(dll_hijack_template_path).st_size == 1598 or os.stat(dll_exports_path).st_size == 13:
                     response.status = BuildStatus.Error
                     response.build_message = "Failed to proxy the given file."
-                    await SendMythicRPCPayloadUpdatebuildStep(MythicRPCPayloadUpdateBuildStepMessage(
+                    await SendMythicRPCPayloadUpdatebuildStep(
+                        MythicRPCPayloadUpdateBuildStepMessage(
                         PayloadUUID=self.uuid,
                         StepName="Gathering DLL Exports for Hijacking",
                         StepStdout="Failed to proxy the given file.",
@@ -596,7 +602,8 @@ generated if none have been entered.""",
                 else:
                     response.status = BuildStatus.Success
                     response.build_message = "DLL Proxied! Compiling Payload..."
-                    await SendMythicRPCPayloadUpdatebuildStep(MythicRPCPayloadUpdateBuildStepMessage(
+                    await SendMythicRPCPayloadUpdatebuildStep(
+                        MythicRPCPayloadUpdateBuildStepMessage(
                         PayloadUUID=self.uuid,
                         StepName="Gathering DLL Exports for Hijacking",
                         StepStdout="DLL Proxied! Compiling Payload...",
@@ -630,12 +637,13 @@ generated if none have been entered.""",
                     output += f"[stderr]\n{stderr.decode()}"
 
                 if os.path.exists(payload_path):
-                    response.payload = open(payload_path, "rb").read()
+                    # response.payload = open(payload_path, "rb").read()
                     response.status = BuildStatus.Success
                     response.build_message = "DLL Compiled!"
                     response.build_stdout = output + "\n" + payload_path
                     response.updated_filename = dll_file_name
-                    await SendMythicRPCPayloadUpdatebuildStep(MythicRPCPayloadUpdateBuildStepMessage(
+                    await SendMythicRPCPayloadUpdatebuildStep(
+                        MythicRPCPayloadUpdateBuildStepMessage(
                         PayloadUUID=self.uuid,
                         StepName="Compiling DLL Payload",
                         StepStdout="DLL Loader Compiled!",
@@ -648,7 +656,8 @@ generated if none have been entered.""",
                     response.payload = b""
                     response.build_message = "Failed to compile DLL"
                     response.build_stderr = output + "\n" + payload_path
-                    await SendMythicRPCPayloadUpdatebuildStep(MythicRPCPayloadUpdateBuildStepMessage(
+                    await SendMythicRPCPayloadUpdatebuildStep(
+                        MythicRPCPayloadUpdateBuildStepMessage(
                         PayloadUUID=self.uuid,
                         StepName="Compiling DLL Payload",
                         StepStdout="Failed to Compile DLL Payload",
@@ -666,13 +675,9 @@ generated if none have been entered.""",
                 payload_path = str(payload_path)
 
                 cmd = [
-                    "x86_64-w64-mingw32-gcc",
-                    "-shared",
-                    f"{shellcode_loader_path}/main.cpp",
-                    "-o",
-                    payload_path,
-                    "-I/usr/x86_64-w64-mingw32/include",
-                    "-L/usr/x86_64-w64-mingw32/lib"
+                    "make",
+                    "-C",
+                    shellcode_loader_path,
                 ]
                 proc = await asyncio.create_subprocess_exec(
                     *cmd,
@@ -693,7 +698,8 @@ generated if none have been entered.""",
                     response.status = BuildStatus.Success
                     response.build_message = "Loader Compiled!"
                     response.build_stdout = output + "\n" + payload_path
-                    await SendMythicRPCPayloadUpdatebuildStep(MythicRPCPayloadUpdateBuildStepMessage(
+                    await SendMythicRPCPayloadUpdatebuildStep(
+                        MythicRPCPayloadUpdateBuildStepMessage(
                         PayloadUUID=self.uuid,
                         StepName="Compiling Shellcode Loader",
                         StepStdout="Shellcode Loader Compiled!",
@@ -704,7 +710,8 @@ generated if none have been entered.""",
                     response.status = BuildStatus.Error
                     response.build_message = "Failed to compile loader"
                     response.build_stderr = output + "\n" + payload_path
-                    await SendMythicRPCPayloadUpdatebuildStep(MythicRPCPayloadUpdateBuildStepMessage(
+                    await SendMythicRPCPayloadUpdatebuildStep(
+                        MythicRPCPayloadUpdateBuildStepMessage(
                         PayloadUUID=self.uuid,
                         StepName="Compiling Shellcode Loader",
                         StepStdout="Failed to Compile Shellcode Loader",
