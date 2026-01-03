@@ -689,8 +689,8 @@ generated if none have been entered.""",
                     "cmake",
                     "-S",
                     shellcode_loader_path,
-                    "-B"
-                    "build"
+                    "-B",
+                    f"{shellcode_loader_path}/build"      
                 ]
                 process = await asyncio.create_subprocess_exec(
                     *cmd,
