@@ -689,8 +689,10 @@ generated if none have been entered.""",
                     "cmake",
                     "-S",
                     shellcode_loader_path,
+                    "-G Ninja"
                     "-B",
-                    f"{shellcode_loader_path}/build"      
+                    f"{shellcode_loader_path}/build",
+                    "-DCMAKE_BUILD_TYPE=Release",
                 ]
                 process = await asyncio.create_subprocess_exec(
                     *cmd,
