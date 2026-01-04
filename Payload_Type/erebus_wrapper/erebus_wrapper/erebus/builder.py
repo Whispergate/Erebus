@@ -686,24 +686,10 @@ generated if none have been entered.""",
                 payload_path = str(payload_path)
 
                 cmd = [
-                    "cmake",
-                    "-S",
+                    "make",
+                    "-C",
                     shellcode_loader_path,
-                    "-B",
-                    f"{shellcode_loader_path}/build",
-                    "-DCMAKE_BUILD_TYPE=Release",
-                ]
-                process = await asyncio.create_subprocess_exec(
-                    *cmd,
-                    stdout=asyncio.subprocess.PIPE,
-                    stderr=asyncio.subprocess.PIPE,
-                )
-                stdout, stderr = await process.communicate()
-
-                cmd = [
-                    "cmake",
-                    "--build",
-                    f"{shellcode_loader_path}/build"
+                    "all"
                 ]
                 process = await asyncio.create_subprocess_exec(
                     *cmd,
