@@ -14,6 +14,7 @@ TODO:
 from erebus_wrapper.erebus.modules.payload_dll_proxy import generate_proxies
 from erebus_wrapper.erebus.modules.container_clickonce import build_clickonce
 from erebus_wrapper.erebus.modules.container_msi import build_msi
+from erebus_wrapper.erebus.modules.container_7z import build_7z
 
 from mythic_container.PayloadBuilder import *
 from mythic_container.MythicCommandBase import *
@@ -160,7 +161,7 @@ NOTE: Only supports XOR for now. Does not (currently) support encoded or compres
             name = "Trigger Type",
             parameter_type = BuildParameterType.ChooseOne,
             description = "Choose a command to run when the trigger is executed.",
-            choices = ["ClickOnce", "LNK", "MSI"],
+            choices = ["ClickOnce", "LNK", "MSI", "7z"],
             default_value = "ClickOnce",
             hide_conditions = [
                 HideCondition(name="Shellcode Format", operand=HideConditionOperand.EQ, value="Raw")
