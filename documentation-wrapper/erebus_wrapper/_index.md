@@ -18,6 +18,7 @@ Erebus is a modern initial access wrapper aimed at decreasing the development to
 ## Authors
 
 - @[Lavender-exe](https://github.com/Lavender-exe) - Project Author
+- @[Hunter](https://github.com/hunterino-sec) - Project Author
 
 ### Contributors
 
