@@ -123,7 +123,7 @@ NOTE: Loaders are written in C++ - Supplied shellcode format must be raw for `Lo
             name = "Loader Format",
             parameter_type = BuildParameterType.ChooseOne,
             description = "Select the loader's filetype.",
-            choices = ["EXE", "DLL", "Service"],
+            choices = ["EXE", "DLL"],
             default_value = "EXE",
             hide_conditions = [
                 HideCondition(name="Main Payload Type", operand=HideConditionOperand.NotEQ, value="Loader"),

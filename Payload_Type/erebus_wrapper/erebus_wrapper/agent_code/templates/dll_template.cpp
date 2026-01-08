@@ -48,7 +48,6 @@ BOOL APIENTRY DllMain(HMODULE hModule, DWORD fdwReason, LPVOID lpvReserved)
 	case DLL_PROCESS_ATTACH:
 	{
 		entry();
-		break;
 	}
 
 	case DLL_THREAD_ATTACH:
