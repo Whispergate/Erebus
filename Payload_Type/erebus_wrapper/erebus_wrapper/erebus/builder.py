@@ -30,6 +30,7 @@ import asyncio
 import subprocess
 import tempfile
 import shutil
+import json
 
 
 ENCRYPTION_METHODS = {
@@ -262,7 +263,30 @@ generated if none have been entered.""",
             hide_conditions = [
                 HideCondition(name="Shellcode Format", operand=HideConditionOperand.EQ, value="Raw")
             ]
-        )
+        ),
+        
+        #7z
+    BuildParameter(
+        name="7z Compression Level",
+        parameter_type=BuildParameterType.ChooseOne,
+        description="Select compression level (9 is max).",
+        choices=["0", "1", "3", "5", "7", "9"],
+        default_value="9",
+        hide_conditions=[
+            HideCondition(name="Trigger Type", operand=HideConditionOperand.NotEQ, value="7z")
+        ]
+    ),
+    
+    BuildParameter(
+        name="Archive Password",
+        parameter_type=BuildParameterType.String,
+        description="Optional password for the archive (leave empty for none).",
+        default_value="",
+        required=False,
+        hide_conditions=[
+            HideCondition(name="Trigger Type", operand=HideConditionOperand.NotEQ, value="7z")
+        ]
+    ),        
 
         # ProtectMyTooling
         # BuildParameter(
@@ -314,16 +338,41 @@ generated if none have been entered.""",
 
     def containerise_payload(self):
         """Creates a container and adds all files generated from the payload function inside of the given archive/media
-
-        Raises:
-            NotImplementedError: Function not implemented yet.
-
         TODO:
             - 7z Compression
             - ZIP Compression
             - ISO Container
         """
-        raise NotImplementedError
+        trigger = self.get_parameter("Trigger Type")
+        if trigger == "7z":
+            
+            files = {
+                "erebus.exe": str(self.generated_payload_path)
+            }
+            
+            spec = {
+                "files": files,
+                "archive_name": "payload.7z",
+                "payload_name": "erebus.exe"
+            }
+            
+            spec_path = PurePath(self.agent_build_path) / f"spec_{self.uuid}.json"
+            
+            with open(spec_path, "w") as f:
+                json.dump(spec, f)
+                
+            try:
+                return build_7z(
+                    spec_name=str(spec_path),
+                    out_dir_name=self.uuid,
+                    compression=self.get_parameter("7z Compression Level"),
+                    password=self.get_parameter("Archive Password")
+                )
+            finally:
+                if os.path.exists(spec_path):
+                    os.remove(spec_path)
+                    
+        return None
 
     def create_triggers(self):
         """Creates a trigger to execute the payload
@@ -755,23 +804,60 @@ generated if none have been entered.""",
                 output = ""
             ######################### End Of Shellcode Loader Section #########################
 
-            # Final Step (Package Payload)
-            shutil.make_archive(f"{agent_build_path}/payload", "zip", f"{agent_build_path}/payload")
-            response.payload = open(f"{agent_build_path}/payload.zip", "rb").read()
-            response.status = BuildStatus.Success
-            response.build_message = "Packaged Final Payload"
-            response.build_stderr = output + "\n" + f"{agent_build_path}/payload"
-            response.updated_filename = "payload.zip"
-            await SendMythicRPCPayloadUpdatebuildStep(
-                MythicRPCPayloadUpdateBuildStepMessage(
-                PayloadUUID=self.uuid,
-                StepName="Packaging",
-                StepStdout="Final Payload Packaged to Archive",
-                StepSuccess=True,
-            ))
+            #Final Payload / Container
+            
+            # 1. Capture context for container function
+            if 'payload_path' in locals():
+                final_path = payload_path
+            else:
+                final_path = obfuscated_shellcode_path
+
+            self.generated_payload_path = final_path
+            self.agent_build_path = agent_build_path
+
+            # 2. Attempt Containerization
+            container_path = self.containerise_payload()
+
+            if container_path:
+                # Case A: Container created (7z/MSI)
+                with open(container_path, "rb") as f:
+                    response.payload = f.read()
+                
+                trigger = self.get_parameter("Trigger Type")
+                ext = "7z" if trigger == "7z" else "bin"
+                if trigger == "MSI": ext = "msi"
+                
+                response.updated_filename = f"payload.{ext}"
+                response.status = BuildStatus.Success
+                response.build_message = f"Success! Containerized ({trigger})"
+                
+                await SendMythicRPCPayloadUpdatebuildStep(
+                    MythicRPCPayloadUpdateBuildStepMessage(
+                    PayloadUUID=self.uuid,
+                    StepName="Containerising",
+                    StepStdout=f"Payload packaged into {trigger} container",
+                    StepSuccess=True,
+                ))
+            else:
+                # Case B: Default ZIP behavior (No specific container selected)
+                shutil.make_archive(f"{agent_build_path}/payload", "zip", f"{agent_build_path}/payload")
+                response.payload = open(f"{agent_build_path}/payload.zip", "rb").read()
+                
+                response.updated_filename = "payload.zip"
+                response.status = BuildStatus.Success
+                response.build_message = "Success! Packaged (Zip)"
+                
+                await SendMythicRPCPayloadUpdatebuildStep(
+                    MythicRPCPayloadUpdateBuildStepMessage(
+                    PayloadUUID=self.uuid,
+                    StepName="Packaging",
+                    StepStdout="Final Payload Packaged to Zip Archive",
+                    StepSuccess=True,
+                ))
+
             return response
+        
         except Exception as e:
             response.status = BuildStatus.Error
             response.build_message = f"Error building wrapper: {str(e)}\n{output}"
             return response
-        return response
