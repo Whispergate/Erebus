@@ -679,24 +679,15 @@ generated if none have been entered.""",
                     "-t",
                     "UTF-8",
                     f"{shellcode_loader_path}/Erebus.Loader.rc",
-                    "-o",
-                    f"{shellcode_loader_path}/Erebus.Loader.utf8.rc",
                 ]
-                process = await asyncio.create_subprocess_exec(
-                    *cmd,
-                    stdout=asyncio.subprocess.PIPE,
-                    stderr=asyncio.subprocess.PIPE,
-                )
-                stdout, stderr = await process.communicate()
-
-                if stdout:
-                    output += f"[stdout]\n{stdout.decode(errors='replace')}"
-                if stderr:
-                    output += f"[stderr]\n{stderr.decode(errors='replace')}"
+                
+                resource_file = subprocess.check_output(cmd, text=True)
+                with open(f"{shellcode_loader_path}/Erebus.Loader.utf8.rc", "w") as file:
+                    file.write(resource_file)
 
                 cmd = [
                     "mv",
-                    f"{shellcode_loader_path}/Erebus.Loader.utf8.rc ",
+                    f"{shellcode_loader_path}/Erebus.Loader.utf8.rc",
                     f"{shellcode_loader_path}/Erebus.Loader.rc",
                 ]
                 process = await asyncio.create_subprocess_exec(
