@@ -176,7 +176,7 @@ NOTE: ({semver}) Only supports XOR for now. Does not (currently) support encoded
             name = "Container Type",
             parameter_type = BuildParameterType.ChooseOne,
             description = "Choose a command to run when the trigger is executed.",
-            choices = ["ISO", "7z", "Zip"],
+            choices = ["ISO", "7z", "Zip", "MSI"],
             default_value = "Zip",
         ),
 
