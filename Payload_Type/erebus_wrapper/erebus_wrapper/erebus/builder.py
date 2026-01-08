@@ -8,8 +8,10 @@ TODO:
     - MSI/X Payload Containers
         -   https://github.com/TrevorHamm/msilib (Only supports python13)
     - 7zip/Winzip Containers
-        -   https://pypi.org/project/py7zr/
-
+        -   https://pypi.org/project/py7zr
+- Triggers
+    - LNK
+        -   https://github.com/strayge/pylnk
 '''
 from erebus_wrapper.erebus.modules.payload_dll_proxy import generate_proxies
 from erebus_wrapper.erebus.modules.container_clickonce import build_clickonce
@@ -83,14 +85,15 @@ FINAL_PAYLOAD_EXTENSIONS = [
 
 class ErebusWrapper(PayloadType):
     name = "erebus_wrapper"
-    author = "@Lavender-exe"
-    semver = "0.0.1"
-    note = f"An Initial Access Toolkit. Version: {semver}."
+    author = "@Lavender-exe, @hunterino-sec"
+    semver = "v0.0.1"
+    note = f"An Initial Access Toolkit."
 
     file_extension = "zip"
     supported_os = [
         SupportedOS.Windows
-        # SupportedOS.Linux, Not Supported Yet
+        # SupportedOS.Linux, # Not Supported Yet
+        # SupportedOS.MacOS, # Not Supported Yet
     ]
 
     wrapper = True
@@ -129,26 +132,25 @@ NOTE: Loaders are written in C++ - Supplied shellcode format must be raw for `Lo
             ]
         ),
 
-        # BuildParameter(
-        #     name = "Loader Technique",
-        #     parameter_type = BuildParameterType.ChooseOne,
-        #     description = "Select the loader's payload execution.",
-        #     choices = ["Shellcode Injection", "ClickOnce Application"],
-        #     default_value = "Shellcode Injection",
-        #     hide_conditions = [
-        #         HideCondition(name="Main Payload Type", operand=HideConditionOperand.NotEQ, value="Loader"),
-        #         # Change this if you are using a custom Loader written in another language
-        #         HideCondition(name="Shellcode Format", operand=HideConditionOperand.NotEQ, value="Raw"),
-        #         HideCondition(name="Shellcode Format", operand=HideConditionOperand.NotEQ, value="CSharp"),
-        #     ]
-        # ),
+        BuildParameter(
+            name = "Loader Build Configuration",
+            parameter_type = BuildParameterType.ChooseOne,
+            description = "Select the loader's build config.",
+            choices = ["debug", "release"],
+            default_value = "debug",
+            hide_conditions = [
+                HideCondition(name="Main Payload Type", operand=HideConditionOperand.NotEQ, value="Loader"),
+                # Change this if you are using a custom shellcode retrieval method
+                HideCondition(name="Shellcode Format", operand=HideConditionOperand.NotEQ, value="Raw"),
+            ]
+        ),
 
         BuildParameter(
             name = "DLL Hijacking",
             parameter_type = BuildParameterType.File,
-            description = """Prepares a given DLL for proxy-based hijacking.
+            description = f"""Prepares a given DLL for proxy-based hijacking.
 NOTE: Shellcode Format must be set to C.
-NOTE: Only supports XOR for now. Does not (currently) support encoded or compressed payloads.
+NOTE: ({semver}) Only supports XOR for now. Does not (currently) support encoded or compressed payloads.
 """,
             hide_conditions = [
                 HideCondition(name="Main Payload Type", operand=HideConditionOperand.NotEQ, value="Hijack"),
@@ -310,20 +312,16 @@ generated if none have been entered.""",
                   step_description = "Adding payload into chosen container"),
     ]
 
-    def generate_payload(self):
-        """Creates a payload based on the provided shellcode/agent
+    def containerise_payload(self):
+        """Creates a container and adds all files generated from the payload function inside of the given archive/media
 
         Raises:
             NotImplementedError: Function not implemented yet.
 
         TODO:
-            - Take in payload.
-            - Check that it is in shellcode format (File Header Check).
-            - Add different techniques to build payload:
-                - AppDomain Injection (Local and Remote)
-                - ClickOnce (Local and Remote)
-                - MSI + MST
-                - MSIX (Unsigned and Signed)
+            - 7z Compression
+            - ZIP Compression
+            - ISO Container
         """
         raise NotImplementedError
 
@@ -338,19 +336,6 @@ generated if none have been entered.""",
             - LOLBIN Trigger
             - MSI/MST Trigger
             - ClickOnce Trigger
-        """
-        raise NotImplementedError
-
-    def containerise_payload(self):
-        """Creates a container and adds all files generated from the payload function inside of the given archive/media
-
-        Raises:
-            NotImplementedError: Function not implemented yet.
-
-        TODO:
-            - 7z Compression
-            - ZIP Compression
-            - ISO Container
         """
         raise NotImplementedError
 
@@ -686,10 +671,52 @@ generated if none have been entered.""",
                 payload_path = PurePath(agent_build_path) / "payload" / "erebus.exe"
                 payload_path = str(payload_path)
 
+                # Convert resource file to UTF16
+                cmd = [
+                    "iconv",
+                    "-f",
+                    "UTF-16LE",
+                    "-t",
+                    "UTF-8",
+                    f"{shellcode_loader_path}/Erebus.Loader.rc",
+                    "-o",
+                    f"{shellcode_loader_path}/Erebus.Loader.utf8.rc",
+                ]
+                process = await asyncio.create_subprocess_exec(
+                    *cmd,
+                    stdout=asyncio.subprocess.PIPE,
+                    stderr=asyncio.subprocess.PIPE,
+                )
+                stdout, stderr = await process.communicate()
+
+                if stdout:
+                    output += f"[stdout]\n{stdout.decode(errors='replace')}"
+                if stderr:
+                    output += f"[stderr]\n{stderr.decode(errors='replace')}"
+
+                cmd = [
+                    "mv"
+                    f"{shellcode_loader_path}/Erebus.Loader.utf8.rc",
+                    f"{shellcode_loader_path}/Erebus.Loader.rc",
+                ]
+                process = await asyncio.create_subprocess_exec(
+                    *cmd,
+                    stdout=asyncio.subprocess.PIPE,
+                    stderr=asyncio.subprocess.PIPE,
+                )
+                stdout, stderr = await process.communicate()
+
+                if stdout:
+                    output += f"[stdout]\n{stdout.decode(errors='replace')}"
+                if stderr:
+                    output += f"[stderr]\n{stderr.decode(errors='replace')}"
+
+                # Compile Loader
                 cmd = [
                     "make",
                     "-C",
                     shellcode_loader_path,
+                    f"BUILD={self.get_parameter('Loader Build Configuration')}",
                     "all"
                 ]
                 process = await asyncio.create_subprocess_exec(
@@ -700,13 +727,16 @@ generated if none have been entered.""",
                 stdout, stderr = await process.communicate()
 
                 if stdout:
-                    output += f"[stdout]\n{stdout.decode()}"
+                    output += f"[stdout]\n{stdout.decode(errors='replace')}"
                 if stderr:
-                    output += f"[stderr]\n{stderr.decode()}"
+                    output += f"[stderr]\n{stderr.decode(errors='replace')}"
+
+                shutil.copy(dst=payload_path, src=f"{shellcode_loader_path}/erebus.exe")
 
                 if os.path.exists(payload_path):
                     # Debug
-                    # response.payload = open(payload_path, "rb").read()
+                    response.payload = open(payload_path, "rb").read()
+                    response.updated_filename = "erebus_loader.exe"
                     response.status = BuildStatus.Success
                     response.build_message = "Loader Compiled!"
                     response.build_stdout = output + "\n" + payload_path
@@ -717,7 +747,8 @@ generated if none have been entered.""",
                         StepStdout="Shellcode Loader Compiled!",
                         StepSuccess=True,
                     ))
-                    # return response
+
+                    return response
                 else:
                     response.status = BuildStatus.Error
                     response.build_message = "Failed to compile loader"
