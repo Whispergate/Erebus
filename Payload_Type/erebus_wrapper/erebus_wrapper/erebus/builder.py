@@ -114,9 +114,6 @@ NOTE: Loaders are written in C++ - Supplied shellcode format must be raw for `Lo
 """,
             choices = ["Loader", "Hijack"],
             default_value="Loader",
-            hide_conditions = [
-                HideCondition(name="Shellcode Format", operand=HideConditionOperand.NotEQ, value="Raw"),
-            ]
         ),
 
         BuildParameter(
@@ -310,6 +307,9 @@ generated if none have been entered.""",
 
         BuildStep(step_name = "Containerising",
                   step_description = "Adding payload into chosen container"),
+
+        BuildStep(step_name = "Packaging",
+                  step_description = "Packaging final payload into zip archive")
     ]
 
     def containerise_payload(self):
@@ -637,7 +637,7 @@ generated if none have been entered.""",
                     response.status = BuildStatus.Success
                     response.build_message = "DLL Compiled!"
                     response.build_stdout = output + "\n" + payload_path
-                    response.updated_filename = dll_file_name
+                    # response.updated_filename = dll_file_name
                     await SendMythicRPCPayloadUpdatebuildStep(
                         MythicRPCPayloadUpdateBuildStepMessage(
                         PayloadUUID=self.uuid,
@@ -680,7 +680,7 @@ generated if none have been entered.""",
                     "UTF-8",
                     f"{shellcode_loader_path}/Erebus.Loader.rc",
                 ]
-                
+
                 resource_file = subprocess.check_output(cmd, text=True)
                 with open(f"{shellcode_loader_path}/Erebus.Loader.utf8.rc", "w") as file:
                     file.write(resource_file)
@@ -726,8 +726,8 @@ generated if none have been entered.""",
 
                 if os.path.exists(payload_path):
                     # Debug
-                    response.payload = open(payload_path, "rb").read()
-                    response.updated_filename = "erebus_loader.exe"
+                    # response.payload = open(payload_path, "rb").read()
+                    # response.updated_filename = "erebus_loader.exe"
                     response.status = BuildStatus.Success
                     response.build_message = "Loader Compiled!"
                     response.build_stdout = output + "\n" + payload_path
@@ -739,7 +739,7 @@ generated if none have been entered.""",
                         StepSuccess=True,
                     ))
 
-                    return response
+                    # return response
                 else:
                     response.status = BuildStatus.Error
                     response.build_message = "Failed to compile loader"
@@ -754,6 +754,22 @@ generated if none have been entered.""",
                     return response
                 output = ""
             ######################### End Of Shellcode Loader Section #########################
+
+            # Final Step (Package Payload)
+            shutil.make_archive(f"{agent_build_path}/payload", "zip", f"{agent_build_path}/payload")
+            response.payload = open(f"{agent_build_path}/payload.zip", "rb").read()
+            response.status = BuildStatus.Success
+            response.build_message = "Packaged Final Payload"
+            response.build_stderr = output + "\n" + f"{agent_build_path}/payload"
+            response.updated_filename = "payload.zip"
+            await SendMythicRPCPayloadUpdatebuildStep(
+                MythicRPCPayloadUpdateBuildStepMessage(
+                PayloadUUID=self.uuid,
+                StepName="Packaging",
+                StepStdout="Final Payload Packaged to Archive",
+                StepSuccess=True,
+            ))
+            return response
         except Exception as e:
             response.status = BuildStatus.Error
             response.build_message = f"Error building wrapper: {str(e)}\n{output}"
