@@ -695,8 +695,8 @@ generated if none have been entered.""",
                     output += f"[stderr]\n{stderr.decode(errors='replace')}"
 
                 cmd = [
-                    "mv"
-                    f"{shellcode_loader_path}/Erebus.Loader.utf8.rc",
+                    "mv",
+                    f"{shellcode_loader_path}/Erebus.Loader.utf8.rc ",
                     f"{shellcode_loader_path}/Erebus.Loader.rc",
                 ]
                 process = await asyncio.create_subprocess_exec(
