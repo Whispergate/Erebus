@@ -2,8 +2,10 @@
   "name": "ErebusApp",
   "msi_name" : "erebus.msi",
   "clickonce_name": "setup.exe",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "author": "Whispergate",
+  "archive_name": "payload.7z",
+  "payload_name": "erebus.exe",
   "files": {
     "decoy.pdf": "decoys/decoy.pdf"
   }

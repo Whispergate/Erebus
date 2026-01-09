@@ -30,7 +30,7 @@ import asyncio
 import subprocess
 import tempfile
 import shutil
-import json
+from pathlib import Path
 
 
 ENCRYPTION_METHODS = {
@@ -340,35 +340,15 @@ generated if none have been entered.""",
             - ZIP Compression
             - ISO Container
         """
-        trigger = self.get_parameter("Trigger Type")
-        if trigger == "7z":
-
-            files = {
-                "erebus.exe": str(self.generated_payload_path)
-            }
-
-            spec = {
-                "files": files,
-                "archive_name": "payload.7z",
-                "payload_name": "erebus.exe"
-            }
-
-            spec_path = PurePath(self.agent_build_path) / f"spec_{self.uuid}.json"
-
-            with open(spec_path, "w") as f:
-                json.dump(spec, f)
-
-            try:
-                return build_7z(
-                    spec_name=str(spec_path),
-                    out_dir_name=self.uuid,
-                    compression=self.get_parameter("7z Compression Level"),
-                    password=self.get_parameter("Archive Password")
-                )
-            finally:
-                if os.path.exists(spec_path):
-                    os.remove(spec_path)
-
+        if self.get_parameter("Container Type") == "7z":
+            return build_7z(
+                spec_name = "spec.json",
+                out_dir_name="7z",
+                compression=self.get_parameter("7z Compression Level"),
+                password=self.get_parameter("Archive Password"),
+                build_path=Path(self.agent_build_path) 
+            )
+            
         return None
 
     def create_triggers(self):
