@@ -8,3 +8,4 @@ pypdf2
 pefile
 lznt1
 jinja2
+pycdlib

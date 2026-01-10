@@ -17,6 +17,7 @@ from erebus_wrapper.erebus.modules.payload_dll_proxy import generate_proxies
 from erebus_wrapper.erebus.modules.container_clickonce import build_clickonce
 from erebus_wrapper.erebus.modules.container_msi import build_msi
 from erebus_wrapper.erebus.modules.container_7z import build_7z
+from erebus_wrapper.erebus.modules.container_iso import build_iso
 
 from mythic_container.PayloadBuilder import *
 from mythic_container.MythicCommandBase import *
@@ -299,6 +300,29 @@ generated if none have been entered.""",
             HideCondition(name="Container Type", operand=HideConditionOperand.NotEQ, value="7z")
         ]
     ),
+    
+    #ISO
+    BuildParameter(
+        name="ISO Volume ID",
+        parameter_type=BuildParameterType.String,
+        description="ISO Volume name seen in Explorer.",
+        default_value="EREBUS",
+        required=False,
+        hide_conditions=[
+            HideCondition(name="Container Type", operand=HideConditionOperand.NotEQ, value="ISO")
+        ]
+    ),
+    
+     BuildParameter(
+        name="ISO enable Autorun",
+        parameter_type=BuildParameterType.Boolean,
+        description="Enable Autorun for ISO",
+        default_value=False,
+        required=False,
+        hide_conditions=[
+            HideCondition(name="Container Type", operand=HideConditionOperand.NotEQ, value="ISO")
+        ]
+    )
 ]
 
     build_steps = [
@@ -339,13 +363,21 @@ generated if none have been entered.""",
             - ZIP Compression
             - ISO Container
         """
-        if self.get_parameter("Container Type") == "7z":
-            return build_7z(
+        
+        match(self.get_parameter("Container Type")):
+            case "7z":
+                  return build_7z(
                 compression=self.get_parameter("7z Compression Level"),
                 password=self.get_parameter("Archive Password"),
                 build_path=Path(self.agent_build_path) 
             )
             
+            case "ISO":
+                return build_iso (volume_id=self.get_parameter("ISO Volume ID"),
+                                  enable_autorun = self.get_parameter("ISO enable Autorun"),
+                                  build_path=Path(self.agent_build_path) 
+                                  )
+  
         return None
 
     def create_triggers(self):
@@ -800,8 +832,15 @@ generated if none have been entered.""",
                     response.payload = f.read()
 
                 container = self.get_parameter("Container Type")
-                ext = "7z" if container == "7z" else "bin"
-                if container == "MSI": ext = "msi"
+                match container:
+                    case "7z":
+                        ext = "7z"
+                    case "MSI":
+                        ext = "msi"
+                    case "ISO":
+                        ext = "iso"
+                    case _:
+                        ext = "bin"
 
                 response.updated_filename = f"payload.{ext}"
                 response.status = BuildStatus.Success
