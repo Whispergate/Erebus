@@ -336,14 +336,11 @@ generated if none have been entered.""",
     def containerise_payload(self):
         """Creates a container and adds all files generated from the payload function inside of the given archive/media
         TODO:
-            - 7z Compression
             - ZIP Compression
             - ISO Container
         """
         if self.get_parameter("Container Type") == "7z":
             return build_7z(
-                spec_name = "spec.json",
-                out_dir_name="7z",
                 compression=self.get_parameter("7z Compression Level"),
                 password=self.get_parameter("Archive Password"),
                 build_path=Path(self.agent_build_path) 
