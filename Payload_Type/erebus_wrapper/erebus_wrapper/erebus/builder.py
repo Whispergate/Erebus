@@ -4,11 +4,6 @@
 - Description: Initial Access Wrapper
 
 TODO:
-- Containers
-    - MSI/X Payload Containers
-        -   https://github.com/TrevorHamm/msilib (Only supports python13)
-    - 7zip/Winzip Containers
-        -   https://pypi.org/project/py7zr
 - Triggers
     - LNK
         -   https://github.com/strayge/pylnk
@@ -16,7 +11,7 @@ TODO:
 from erebus_wrapper.erebus.modules.payload_dll_proxy import generate_proxies
 from erebus_wrapper.erebus.modules.container_clickonce import build_clickonce
 from erebus_wrapper.erebus.modules.container_msi import build_msi
-from erebus_wrapper.erebus.modules.container_7z import build_7z
+from Payload_Type.erebus_wrapper.erebus_wrapper.erebus.modules.container_archive import build_7z, build_zip
 from erebus_wrapper.erebus.modules.container_iso import build_iso
 
 from mythic_container.PayloadBuilder import *
@@ -280,13 +275,14 @@ generated if none have been entered.""",
 
         #7z
     BuildParameter(
-        name="7z Compression Level",
+        name="Compression Level",
         parameter_type=BuildParameterType.ChooseOne,
         description="Select compression level (9 is max).",
         choices=["0", "1", "3", "5", "7", "9"],
         default_value="9",
         hide_conditions=[
-            HideCondition(name="Container Type", operand=HideConditionOperand.NotEQ, value="7z")
+            HideCondition(name="Container Type", operand=HideConditionOperand.NotEQ, value="7z"),
+            HideCondition(name="Container Type", operand=HideConditionOperand.NotEQ, value="Zip"),
         ]
     ),
 
@@ -297,10 +293,11 @@ generated if none have been entered.""",
         default_value="",
         required=False,
         hide_conditions=[
-            HideCondition(name="Container Type", operand=HideConditionOperand.NotEQ, value="7z")
+            HideCondition(name="Container Type", operand=HideConditionOperand.NotEQ, value="7z"),
+            HideCondition(name="Container Type", operand=HideConditionOperand.NotEQ, value="Zip"),
         ]
     ),
-    
+
     #ISO
     BuildParameter(
         name="ISO Volume ID",
@@ -312,7 +309,7 @@ generated if none have been entered.""",
             HideCondition(name="Container Type", operand=HideConditionOperand.NotEQ, value="ISO")
         ]
     ),
-    
+
      BuildParameter(
         name="ISO enable Autorun",
         parameter_type=BuildParameterType.Boolean,
@@ -371,18 +368,25 @@ generated if none have been entered.""",
     async def containerise_payload(self):
         """Creates a container and adds all files generated from the payload function inside of the given archive/media
         TODO:
-            - ZIP Compression
+            - ZIP/7Zip Compression
             - ISO Container
         """
-        
+
         match(self.get_parameter("Container Type")):
             case "7z":
                   return build_7z(
-                compression=self.get_parameter("7z Compression Level"),
-                password=self.get_parameter("Archive Password"),
-                build_path=Path(self.agent_build_path) 
-            )
-            
+                    compression=self.get_parameter("Compression Level"),
+                    password=self.get_parameter("Archive Password"),
+                    build_path=Path(self.agent_build_path)
+                )
+
+            case "Zip":
+                return build_zip(
+                    compression=self.get_parameter("Compression Level"),
+                    password=self.get_parameter("Archive Password"),
+                    build_path=Path(self.agent_build_path)
+                )
+
             case "ISO":
                 source_iso_path = None
                 iso_uuid = self.get_parameter("ISO Backdoor File")
@@ -390,17 +394,17 @@ generated if none have been entered.""",
                     file_resp = await SendMythicRPCFileGetContent(
                         MythicRPCFileGetContentMessage(AgentFileId=iso_uuid)
                     )
-                    
-                filename = f"template_{iso_uuid}.iso" 
+
+                filename = f"template_{iso_uuid}.iso"
                 temp_dir = Path(tempfile.gettempdir())
                 source_iso_path = temp_dir / filename
-                source_iso_path.write_bytes(file_resp.Content)    
-                return build_iso (volume_id=self.get_parameter("ISO Volume ID"),
-                                  enable_autorun = self.get_parameter("ISO enable Autorun"),
-                                  source_iso=source_iso_path,
-                                  build_path=Path(self.agent_build_path) 
-                                  )
-  
+                source_iso_path.write_bytes(file_resp.Content)
+                return build_iso(
+                                    volume_id=self.get_parameter("ISO Volume ID"),
+                                    enable_autorun = self.get_parameter("ISO enable Autorun"),
+                                    source_iso=source_iso_path,
+                                    build_path=Path(self.agent_build_path)
+                                )
         return None
 
     def create_triggers(self):
@@ -858,6 +862,8 @@ generated if none have been entered.""",
                 match container:
                     case "7z":
                         ext = "7z"
+                    case "Zip":
+                        ext = "zip"
                     case "MSI":
                         ext = "msi"
                     case "ISO":
@@ -874,22 +880,6 @@ generated if none have been entered.""",
                     PayloadUUID=self.uuid,
                     StepName="Containerising",
                     StepStdout=f"Payload packaged into {container} container",
-                    StepSuccess=True,
-                ))
-            elif self.get_parameter("Container Type") == "Zip":
-                # Case B: Default ZIP behavior (No specific container selected)
-                shutil.make_archive(f"{agent_build_path}/payload", "zip", f"{agent_build_path}/payload")
-                response.payload = open(f"{agent_build_path}/payload.zip", "rb").read()
-
-                response.updated_filename = "payload.zip"
-                response.status = BuildStatus.Success
-                response.build_message = "Success! Packaged (Zip)"
-
-                await SendMythicRPCPayloadUpdatebuildStep(
-                    MythicRPCPayloadUpdateBuildStepMessage(
-                    PayloadUUID=self.uuid,
-                    StepName="Packaging",
-                    StepStdout="Final Payload Packaged to Zip Archive",
                     StepSuccess=True,
                 ))
 
