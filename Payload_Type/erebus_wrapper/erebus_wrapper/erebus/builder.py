@@ -360,9 +360,6 @@ generated if none have been entered.""",
 
         BuildStep(step_name = "Containerising",
                   step_description = "Adding payload into chosen container"),
-
-        BuildStep(step_name = "Packaging",
-                  step_description = "Packaging final payload into zip archive")
     ]
 
     async def containerise_payload(self):
