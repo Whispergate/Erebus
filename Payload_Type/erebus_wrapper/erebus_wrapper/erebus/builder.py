@@ -11,7 +11,7 @@ TODO:
 from erebus_wrapper.erebus.modules.payload_dll_proxy import generate_proxies
 from erebus_wrapper.erebus.modules.container_clickonce import build_clickonce
 from erebus_wrapper.erebus.modules.container_msi import build_msi
-from Payload_Type.erebus_wrapper.erebus_wrapper.erebus.modules.container_archive import build_7z, build_zip
+from erebus_wrapper.erebus.modules.container_archive import build_7z, build_zip
 from erebus_wrapper.erebus.modules.container_iso import build_iso
 
 from mythic_container.PayloadBuilder import *
@@ -169,14 +169,6 @@ NOTE: ({semver}) Only supports XOR for now. Does not (currently) support encoded
         ),
 
         BuildParameter(
-            name = "Container Type",
-            parameter_type = BuildParameterType.ChooseOne,
-            description = "Choose a command to run when the trigger is executed.",
-            choices = ["ISO", "7z", "Zip", "MSI"],
-            default_value = "Zip",
-        ),
-
-        BuildParameter(
             name = "Trigger Command",
             parameter_type = BuildParameterType.String,
             description = "Choose a command to run when the trigger is executed.",
@@ -273,65 +265,65 @@ generated if none have been entered.""",
             ]
         ),
 
-        #7z
-    BuildParameter(
-        name="Compression Level",
-        parameter_type=BuildParameterType.ChooseOne,
-        description="Select compression level (9 is max).",
-        choices=["0", "1", "3", "5", "7", "9"],
-        default_value="9",
-        hide_conditions=[
-            HideCondition(name="Container Type", operand=HideConditionOperand.NotEQ, value="7z"),
-            HideCondition(name="Container Type", operand=HideConditionOperand.NotEQ, value="Zip"),
-        ]
-    ),
+        # Archive
+        BuildParameter(
+            name = "Container Type",
+            parameter_type = BuildParameterType.ChooseOne,
+            description = "Choose the final payload container type.",
+            choices = ["ISO", "7z", "Zip", "MSI"],
+            default_value = "Zip",
+        ),
 
-    BuildParameter(
-        name="Archive Password",
-        parameter_type=BuildParameterType.String,
-        description="Optional password for the archive (leave empty for none).",
-        default_value="",
-        required=False,
-        hide_conditions=[
-            HideCondition(name="Container Type", operand=HideConditionOperand.NotEQ, value="7z"),
-            HideCondition(name="Container Type", operand=HideConditionOperand.NotEQ, value="Zip"),
-        ]
-    ),
+        BuildParameter(
+            name="Compression Level",
+            parameter_type=BuildParameterType.ChooseOne,
+            description="Select compression level (9 is max).",
+            choices=["0", "1", "3", "5", "7", "9"],
+            default_value="9",
+        ),
 
-    #ISO
-    BuildParameter(
-        name="ISO Volume ID",
-        parameter_type=BuildParameterType.String,
-        description="ISO Volume name seen in Explorer.",
-        default_value="EREBUS",
-        required=False,
-        hide_conditions=[
-            HideCondition(name="Container Type", operand=HideConditionOperand.NotEQ, value="ISO")
-        ]
-    ),
+        BuildParameter(
+            name="Archive Password",
+            parameter_type=BuildParameterType.String,
+            description="Optional password for the archive (leave empty for none).",
+            default_value="",
+            required=False,
+        ),
 
-     BuildParameter(
-        name="ISO enable Autorun",
-        parameter_type=BuildParameterType.Boolean,
-        description="Enable Autorun for ISO",
-        default_value=False,
-        required=False,
-        hide_conditions=[
-            HideCondition(name="Container Type", operand=HideConditionOperand.NotEQ, value="ISO")
-        ]
-    ),
+        #ISO
+        BuildParameter(
+            name="ISO Volume ID",
+            parameter_type=BuildParameterType.String,
+            description="ISO Volume name seen in Explorer.",
+            default_value="EREBUS",
+            required=False,
+            hide_conditions=[
+                HideCondition(name="Container Type", operand=HideConditionOperand.NotEQ, value="ISO")
+            ]
+        ),
 
-     BuildParameter(
-        name="ISO Backdoor File",
-        parameter_type=BuildParameterType.File,
-        description="Backdoor an existing ISO",
-        required=False,
-        hide_conditions=[
-            HideCondition(name="Container Type", operand=HideConditionOperand.NotEQ, value="ISO")
-        ]
-    )
+        BuildParameter(
+            name="ISO enable Autorun",
+            parameter_type=BuildParameterType.Boolean,
+            description="Enable Autorun for ISO",
+            default_value=False,
+            required=False,
+            hide_conditions=[
+                HideCondition(name="Container Type", operand=HideConditionOperand.NotEQ, value="ISO")
+            ]
+        ),
 
-]
+        BuildParameter(
+            name="ISO Backdoor File",
+            parameter_type=BuildParameterType.File,
+            description="Backdoor an existing ISO",
+            required=False,
+            hide_conditions=[
+                HideCondition(name="Container Type", operand=HideConditionOperand.NotEQ, value="ISO")
+            ]
+        )
+
+    ]
 
     build_steps = [
         BuildStep(step_name = "Gathering Files",
@@ -363,11 +355,7 @@ generated if none have been entered.""",
     ]
 
     async def containerise_payload(self):
-        """Creates a container and adds all files generated from the payload function inside of the given archive/media
-        TODO:
-            - ZIP/7Zip Compression
-            - ISO Container
-        """
+        """Creates a container and adds all files generated from the payload function inside of the given archive/media"""
 
         match(self.get_parameter("Container Type")):
             case "7z":
