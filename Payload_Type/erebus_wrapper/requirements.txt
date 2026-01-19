@@ -1,6 +1,7 @@
 mythic-container
 argparse
 pycryptodome
+cryptography
 pyfiglet
 rich
 py7zr
