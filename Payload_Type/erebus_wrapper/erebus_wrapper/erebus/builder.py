@@ -13,7 +13,7 @@ from erebus_wrapper.erebus.modules.container_clickonce import build_clickonce
 from erebus_wrapper.erebus.modules.container_msi import build_msi
 from erebus_wrapper.erebus.modules.container_archive import build_7z, build_zip
 from erebus_wrapper.erebus.modules.container_iso import build_iso
-from erebus_wrapper.erebus.modules.codesigner import self_sign_payload, get_remote_cert_details
+from erebus_wrapper.erebus.modules.codesigner import self_sign_payload, get_remote_cert_details, sign_with_provided_cert
 
 from mythic_container.PayloadBuilder import *
 from mythic_container.MythicCommandBase import *
@@ -323,7 +323,7 @@ generated if none have been entered.""",
                 HideCondition(name="Container Type", operand=HideConditionOperand.NotEQ, value="ISO")
             ]
         ),
-
+        #Codesigning
         BuildParameter(
             name="Codesign Loader",
             parameter_type=BuildParameterType.Boolean,
@@ -374,7 +374,26 @@ generated if none have been entered.""",
                 HideCondition(name="Codesign Type", operand=HideConditionOperand.NotEQ, value="Spoof URL")
             ]
         ),
-
+        
+        BuildParameter(
+            name="Codesign Cert",
+            parameter_type=BuildParameterType.File,
+            description="Upload PFX/P12 certificate",
+            hide_conditions=[
+                HideCondition(name="Codesign Loader", operand=HideConditionOperand.EQ, value="False"),
+                HideCondition(name="Codesign Type", operand=HideConditionOperand.NotEQ, value="Provide Certificate")
+            ]
+        ),
+        BuildParameter(
+            name="Codesign Cert Password",
+            parameter_type=BuildParameterType.String,
+            default_value="",
+            description="Certificate password (leave empty if none)",
+            hide_conditions=[
+                HideCondition(name="Codesign Loader", operand=HideConditionOperand.EQ, value="False"),
+                HideCondition(name="Codesign Type", operand=HideConditionOperand.NotEQ, value="Provide Certificate")
+            ]
+        )
     ]
 
     build_steps = [
@@ -911,9 +930,33 @@ generated if none have been entered.""",
                             payload_path=payload_path,
                             subject_cn=cert_details["CN"],
                             org_name=cert_details["O"],
-                            full_details=cert_details  # Pass the dict for high-fidelity cloning
+                            full_details=cert_details
                         )
                         success_msg = f"Spoofed {target_url} (CN: {cert_details['CN']})"
+                    
+                    elif signing_type == "Provide Certificate":
+                        cert_uuid = self.get_parameter("Codesign Cert")
+                        cert_pass = self.get_parameter("Codesign Cert Password")
+                        
+                        if not cert_uuid:
+                            raise ValueError("No certificate file uploaded")
+
+                        file_resp = await SendMythicRPCFileGetContent(
+                            MythicRPCFileGetContentMessage(AgentFileId=cert_uuid)
+                        )
+                        
+                        if not file_resp.Success:
+                            raise ValueError("Failed to retrieve certificate file")
+                        
+                        cert_path = Path(agent_build_path) / "uploaded_cert.pfx"
+                        cert_path.write_bytes(file_resp.Content)
+                        
+                        sign_with_provided_cert(
+                            payload_path=payload_path,
+                            cert_path=cert_path,
+                            cert_password=cert_pass
+                        )
+                        success_msg = "Signed with provided certificate"
 
                     elif signing_type == "Provide Certificate":
                         raise NotImplementedError("Provide Certificate mode not yet implemented in backend")

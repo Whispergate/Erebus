@@ -119,3 +119,38 @@ def self_sign_payload(payload_path: pathlib.Path,
         ], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         
         signed_temp.replace(payload_path)
+
+def sign_with_provided_cert(payload_path: pathlib.Path,
+                          cert_path: pathlib.Path,
+                          cert_password: str = None) -> None:
+    """
+    Signs payload using an external PFX/P12 certificate file.
+    """
+    if not payload_path.exists():
+        raise FileNotFoundError(f"Payload not found: {payload_path}")
+    
+    if not cert_path.exists():
+        raise FileNotFoundError(f"Certificate file not found: {cert_path}")
+
+    with tempfile.TemporaryDirectory() as temp_dir:
+        signed_temp = pathlib.Path(temp_dir) / payload_path.name
+        
+        cmd = [
+            "osslsigncode", "sign",
+            "-pkcs12", str(cert_path),
+            "-t", "http://timestamp.digicert.com",
+            "-in", str(payload_path),
+            "-out", str(signed_temp),
+            "-h", "sha256"
+        ]
+        
+        if cert_password:
+            cmd.extend(["-pass", cert_password])
+        else:
+            cmd.extend(["-pass", ""]) 
+
+        try:
+            subprocess.check_call(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            signed_temp.replace(payload_path)
+        except subprocess.CalledProcessError as e:
+            raise RuntimeError(f"Signing failed (Check certificate/password): {e}")
