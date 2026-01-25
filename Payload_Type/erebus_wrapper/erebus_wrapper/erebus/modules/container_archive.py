@@ -84,7 +84,7 @@ def build_zip(compression: int = 9,
 
         cmd = ["zip", "-r", f"-{compression}", "-y", "-q", str(zip_path), "."]
         if password:
-            cmd.extend(["-P", password])
+            cmd.extend(["--encrypt", password])
         subprocess.check_call(cmd, cwd=payload_dir,
                             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         return zip_path
