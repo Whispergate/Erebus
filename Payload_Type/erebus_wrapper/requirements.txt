@@ -5,6 +5,7 @@ cryptography
 pyfiglet
 rich
 py7zr
+pylnk3
 pypdf2
 pefile
 lznt1
