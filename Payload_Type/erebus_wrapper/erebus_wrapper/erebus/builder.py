@@ -296,8 +296,8 @@ generated if none have been entered.""",
             choices=["0", "1", "3", "5", "7", "9"],
             default_value="9",
             hide_conditions = [
-                HideCondition(name="2.4 Shellcode Format", operand=HideConditionOperand.EQ, value="ISO"),
-                HideCondition(name="2.4 Shellcode Format", operand=HideConditionOperand.EQ, value="MSI"),
+                HideCondition(name="3.0 Container Type", operand=HideConditionOperand.EQ, value="ISO"),
+                HideCondition(name="3.0 Container Type", operand=HideConditionOperand.EQ, value="MSI"),
             ]
         ),
 
@@ -308,8 +308,8 @@ generated if none have been entered.""",
             default_value="",
             required=False,
             hide_conditions = [
-                HideCondition(name="2.4 Shellcode Format", operand=HideConditionOperand.EQ, value="ISO"),
-                HideCondition(name="2.4 Shellcode Format", operand=HideConditionOperand.EQ, value="MSI"),
+                HideCondition(name="3.0 Container Type", operand=HideConditionOperand.EQ, value="ISO"),
+                HideCondition(name="3.0 Container Type", operand=HideConditionOperand.EQ, value="MSI"),
             ]
         ),
 
@@ -351,6 +351,9 @@ generated if none have been entered.""",
             description="Application name shown in MSI/UI",
             default_value="System Updater",
             required=False,
+            hide_conditions=[
+                HideCondition(name="3.0 Container Type", operand=HideConditionOperand.NotEQ, value="MSI")
+            ]
         ),
         BuildParameter(
             name="5.2 MSI Manufacturer",
@@ -358,7 +361,20 @@ generated if none have been entered.""",
             description="Company name shown in MSI metadata",
             default_value="Microsoft Corporation",
             required=False,
-        ),        
+            hide_conditions=[
+                HideCondition(name="3.0 Container Type", operand=HideConditionOperand.NotEQ, value="MSI")
+            ]
+        ),
+        BuildParameter(
+            name="5.3 MSI Install Scope",
+            parameter_type=BuildParameterType.ChooseOne,
+            description="Machine=Admin Required (Program Files), User=No Admin (AppData)",
+            choices=["User", "Machine"],
+            default_value="User",
+            hide_conditions=[
+                HideCondition(name="3.0 Container Type", operand=HideConditionOperand.NotEQ, value="MSI")
+            ]
+        ),
         #Codesigning
         BuildParameter(
             name="6.0 Codesign Loader",
@@ -489,6 +505,14 @@ generated if none have been entered.""",
                     file_resp = await SendMythicRPCFileGetContent(
                         MythicRPCFileGetContentMessage(AgentFileId=iso_uuid)
                     )
+
+            case "MSI":
+                return build_msi(
+                    build_path=Path(self.agent_build_path),
+                    app_name=self.get_parameter("5.1 MSI Product Name"),
+                    manufacturer=self.get_parameter("5.2 MSI Manufacturer"),
+                    install_scope=self.get_parameter("5.3 MSI Install Scope")
+                )
 
                 filename = f"template_{iso_uuid}.iso"
                 temp_dir = Path(tempfile.gettempdir())
