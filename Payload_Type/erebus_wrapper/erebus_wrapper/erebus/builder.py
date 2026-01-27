@@ -1155,19 +1155,17 @@ generated if none have been entered.""",
                         output += f"[stderr]\n{stderr.decode(errors='replace')}"
 
                     # ClickOnce publish outputs to bin/{Config}/net8.0-windows/win-x64/publish/
-                    clickonce_output_path = Path(clickonce_loader_path) / "bin" / f"{self.get_parameter('0.3 ClickOnce Build Configuration')}" / "net8.0-windows" / "win-x64" / "publish"
+                    clickonce_output_path = Path(clickonce_loader_path) / "bin" / f"{self.get_parameter('0.3 ClickOnce Build Configuration')}" / "net7.0-windows" / "win-x64" / "publish"
 
                     # Find the main executable in the publish directory
                     clickonce_exe = clickonce_output_path / "Erebus.ClickOnce.exe"
 
                     if clickonce_exe.exists():
-                        # Copy all ClickOnce deployment files to payload directory
                         payload_dir = Path(agent_build_path) / "payload"
                         for item in clickonce_output_path.iterdir():
-                            if item.is_file():
+                            if item.is_file() and "Erebus.ClickOnce" in item.name:
                                 dest_path = payload_dir / item.name
                                 shutil.copy2(str(item), str(dest_path))
-                                # Rename main executable to erebus.exe
                                 if item.name == "Erebus.ClickOnce.exe":
                                     if dest_path.exists():
                                         shutil.move(str(dest_path), payload_path)
