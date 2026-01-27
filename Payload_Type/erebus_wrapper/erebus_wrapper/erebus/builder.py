@@ -1152,8 +1152,7 @@ generated if none have been entered.""",
                         output += f"[stderr]\n{stderr.decode(errors='replace')}"
 
                     # Locate publish output dynamically: bin/{config}/{tfm}/{rid}/publish
-                    config = self.get_parameter('0.3 ClickOnce Build Configuration')
-                    publish_root = Path(clickonce_loader_path) / "bin" / config
+                    publish_root = Path(clickonce_loader_path) / "bin" / f"{self.get_parameter('0.3 ClickOnce Build Configuration')}"
 
                     tfm_dir = None
                     if publish_root.exists():
