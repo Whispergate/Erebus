@@ -28,7 +28,7 @@ def build_iso(volume_id: str = "SYSTEM",
     payload_dir = root_dir / "payload"
     decoy_dir = root_dir / "decoys"
 
-    VISIBLE_EXTENSIONS = {'.lnk', '.pdf', '.docx', '.xlsx', '.txt'}
+    VISIBLE_EXTENSIONS = {'.lnk'}
 
     try:
         for item in decoy_dir.rglob('*'):
