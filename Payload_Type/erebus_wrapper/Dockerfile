@@ -1,4 +1,4 @@
-FROM itsafeaturemythic/mythic_python_base:latest
+FROM itsafeaturemythic/mythic_python_dotnet:latest
 RUN apt-get clean
 RUN apt-get update && apt-get install python3 python3-pip python3-venv wget openssl mingw-w64 git msitools make p7zip-full zip wixl osslsigncode --no-install-recommends -y
 
