@@ -114,11 +114,7 @@ The Erebus wrapper is a comprehensive initial access toolkit designed to generat
 - **6.4 Codesign Spoof URL**: URL to clone cert from
 - **6.5 Codesign Cert**: PFX/P12 certificate file
 - **6.6 Codesign Cert Password**: Certificate password
-1 = NtQueueApcThread (APC injection to suspended thread - Remote)
-2 = NtMapViewOfSection (Section mapping injection - Remote)
-3 = CreateFiber (Fiber-based execution - Self)
-4 = EarlyCascade (Early Bird APC injection - Remote)
-5 = PoolParty (Worker Factory thread pool injection - Remote)""",
+
 ## Adding Features
 
 ### Modules
