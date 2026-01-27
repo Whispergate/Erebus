@@ -1191,22 +1191,32 @@ generated if none have been entered.""",
                         ))
                         return response
 
+                  # Prefer exe if present, else fall back to dll (non-Windows publish may omit host exe)
                     clickonce_exe = publish_dir / "Erebus.ClickOnce.exe"
                     clickonce_dll = publish_dir / "Erebus.ClickOnce.dll"
 
                     payload_dir = Path(agent_build_path) / "payload"
                     payload_dir.mkdir(parents=True, exist_ok=True)
 
-                    if clickonce_exe.exists():
-                        shutil.copy2(str(clickonce_exe), str(payload_dir / "Erebus.ClickOnce.exe"))
-                    if clickonce_dll.exists():
-                        shutil.copy2(str(clickonce_dll), str(payload_dir / "Erebus.ClickOnce.dll"))
+                    # Copy all publish artifacts into payload directory and hide them
+                    for item in publish_dir.iterdir():
+                        if item.is_file():
+                            dest_path = payload_dir / item.name
+                            shutil.copy2(str(item), str(dest_path))
+                            try:
+                                import ctypes
+                                FILE_ATTRIBUTE_HIDDEN = 0x02
+                                ctypes.windll.kernel32.SetFileAttributesW(str(dest_path), FILE_ATTRIBUTE_HIDDEN)
+                            except:
+                                # If not on Windows or ctypes fails, silently continue
+                                pass
 
                     if clickonce_exe.exists():
                         shutil.move(str(payload_dir / "Erebus.ClickOnce.exe"), payload_path)
                         response.build_stdout = output + "\n" + payload_path
                     elif clickonce_dll.exists():
                         payload_path_dll = Path(payload_path).with_suffix(".dll")
+
                         shutil.move(str(payload_dir / "Erebus.ClickOnce.dll"), payload_path_dll)
                         response.build_stdout = output + "\n" + str(payload_path_dll)
                     else:
