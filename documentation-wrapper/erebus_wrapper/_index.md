@@ -9,11 +9,42 @@ weight = 100
 Erebus is a modern initial access wrapper aimed at decreasing the development to deployment time, when preparing for intrusion operations. Erebus comes with multiple techniques out of the box to craft complex chains, and assist in bypassing the toughest security measures.
 
 ### Highlighted Wrapper Features
-- Payload Creation:
-  - MSI Packages
-  - ClickOnce Payloads
-  - DLL Hijacking
-  - Obfuscated Shellcode Generation
+- **Loader Types:**
+  - Shellcode Loader (C++ with 5 injection methods)
+  - ClickOnce (.NET with 5 injection methods)
+  - DLL Hijacking (Proxy-based execution)
+
+- **Shellcode Obfuscation Pipeline:**
+  - Compression: LZNT1, RLE, or None
+  - Encryption: AES variants, CHACHA20, SALSA20, XOR variants
+  - Encoding: BASE64, ALPHA32, ASCII85, WORDS256
+  - Multiple output formats (C, C#, Python, PowerShell, Nim, Go, Rust, JavaScript, Zig, Raw)
+
+- **Injection Methods:**
+  - NtQueueApcThread (APC injection)
+  - NtMapViewOfSection (Section mapping)
+  - CreateFiber (Self-injection)
+  - EarlyCascade (Early Bird APC)
+  - PoolParty (Worker Factory)
+  - Classic CreateRemoteThread
+  - EnumDesktops callback injection
+
+- **Container Formats:**
+  - ISO (Bootable media with optional autorun)
+  - MSI (Windows Installer packages)
+  - 7z (High compression archives)
+  - ZIP (Standard archives with optional encryption)
+
+- **Delivery & Evasion:**
+  - Code Signing (Self-signed, spoofed, or legitimate certificates)
+  - LNK Trigger Mechanisms (Shortcut-based execution chains)
+  - Decoy File Support (Social engineering with fake content)
+  - Configurable Injection Parameters (Target process, injection type)
+
+- **Obfuscated Shellcode Generation**
+  - Dynamic configuration of obfuscation chains
+  - Multiple encryption key options (custom or auto-generated)
+  - Output format customization per loader type
 
 ## Authors
 
