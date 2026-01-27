@@ -1,8 +1,3 @@
-import pathlib
-import subprocess
-import tempfile
-import ssl
-import socket
 from cryptography import x509
 from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.serialization import pkcs12
@@ -10,6 +5,11 @@ from cryptography.hazmat.primitives.asymmetric import rsa
 from cryptography.x509.oid import NameOID
 from cryptography.hazmat.backends import default_backend
 from datetime import datetime, timedelta, timezone
+import pathlib
+import subprocess
+import tempfile
+import ssl
+import socket
 
 def get_remote_cert_details(url: str) -> dict:
     """

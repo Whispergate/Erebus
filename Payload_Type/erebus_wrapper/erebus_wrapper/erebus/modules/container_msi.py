@@ -18,7 +18,7 @@ def build_msi(build_path: pathlib.Path,
               install_scope: str = "User") -> pathlib.Path:
     """
     Wraps the payload into an MSI.
-    
+
     Args:
         app_name (str): Name of the Application
         manufacturer (str): Name of the manufacturer
@@ -27,7 +27,7 @@ def build_msi(build_path: pathlib.Path,
     version = "1.0.0.0"
     upgrade_code = str(uuid.uuid4())
     component_guid = str(uuid.uuid4())
-    
+
     payload_dir = build_path / "payload"
     payload_exe = payload_dir / "erebus.exe"
     if not payload_exe.exists():
@@ -38,24 +38,24 @@ def build_msi(build_path: pathlib.Path,
 
     msi_path = build_path / "container" / "msi" / "erebus.msi"
     msi_path.parent.mkdir(parents=True, exist_ok=True)
-    
+
     if install_scope.lower() == "machine":
         target_dir_id = "ProgramFilesFolder"
         package_scope = 'InstallScope="perMachine"'
         root_dir_name = "SourceDir"
     else:
-        target_dir_id = "LocalAppDataFolder" 
+        target_dir_id = "LocalAppDataFolder"
         package_scope = 'InstallScope="perUser"'
         root_dir_name = "SourceDir"
 
     files_xml = ""
     main_exe_id = "PayloadEXE"
-    
+
     for file in payload_dir.iterdir():
         if file.is_file() and file.name != msi_path.name:
             file_id = f"File_{uuid.uuid4().hex[:8]}"
             is_main = (file.name == payload_exe.name)
-            
+
             if is_main:
                 current_id = main_exe_id
                 keypath = ''
@@ -88,7 +88,7 @@ def build_msi(build_path: pathlib.Path,
         </Feature>
 
         <CustomAction Id="LaunchApp" FileKey="{main_exe_id}" ExeCommand="" Return="asyncNoWait" />
-        
+
         <InstallExecuteSequence>
             <Custom Action="LaunchApp" After="InstallFinalize">NOT Installed</Custom>
         </InstallExecuteSequence>
@@ -100,10 +100,10 @@ def build_msi(build_path: pathlib.Path,
         with tempfile.TemporaryDirectory() as temp_dir:
             wxs_path = pathlib.Path(temp_dir) / "installer.wxs"
             wxs_path.write_text(wix_xml, encoding="utf-8")
-            
+
             cmd = ["wixl", "-o", str(msi_path), str(wxs_path)]
             subprocess.check_output(cmd, stderr=subprocess.STDOUT)
-            
+
             if not msi_path.exists():
                 raise RuntimeError("MSI file was not created.")
             return msi_path
