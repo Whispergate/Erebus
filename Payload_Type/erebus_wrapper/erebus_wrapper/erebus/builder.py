@@ -1314,6 +1314,56 @@ generated if none have been entered.""",
                     response.build_stderr = f"Code signing failed: {str(e)}"
                     return response
   
+
+            ######################### Creating Decoy Section #########################
+            decoy_dir = Path(agent_build_path) / "decoys"
+            decoy_file_uuid = self.get_parameter("0.10 Decoy File")
+
+            if decoy_file_uuid:
+                try:
+                    file_resp = await SendMythicRPCFileGetContent(
+                        MythicRPCFileGetContentMessage(AgentFileId=decoy_file_uuid)
+                    )
+
+                    file_name_resp = await SendMythicRPCFileSearch(
+                        MythicRPCFileSearchMessage(AgentFileID=decoy_file_uuid)
+                    )
+                    custom_filename = "decoy.pdf"
+                    if file_name_resp.Success and len(file_name_resp.Files) > 0:
+                        custom_filename = file_name_resp.Files[0].Filename
+
+                    if decoy_dir.exists():
+                        shutil.rmtree(decoy_dir)
+                    decoy_dir.mkdir(parents=True, exist_ok=True)
+                    custom_decoy_path = decoy_dir / custom_filename
+                    custom_decoy_path.write_bytes(file_resp.Content)
+
+                    await SendMythicRPCPayloadUpdatebuildStep(
+                        MythicRPCPayloadUpdateBuildStepMessage(
+                            PayloadUUID=self.uuid,
+                            StepName="Creating Decoy",
+                            StepStdout=f"Replaced default decoys with custom file: {custom_filename}",
+                            StepSuccess=True
+                        ))
+
+                except Exception as e:
+                    await SendMythicRPCPayloadUpdatebuildStep(
+                        MythicRPCPayloadUpdateBuildStepMessage(
+                            PayloadUUID=self.uuid,
+                            StepName="Creating Decoy",
+                            StepStdout=f"Failed to process custom decoy: {str(e)}",
+                            StepSuccess=False
+                        ))
+            else:
+                await SendMythicRPCPayloadUpdatebuildStep(
+                    MythicRPCPayloadUpdateBuildStepMessage(
+                        PayloadUUID=self.uuid,
+                        StepName="Creating Decoy",
+                        StepStdout="Using default decoy files.",
+                        StepSuccess=True
+                    ))
+            ######################### End of Decoy Section #########################
+
             ######################### Final Payload / Container #########################
 
             # 1. Capture context for container function
