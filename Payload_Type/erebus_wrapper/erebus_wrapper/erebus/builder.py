@@ -1392,18 +1392,15 @@ generated if none have been entered.""",
                     lnk_source = Path(lnk_path)
                     lnk_destination = payload_dir / "invoice.pdf.lnk"
                     if lnk_source.exists():
-                        shutil.move(str(lnk_source), str(lnk_destination))
-                        lnk_path = str(lnk_destination)
-                    
-                    response.status = BuildStatus.Success
-                    response.build_message = "LNK Trigger created!"
-                    await SendMythicRPCPayloadUpdatebuildStep(
-                        MythicRPCPayloadUpdateBuildStepMessage(
-                        PayloadUUID=self.uuid,
-                        StepName="Adding Trigger",
-                        StepStdout=f"LNK Trigger created at: {lnk_path}",
-                        StepSuccess=True,
-                    ))
+                        response.status = BuildStatus.Success
+                        response.build_message = "LNK Trigger created!"
+                        await SendMythicRPCPayloadUpdatebuildStep(
+                            MythicRPCPayloadUpdateBuildStepMessage(
+                            PayloadUUID=self.uuid,
+                            StepName="Adding Trigger",
+                            StepStdout=f"LNK Trigger created at: {lnk_path}",
+                            StepSuccess=True,
+                        ))
                 except Exception as e:
                     response.status = BuildStatus.Error
                     response.build_message = f"Failed to create LNK trigger: {str(e)}"
