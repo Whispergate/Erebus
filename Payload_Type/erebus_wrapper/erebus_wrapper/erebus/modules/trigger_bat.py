@@ -39,7 +39,7 @@ def create_bat_trigger(
     bat_content.append("exit")
 
     with open(bat_output_path, 'w', newline='\r\n') as f:
-        f.write('\n'.jWoin(bat_content))
+        f.write('\n'.join(bat_content))
 
     return bat_output_path
 
