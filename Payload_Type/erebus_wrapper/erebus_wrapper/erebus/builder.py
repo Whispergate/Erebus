@@ -672,16 +672,17 @@ generated if none have been entered.""",
                     file_resp = await SendMythicRPCFileGetContent(
                         MythicRPCFileGetContentMessage(AgentFileId=iso_uuid)
                     )
-
-                filename = f"template_{iso_uuid}.iso"
-                temp_dir = Path(tempfile.gettempdir())
-                source_iso_path = temp_dir / filename
-                source_iso_path.write_bytes(file_resp.Content)
+                    if file_resp.Success:
+                        filename = f"template_{iso_uuid}.iso"
+                        temp_dir = Path(tempfile.gettempdir())
+                        source_iso_path = temp_dir / filename
+                        source_iso_path.write_bytes(file_resp.Content)
                 return build_iso(
                                     volume_id=self.get_parameter("4.0 ISO Volume ID"),
                                     enable_autorun = self.get_parameter("4.1 ISO enable Autorun"),
                                     source_iso=source_iso_path,
-                                    build_path=Path(agent_build_path)
+                                    build_path=Path(agent_build_path),
+                                    visible_extension=target_ext
                                 )
 
             case "MSI":
