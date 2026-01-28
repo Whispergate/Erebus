@@ -451,6 +451,9 @@ generated if none have been entered.""",
             parameter_type=BuildParameterType.File,
             description="Backdoor an existing MSI installer by injecting payload execution",
             required=False,
+            hide_conditions=[
+                HideCondition(name="3.0 Container Type", operand=HideConditionOperand.NotEQ, value="MSI")
+            ]
         ),
         #Codesigning
         BuildParameter(
