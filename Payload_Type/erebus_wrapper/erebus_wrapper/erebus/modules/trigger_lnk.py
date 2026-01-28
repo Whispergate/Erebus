@@ -55,7 +55,12 @@ def create_lnk_trigger(target_bin: str, args: str, icon_src: str, icon_index: in
     
     lnk_output_path = payload_dir / output_filename
 
+    # Create LNK file with proper properties
+    lnk = pylnk3.Lnk()
     lnk = pylnk3.for_file(target_bin, str(lnk_output_path), args, description, icon_src, icon_index)
+    # lnk.description = description
+    # lnk.icon = icon_src
+    # lnk.icon_index = icon_index
     lnk.save(str(lnk_output_path))
 
     return lnk_output_path
