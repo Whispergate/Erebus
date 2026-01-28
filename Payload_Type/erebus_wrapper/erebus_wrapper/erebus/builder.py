@@ -645,19 +645,24 @@ generated if none have been entered.""",
     async def containerise_payload(self,agent_build_path):
         """Creates a container and adds all files generated from the payload function inside of the given archive/media"""
 
+        trigger_type = self.get_parameter("7.0 Trigger Type")
+        target_ext = f".{self.get_parameter('7.0 Trigger Type').lower()}"
+        
         match(self.get_parameter("3.0 Container Type")):
             case "7z":
                   return build_7z(
                     compression=self.get_parameter("3.1 Compression Level"),
                     password=self.get_parameter("3.2 Archive Password"),
-                    build_path=Path(agent_build_path)
+                    build_path=Path(agent_build_path),
+                    visible_extension=target_ext
                 )
 
             case "Zip":
                 return build_zip(
                     compression=self.get_parameter("3.1 Compression Level"),
                     password=self.get_parameter("3.2 Archive Password"),
-                    build_path=Path(agent_build_path)
+                    build_path=Path(agent_build_path),
+                    visible_extension=target_ext
                 )
 
             case "ISO":
