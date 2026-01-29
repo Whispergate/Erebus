@@ -492,7 +492,8 @@ generated if none have been entered.""",
             hide_conditions=[
                 HideCondition(name="3.0 Container Type", operand=HideConditionOperand.NotEQ, value="MSI"),
                 HideCondition(name="5.3 MSI Backdoor File", operand=HideConditionOperand.EQ, value=""),
-                HideCondition(name="5.4 MSI Attack Type", operand=HideConditionOperand.Nin, value=["execute", "run-exe"])
+                HideCondition(name="5.4 MSI Attack Type", operand=HideConditionOperand.NotEQ, value="execute"),
+                HideCondition(name="5.4 MSI Attack Type", operand=HideConditionOperand.NotEQ, value="run-exe")
             ]
         ),
         BuildParameter(
