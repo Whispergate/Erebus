@@ -170,7 +170,6 @@ NOTE: Loaders are written in C++ - Supplied shellcode format must be raw for `Lo
             default_value = "debug",
             hide_conditions = [
                 HideCondition(name="0.1 Loader Type", operand=HideConditionOperand.NotEQ, value="ClickOnce"),
-                HideCondition(name="2.4 Shellcode Format", operand=HideConditionOperand.NotEQ, value="CSharp"),
             ]
         ),
 
@@ -187,8 +186,7 @@ NOTE: Loaders are written in C++ - Supplied shellcode format must be raw for `Lo
             choices = ["1", "2", "3", "4", "5"],
             default_value = "1",
             hide_conditions = [
-                HideCondition(name="0.1 Loader Type", operand=HideConditionOperand.NotEQ, value="Shellcode Loader"),
-                HideCondition(name="2.4 Shellcode Format", operand=HideConditionOperand.NotEQ, value="C"),
+                HideCondition(name="0.1 Loader Type", operand=HideConditionOperand.EQ, value="ClickOnce"),
             ]
         ),
 
@@ -198,8 +196,7 @@ NOTE: Loaders are written in C++ - Supplied shellcode format must be raw for `Lo
             description = "Target process for remote injection (e.g., notepad.exe, explorer.exe)",
             default_value = "notepad.exe",
             hide_conditions = [
-                HideCondition(name="0.1 Loader Type", operand=HideConditionOperand.NotEQ, value="Shellcode Loader"),
-                HideCondition(name="2.4 Shellcode Format", operand=HideConditionOperand.NotEQ, value="C"),
+                HideCondition(name="0.1 Loader Type", operand=HideConditionOperand.EQ, value="ClickOnce"),
                 HideCondition(name="0.4 Shellcode Loader - Injection Type", operand=HideConditionOperand.EQ, value="3"),
             ]
         ),
@@ -218,7 +215,6 @@ enumdesktops (self)""",
             default_value = "createfiber",
             hide_conditions = [
                 HideCondition(name="0.1 Loader Type", operand=HideConditionOperand.NotEQ, value="ClickOnce"),
-                HideCondition(name="2.4 Shellcode Format", operand=HideConditionOperand.NotEQ, value="CSharp"),
             ]
         ),
 
@@ -229,7 +225,6 @@ enumdesktops (self)""",
             default_value = "explorer.exe",
             hide_conditions = [
                 HideCondition(name="0.1 Loader Type", operand=HideConditionOperand.NotEQ, value="ClickOnce"),
-                HideCondition(name="2.4 Shellcode Format", operand=HideConditionOperand.NotEQ, value="CSharp"),
                 HideCondition(name="0.6 ClickOnce - Injection Method", operand=HideConditionOperand.EQ, value="createfiber"),
                 HideCondition(name="0.6 ClickOnce - Injection Method", operand=HideConditionOperand.EQ, value="enumdesktops"),
             ]
@@ -272,6 +267,9 @@ If one is not uploaded then an example file will be used.""",
             choices=["LNK", "BAT", "MSI", "ClickOnce"],
             default_value="BAT",
             required=False,
+            hide_conditions = [
+                HideCondition(name="0.0 Main Payload Type", operand=HideConditionOperand.NotEQ, value="Loader"),
+            ]
         ),
 
         BuildParameter(
@@ -283,8 +281,6 @@ NOTE: ({semver}) Only supports XOR for now. Does not (currently) support encoded
 """,
             hide_conditions = [
                 HideCondition(name="0.0 Main Payload Type", operand=HideConditionOperand.NotEQ, value="Hijack"),
-                # Change this if you are using a custom DLL Loader written in another language
-                HideCondition(name="2.4 Shellcode Format", operand=HideConditionOperand.NotEQ, value="C"),
             ]
         ),
 
@@ -344,17 +340,18 @@ generated if none have been entered.""",
             parameter_type = BuildParameterType.ChooseOne,
             description = "Choose a format for the obfuscated shellcode.",
             choices = [
+                # Uncomment lines for custom loaders
                 "C",
                 "CSharp",
-                "Nim",
-                "Go",
-                "Python",
-                "Powershell",
-                "VBA",
-                "VBScript",
-                "Rust",
-                "JavaScript",
-                "Zig",
+                # "Nim",
+                # "Go",
+                # "Python",
+                # "Powershell",
+                # "VBA",
+                # "VBScript",
+                # "Rust",
+                # "JavaScript",
+                # "Zig",
                 "Raw",
             ],
             default_value = "C",
@@ -870,8 +867,8 @@ generated if none have been entered.""",
             shellcrypt_path = str(shellcrypt_path)
 
             templates_path = PurePath(agent_build_path) / "templates"
-            dll_hijack_template_path = templates_path / "dll_template.cpp"
-            dll_target_path = templates_path / "dll_target.dll"
+            dll_hijack_path = templates_path / "dll_hijack.cpp"
+            dll_target_path = templates_path / "dll_hijack.dll"
             dll_exports_path = templates_path / "proxy.def"
 
             templates_path = str(templates_path)
@@ -958,6 +955,8 @@ generated if none have been entered.""",
 
             if self.get_parameter("2.2 Encryption Key") != "NONE":
                 cmd += ["-k", self.get_parameter("2.2 Encryption Key")]
+            else: 
+                cmd += ["-k", "0000"]
 
             cmd += ["-o", obfuscated_shellcode_path]
 
@@ -1133,17 +1132,18 @@ generated if none have been entered.""",
                         StepSuccess=True,
                     ))
 
+                # Get the hijack directory (source of all hijack files)
+                hijack_dir = PurePath(agent_build_path) / "hijack"
+                hijack_dir_str = str(hijack_dir)
+
+                # Use make to compile the DLL with all hijack directory files
                 cmd = [
-                    "x86_64-w64-mingw32-gcc",
-                    "-shared",
-                    "-o",
-                    payload_path,
-                    dll_hijack_template_path,
-                    dll_exports_path,
-                    "-I/usr/x86_64-w64-mingw32/include",
-                    "-L/usr/x86_64-w64-mingw32/lib"
-                    "-e DllMain",
-                    "-DDLL",
+                    "make",
+                    "-C",
+                    hijack_dir_str,
+                    f"OUTPUT_PATH={PurePath(agent_build_path) / 'payload'}",
+                    f"DLL_NAME={dll_file_name}",
+                    f"TEMPLATE_PATH={templates_path}",
                 ]
 
                 process = await asyncio.create_subprocess_exec(
