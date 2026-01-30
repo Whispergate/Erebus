@@ -196,6 +196,7 @@ NOTE: Loaders are written in C++ - Supplied shellcode format must be raw for `Lo
             hide_conditions = [
                 HideCondition(name="0.1 Loader Type", operand=HideConditionOperand.NotEQ, value="Shellcode Loader"),
                 HideCondition(name="2.4 Shellcode Format", operand=HideConditionOperand.NotEQ, value="C"),
+                HideCondition(name="0.4 Shellcode Loader - Injection Type", operand=HideConditionOperand.EQ, value="3"),
             ]
         ),
 
@@ -225,6 +226,8 @@ enumdesktops (self)""",
             hide_conditions = [
                 HideCondition(name="0.1 Loader Type", operand=HideConditionOperand.NotEQ, value="ClickOnce"),
                 HideCondition(name="2.4 Shellcode Format", operand=HideConditionOperand.NotEQ, value="CSharp"),
+                HideCondition(name="0.6 ClickOnce - Injection Method", operand=HideConditionOperand.EQ, value="createfiber"),
+                HideCondition(name="0.6 ClickOnce - Injection Method", operand=HideConditionOperand.EQ, value="enumdesktops"),
             ]
         ),
 
