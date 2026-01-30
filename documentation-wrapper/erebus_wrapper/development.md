@@ -238,6 +238,7 @@ During the build process:
    - **LNK Trigger**: Creates .lnk shortcut that executes trigger binary with command arguments and displays decoy
    - **BAT Trigger**: Generates batch script that executes payload and shows decoy file
    - **MSI Trigger**: Embeds trigger into MSI package with execution conditions
+    - **ClickOnce Trigger**: Creates ClickOnce deployment manifests for trusted code execution (See: https://specterops.io/blog/2023/06/07/less-smartscreen-more-caffeine-abusing-clickonce-for-trusted-code-execution/)
 5. **Containerization**: Final payload is packaged into selected container format
 6. **Code Signing**: (Optional) Payload is signed with certificate
 
@@ -278,3 +279,14 @@ The builder reports progress through build steps:
 - Containerising
 
 Each step includes stdout/stderr output and success/failure status for debugging.
+
+### ClickOnce Trigger
+- Creates ClickOnce deployment manifests (.application file)
+- Leverages trusted ClickOnce execution model for code delivery
+- Can bypass SmartScreen warnings through trusted publisher model
+- Creates proper XML manifests for deployment:
+    - Application manifest (.exe.manifest) - Describes assembly and file dependencies
+    - Deployment manifest (.application) - Entry point for ClickOnce deployment
+- Supports auto-installation and execution
+- Files: `trigger_clickonce.py`
+- Reference: https://specterops.io/blog/2023/06/07/less-smartscreen-more-caffeine-abusing-clickonce-for-trusted-code-execution/

