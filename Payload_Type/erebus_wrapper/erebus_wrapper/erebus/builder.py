@@ -131,7 +131,7 @@ NOTE: Loaders are written in C++ - Supplied shellcode format must be raw for `Lo
             default_value = "Shellcode Loader",
             hide_conditions = [
                 HideCondition(name="0.0 Main Payload Type", operand=HideConditionOperand.NotEQ, value="Loader"),
-                HideCondition(name="2.4 Shellcode Format", operand=HideConditionOperand.NotEQ, value="Raw"),
+                HideCondition(name="2.4 Shellcode Format", operand=HideConditionOperand.NotEQ, value="C"),
             ]
         ),
 
@@ -143,6 +143,7 @@ NOTE: Loaders are written in C++ - Supplied shellcode format must be raw for `Lo
             default_value = "EXE",
             hide_conditions = [
                 HideCondition(name="0.1 Loader Type", operand=HideConditionOperand.NotEQ, value="Shellcode Loader"),
+                HideCondition(name="2.4 Shellcode Format", operand=HideConditionOperand.NotEQ, value="C"),
             ]
         ),
 
@@ -154,6 +155,7 @@ NOTE: Loaders are written in C++ - Supplied shellcode format must be raw for `Lo
             default_value = "debug",
             hide_conditions = [
                 HideCondition(name="0.1 Loader Type", operand=HideConditionOperand.NotEQ, value="Shellcode Loader"),
+                HideCondition(name="2.4 Shellcode Format", operand=HideConditionOperand.NotEQ, value="C"),
             ]
         ),
 
@@ -165,6 +167,7 @@ NOTE: Loaders are written in C++ - Supplied shellcode format must be raw for `Lo
             default_value = "debug",
             hide_conditions = [
                 HideCondition(name="0.1 Loader Type", operand=HideConditionOperand.NotEQ, value="ClickOnce"),
+                HideCondition(name="2.4 Shellcode Format", operand=HideConditionOperand.NotEQ, value="CSharp"),
             ]
         ),
 
@@ -182,6 +185,7 @@ NOTE: Loaders are written in C++ - Supplied shellcode format must be raw for `Lo
             default_value = "1",
             hide_conditions = [
                 HideCondition(name="0.1 Loader Type", operand=HideConditionOperand.NotEQ, value="Shellcode Loader"),
+                HideCondition(name="2.4 Shellcode Format", operand=HideConditionOperand.NotEQ, value="C"),
             ]
         ),
 
@@ -192,6 +196,7 @@ NOTE: Loaders are written in C++ - Supplied shellcode format must be raw for `Lo
             default_value = "notepad.exe",
             hide_conditions = [
                 HideCondition(name="0.1 Loader Type", operand=HideConditionOperand.NotEQ, value="Shellcode Loader"),
+                HideCondition(name="2.4 Shellcode Format", operand=HideConditionOperand.NotEQ, value="C"),
             ]
         ),
 
@@ -209,6 +214,7 @@ enumdesktops (self)""",
             default_value = "createfiber",
             hide_conditions = [
                 HideCondition(name="0.1 Loader Type", operand=HideConditionOperand.NotEQ, value="ClickOnce"),
+                HideCondition(name="2.4 Shellcode Format", operand=HideConditionOperand.NotEQ, value="CSharp"),
             ]
         ),
 
@@ -218,8 +224,8 @@ enumdesktops (self)""",
             description = "Target process for remote injection methods (leave empty for explorer.exe)",
             default_value = "explorer.exe",
             hide_conditions = [
-                HideCondition(name="0.0 Main Payload Type", operand=HideConditionOperand.NotEQ, value="Loader"),
                 HideCondition(name="0.1 Loader Type", operand=HideConditionOperand.NotEQ, value="ClickOnce"),
+                HideCondition(name="2.4 Shellcode Format", operand=HideConditionOperand.NotEQ, value="CSharp"),
             ]
         ),
 
@@ -338,16 +344,6 @@ generated if none have been entered.""",
             ],
             default_value = "C",
             required = True,
-        ),
-
-        BuildParameter(
-            name = "2.5 Shellcode Array Name",
-            parameter_type = BuildParameterType.String,
-            description = "Choose a name for the generated shellcode array. E.g. [array name] --> sh3llc0d3[113]...",
-            default_value = "shellcode",
-            hide_conditions = [
-                HideCondition(name="2.4 Shellcode Format", operand=HideConditionOperand.EQ, value="Raw")
-            ]
         ),
 
         # Archive
@@ -859,12 +855,10 @@ generated if none have been entered.""",
 
             shellcode_loader_path = PurePath(agent_build_path) / "Erebus.Loaders" / "Erebus.Loader"
             clickonce_loader_path = PurePath(agent_build_path) / "Erebus.Loaders" / "Erebus.ClickOnce"
-            encryption_key_path_cpp = PurePath(agent_build_path) / "Erebus.Loaders" / "Erebus.Loader" / "include" / "key.hpp"
             encryption_shellcode_path_cpp = PurePath(agent_build_path) / "Erebus.Loaders" / "Erebus.Loader" / "include" / "shellcode.hpp"
 
             shellcode_loader_path = str(shellcode_loader_path)
             clickonce_loader_path = str(clickonce_loader_path)
-            encryption_key_path_cpp = str(encryption_key_path_cpp)
             encryption_shellcode_path_cpp = str(encryption_shellcode_path_cpp)
 
             shellcrypt_path = PurePath(agent_build_path) / "shellcrypt" / "shellcrypt.py"
@@ -954,6 +948,8 @@ generated if none have been entered.""",
 
             cmd += ["-o", obfuscated_shellcode_path]
 
+            shutil.copy(dst=encryption_shellcode_path_cpp, src=obfuscated_shellcode_path)
+
             process = await asyncio.create_subprocess_exec(
                 *cmd,
                 stdout=asyncio.subprocess.PIPE,
@@ -986,20 +982,12 @@ generated if none have been entered.""",
                     shellcode_src = subprocess.check_output(cmd, text=True)
                     output += shellcode_src
 
-                    # Write shellcode to file
-                    start = shellcode_src.find("unsigned char shellcode")
-                    end   = shellcode_src.find("};", start) + 2
-                    shellcode_array = shellcode_src[start:end]
-                    output += shellcode_array
-                    with open(encryption_shellcode_path_cpp, "w+") as file:
-                        file.write(shellcode_array)
-
                     # Write key to file
                     start = shellcode_src.find("unsigned char key")
                     end   = shellcode_src.find("};", start) + 2
                     key_array = shellcode_src[start:end]
                     output += key_array
-                    with open(encryption_key_path_cpp, "w+") as file:
+                    with open(encryption_shellcode_path_cpp, "w") as file:
                         file.write(key_array)
 
                     response.status = BuildStatus.Success
