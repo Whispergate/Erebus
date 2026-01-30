@@ -16,8 +16,9 @@ The Erebus wrapper is a comprehensive initial access toolkit designed to generat
 - **Multiple Injection Methods**: 5+ injection techniques for both loaders
 - **Container Support**: ISO, 7z, ZIP, and MSI packaging
 - **Code Signing**: Self-signed, spoofed, or provided certificates
-- **Trigger Mechanisms**: LNK-based triggers with decoy files
+- **Trigger Mechanisms**: LNK-based triggers, BAT script triggers, and MSI package triggers with decoy files
 - **DLL Hijacking**: Proxy-based DLL hijacking capability
+- **MSI Backdooring**: Multiple attack vectors for injecting payloads into existing MSI installers
 
 ## High Level Flow Chart
 
@@ -78,18 +79,18 @@ The Erebus wrapper is a comprehensive initial access toolkit designed to generat
 ### DLL Hijacking (Section 1.0)
 - **1.0 DLL Hijacking**: Upload DLL for proxy-based hijacking (requires C format shellcode)
 
-### Trigger Configuration (Section 0.8-0.10)
+### Trigger Configuration (Section 0.8-0.11)
 - **0.8 Trigger Binary**: Executable to run when trigger is activated
 - **0.9 Trigger Command**: Command arguments to pass
 - **0.10 Decoy File**: Optional decoy file (PDF/XLSX/etc.)
+- **0.11 Trigger Type**: Select trigger mechanism - LNK (default), BAT, or MSI
 
-### Shellcrypt Options (Section 2.0-2.5)
+### Shellcrypt Options (Section 2.0-2.4)
 - **2.0 Compression Type**: LZNT1, RLE, or NONE
 - **2.1 Encryption Type**: Select encryption algorithm
 - **2.2 Encryption Key**: Custom key or auto-generate
 - **2.3 Encoding Type**: ALPHA32, ASCII85, BASE64, WORDS256, or NONE
 - **2.4 Shellcode Format**: Output format for obfuscated shellcode
-- **2.5 Shellcode Array Name**: Variable name for shellcode array (non-raw formats)
 
 ### Container Options (Section 3.0-3.2)
 - **3.0 Container Type**: ISO, 7z, ZIP, or MSI
@@ -101,10 +102,21 @@ The Erebus wrapper is a comprehensive initial access toolkit designed to generat
 - **4.1 ISO Enable Autorun**: Enable AutoRun.inf
 - **4.2 ISO Backdoor File**: Existing ISO to modify
 
-### MSI-Specific Options (Section 5.0-5.3)
-- **5.0 MSI Product Name**: Application name in MSI
-- **5.1 MSI Manufacturer**: Company name
+### MSI-Specific Options (Section 5.0-5.8)
+- **5.0 MSI Product Name**: Application name shown in MSI/UI
+- **5.1 MSI Manufacturer**: Company name shown in MSI metadata
 - **5.2 MSI Install Scope**: User (AppData) or Machine (Program Files)
+- **5.3 MSI Backdoor File**: Existing MSI to modify and inject payload
+- **5.4 MSI Attack Type**: Attack vector for backdoor injection
+  - execute: Run command via CustomAction (stealthiest)
+  - run-exe: Extract and execute EXE from Binary table
+  - load-dll: Load native DLL via DllEntry
+  - dotnet: Load .NET assembly (auto-detected)
+  - script: Execute VBScript/JScript
+- **5.5 MSI Entry Point**: DLL export or script function name (for load-dll/dotnet/script attacks)
+- **5.6 MSI Command Arguments**: Command line arguments for execute/run-exe attacks
+- **5.7 MSI Execution Condition**: MSI condition for payload execution (default: NOT REMOVE = install only)
+- **5.8 MSI Custom Action Name**: Custom action identifier (auto-generated if empty)
 
 ### Code Signing (Section 6.0-6.6)
 - **6.0 Codesign Loader**: Enable/disable code signing
@@ -202,6 +214,14 @@ For **ClickOnce (.NET)**:
 2. Add option to "0.6 ClickOnce - Injection Method" parameter
 3. Update `InjectionConfig.cs` template to handle new method
 
+### Adding New Trigger Types
+
+1. Create a new module `trigger_<type>.py` in `erebus_wrapper/erebus/modules/`
+2. Implement async function matching signature: `async def create_<type>_payload_trigger(**kwargs) -> str`
+3. Import the function in `builder.py`
+4. Add condition to builder's trigger logic to handle the new type
+5. Add option to "7.0 Trigger Type" parameter in `build_parameters`
+
 ## Configuration Workflow
 
 During the build process:
@@ -214,8 +234,32 @@ During the build process:
    - Encryption key is extracted from obfuscation and included
    - Written to `Erebus.ClickOnce/InjectionConfig.cs`
 3. **Compilation**: Loaders are compiled with their respective configurations
-4. **Containerization**: Final payload is packaged
-5. **Code Signing**: (Optional) Payload is signed with certificate
+4. **Trigger Setup**: Based on selected trigger type:
+   - **LNK Trigger**: Creates .lnk shortcut that executes trigger binary with command arguments and displays decoy
+   - **BAT Trigger**: Generates batch script that executes payload and shows decoy file
+   - **MSI Trigger**: Embeds trigger into MSI package with execution conditions
+5. **Containerization**: Final payload is packaged into selected container format
+6. **Code Signing**: (Optional) Payload is signed with certificate
+
+## Trigger System Details
+
+### LNK Trigger
+- Creates a `.lnk` (Windows shortcut) file
+- Executes specified trigger binary with command arguments
+- Displays decoy file when activated
+- Files: `trigger_lnk.py`
+
+### BAT Trigger
+- Generates a batch script (`.bat` file)
+- Executes trigger binary and command arguments in sequence
+- Can display decoy file
+- Files: `trigger_bat.py`
+
+### MSI Trigger
+- Embeds execution trigger within MSI custom actions
+- Respects MSI execution conditions (install, repair, uninstall)
+- Supports command execution or binary launch
+- Files: `trigger_msi.py`
 
 ## Build Step Tracking
 
@@ -223,11 +267,14 @@ The builder reports progress through build steps:
 - Gathering Files
 - Header Check
 - Shellcode Obfuscation
-- Configuring Shellcode Loader / ClickOnce Loader
-- Compiling Shellcode Loader / DLL / ClickOnce
+- Gathering DLL Exports for Hijacking (DLL hijack only)
+- Compiling DLL Payload (DLL hijack only)
+- Compiling Shellcode Loader (Shellcode Loader)
+- Compiling ClickOnce Loader (ClickOnce)
 - Sign Shellcode Loader (optional)
-- Adding Trigger
-- Creating Decoy
+- Backdooring MSI (MSI container with backdoor file)
+- Adding Trigger (LNK, BAT, or MSI trigger)
+- Creating Decoy (LNK trigger with decoy file)
 - Containerising
 
 Each step includes stdout/stderr output and success/failure status for debugging.

