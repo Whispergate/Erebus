@@ -1330,16 +1330,18 @@ generated if none have been entered.""",
                                     combined_content = combined_file.read()
                                     import re
                                     
-                                    # Extract key array bytes (values between "key[" and first "}")
-                                    key_match = re.search(r'key\[.*?\]\s*=\s*\{([^}]*)\}', combined_content)
+                                    # Extract key array bytes - handles both C++ and C# formats
+                                    # Matches: key[2] = { ... } or byte[] key[2] = { ... }
+                                    key_match = re.search(r'(?:byte\[\]\s+)?key\[\d+\]\s*=\s*\{([^}]*)\}', combined_content)
                                     if key_match:
                                         key_section = key_match.group(1)
                                         hex_key = re.findall(r'0x[0-9a-fA-F]{2}', key_section)
                                         if hex_key:
                                             encryption_key_bytes = ", ".join(hex_key)
                                     
-                                    # Extract shellcode array bytes (values between "sh3llc0d3[" or "shellcode[" and "}")
-                                    shellcode_match = re.search(r'(?:sh3llc0d3|shellcode)\[.*?\]\s*=\s*\{([^}]*)\}', combined_content)
+                                    # Extract shellcode array bytes - handles both C++ and C# formats
+                                    # Matches: shellcode[113] = { ... } or sh3llc0d3[113] = { ... } or byte[] shellcode[113] = { ... }
+                                    shellcode_match = re.search(r'(?:byte\[\]\s+)?(?:sh3llc0d3|shellcode)\[\d+\]\s*=\s*\{([^}]*)\}', combined_content)
                                     if shellcode_match:
                                         shellcode_section = shellcode_match.group(1)
                                         hex_shellcode = re.findall(r'0x[0-9a-fA-F]{2}', shellcode_section)
