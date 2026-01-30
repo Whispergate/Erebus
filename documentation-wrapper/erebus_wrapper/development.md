@@ -30,7 +30,7 @@ The Erebus wrapper is a comprehensive initial access toolkit designed to generat
 - **Loader**: Uses Shellcode Loader or ClickOnce
 - **Hijack**: Uses DLL proxy hijacking
 
-### 2. Shellcode Obfuscation (Shellcrypt Phase)
+### 2. Shellcode Obfuscation
 - **Input**: Raw shellcode binary from Mythic
 - **Compression**: LZNT1, RLE, or NONE
 - **Encryption**: AES128_CBC, AES256_CBC, AES256_ECB, CHACHA20, SALSA20, XOR, XOR_COMPLEX
@@ -52,9 +52,10 @@ The Erebus wrapper is a comprehensive initial access toolkit designed to generat
 
 ## Build Parameters Reference
 
-### Main Payload Selection (Section 0.0)
+### Main Payload Selection (Section 0.0-0.2)
 - **0.0 Main Payload Type**: Choose "Loader" or "Hijack"
 - **0.1 Loader Type**: Select "Shellcode Loader" or "ClickOnce" (Loader only)
+- **0.2 Loader Format**: Select "EXE" or "DLL" (Shellcode Loader Only)
 
 ### Shellcode Loader Configuration (Section 0.3-0.5)
 - **0.3 Loader Build Configuration**: Debug or Release build
