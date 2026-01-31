@@ -90,7 +90,7 @@ The Erebus wrapper is a comprehensive initial access toolkit designed to generat
 - **0.8 Trigger Binary**: Executable to run when trigger is activated
 - **0.9 Trigger Command**: Command arguments to pass
 - **0.12 Decoy File**: Optional decoy file (PDF/XLSX/etc.)
-- **0.10 Decoy File**: Select trigger mechanism - LNK (default), BAT, or MSI
+- **0.10 Trigger Type**: Select trigger mechanism - LNK (default), BAT, or MSI
 
 ### Shellcrypt Options (Section 2.0-2.4)
 - **2.0 Compression Type**: LZNT1, RLE, or NONE

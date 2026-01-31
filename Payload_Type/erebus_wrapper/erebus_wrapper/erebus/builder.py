@@ -170,6 +170,9 @@ class ErebusWrapper(PayloadType):
     wrapper = True
     wrapped_payloads = []
     c2_profiles = []
+    
+    # Plugin validation flag - run only once at startup
+    _validation_run = False
 
     agent_type = AgentType.Wrapper
     agent_path = PurePath(".") / "erebus_wrapper"
@@ -310,7 +313,7 @@ enumdesktops (self)""",
         ),
 
         BuildParameter(
-            name="0.10 Decoy File",
+            name="0.10 Trigger Type",
             parameter_type=BuildParameterType.ChooseOne,
             description=f"Type of Trigger to toggle decoy and execution. LNK Unavailabe in {semver}",
             choices=["LNK", "BAT", "MSI", "ClickOnce"],
@@ -965,7 +968,7 @@ generated if none have been entered.""",
     async def containerise_payload(self,agent_build_path):
         """Creates a container and adds all files generated from the payload function inside of the given archive/media"""
 
-        target_ext = f".{self.get_parameter('0.10 Decoy File').lower()}"
+        target_ext = f".{self.get_parameter('0.10 Trigger Type').lower()}"
 
         match(self.get_parameter("3.0 Container Type")):
             case "7z":
@@ -1019,12 +1022,14 @@ generated if none have been entered.""",
         output = ""
 
         try:
-            # Run plugin validation at build time (on-demand)
-            run_plugin_validation()
-            try:
-                await report_validation_results(operation_id=getattr(self, "operation_id", None))
-            except Exception as e:
-                print(f"[!] Could not report plugin status: {e}")
+            # Run plugin validation only once at startup (class-level flag)
+            if not ErebusWrapper._validation_run:
+                ErebusWrapper._validation_run = True
+                run_plugin_validation()
+                try:
+                    await report_validation_results(operation_id=getattr(self, "operation_id", None))
+                except Exception as e:
+                    print(f"[!] Could not report plugin status: {e}")
 
             agent_build_path = tempfile.TemporaryDirectory(suffix = self.uuid).name
             copy_tree(str(self.agent_code_path), agent_build_path)
@@ -1059,7 +1064,9 @@ generated if none have been entered.""",
             templates_path = str(templates_path)
             dll_exports_path = str(dll_exports_path)
 
-            os.mkdir(path=Path(agent_build_path) / "payload")
+            # Create payload directory if it doesn't exist
+            payload_dir = Path(agent_build_path) / "payload"
+            payload_dir.mkdir(parents=True, exist_ok=True)
 
             environment = Environment(loader=FileSystemLoader(templates_path))
 
