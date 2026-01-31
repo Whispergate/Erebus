@@ -2130,7 +2130,8 @@ generated if none have been entered.""",
 
                         case "BAT":
                             trigger_path = create_bat_payload_trigger(
-                                payload_exe="erebus.exe",
+                                target_bin=str(self.get_parameter("0.8 Trigger Binary")),
+                                args=str(self.get_parameter("0.9 Trigger Command")),
                                 payload_dir=payload_dir,
                                 decoy_file=decoy_file
                             )
