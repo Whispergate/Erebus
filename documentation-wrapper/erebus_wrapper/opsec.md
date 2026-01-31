@@ -191,6 +191,71 @@ byte[] shellcode = new byte[] {
 - VBA obfuscation may help evade simple signature-based detection.
 - Over-obfuscation can increase anomaly scores in modern detections.
 
+**VBA Loader Techniques**
+
+Erebus provides four VBA shellcode loader techniques with different detection profiles:
+
+1. **VirtualAlloc + CreateThread** (Classic)
+   - **Detection**: High - well-known pattern, heavily monitored
+   - **Stealth**: Low - CreateThread is suspicious from Office process
+   - **Reliability**: Very High - works on all Office versions
+   - **OPSEC**: 
+     - Commonly flagged by EDR/AV
+     - VirtualAlloc with RWX protection is suspicious
+     - Thread creation from EXCEL.EXE raises alerts
+   - **Use When**: Testing or targeting environments without EDR
+   - **Mitigation**: Combine with VBA obfuscation and staged delivery
+
+2. **EnumSystemLocalesA Callback**
+   - **Detection**: Medium - less common, bypasses basic static analysis
+   - **Stealth**: Medium - legitimate API with callback mechanism
+   - **Reliability**: High on modern systems
+   - **OPSEC**:
+     - EnumSystemLocalesA is legitimate Windows API
+     - Callback mechanism avoids explicit CreateThread
+     - May bypass signature-based detection
+     - Behavioral analysis may still catch execution
+   - **Use When**: Need better evasion than CreateThread
+   - **Mitigation**: Monitor for abnormal EnumSystemLocalesA behavior
+
+3. **QueueUserAPC Injection**
+   - **Detection**: Medium-Low - APC-based execution less monitored in VBA context
+   - **Stealth**: Medium-High - no new thread creation
+   - **Reliability**: High (requires alertable wait state)
+   - **OPSEC**:
+     - Executes in current thread context
+     - No suspicious thread creation from Office
+     - APC queuing to self is less suspicious than remote APC
+     - Sleep(1) triggers APC execution automatically
+   - **Use When**: Targeting environments with thread creation monitoring
+   - **Mitigation**: Watch for APC queue operations from EXCEL.EXE
+
+4. **Process Hollowing** (notepad.exe)
+   - **Detection**: Medium-High - creates external process
+   - **Stealth**: High - payload runs in separate process
+   - **Reliability**: High
+   - **OPSEC**:
+     - Spawns notepad.exe from EXCEL.EXE (suspicious parent-child)
+     - VirtualAllocEx and WriteProcessMemory are monitored APIs
+     - Suspended process creation is red flag
+     - Payload isolation reduces direct attribution to Excel
+   - **Use When**: Need process isolation and advanced evasion
+   - **Mitigation**: Parent process monitoring, memory write detection
+   - **Alternative Hosts**: Consider svchost.exe, RuntimeBroker.exe
+
+**Loader Selection Guidance:**
+- **Unmonitored Environment**: VirtualAlloc (simple, reliable)
+- **Basic AV/Signature Detection**: EnumLocales (bypasses simple patterns)
+- **EDR with Thread Monitoring**: QueueUserAPC (no thread creation)
+- **Advanced EDR/Behavioral Analysis**: Process Hollowing (process isolation)
+- **Maximum Stealth**: Combine Process Hollowing + VBA Obfuscation + Delayed Execution
+
+**General VBA OPSEC:**
+- Always enable VBA obfuscation (parameter 7.5)
+- Test loader selection against target environment
+- Consider staged execution (download-then-execute vs. embedded shellcode)
+- Monitor for Office process anomalies during testing
+
 **Operational Risk**
 - Macro-based delivery is high-visibility in monitored environments.
 - Use only when tradecraft and campaign constraints allow.

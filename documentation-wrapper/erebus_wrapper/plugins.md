@@ -187,12 +187,41 @@ Creates or backdoors Excel documents (XLSM/XLAM/XLS) with embedded VBA payloads.
 **Functions:**
 - `generate_excel_payload()` - Create a new XLSM with embedded VBA payload
 - `backdoor_existing_excel()` - Inject VBA payload into an existing Excel file
+- `generate_vba_loader_virtualalloc()` - Classic VirtualAlloc + CreateThread loader
+- `generate_vba_loader_enumlocales()` - EnumSystemLocalesA callback technique
+- `generate_vba_loader_queueuserapc()` - QueueUserAPC injection technique
+- `generate_vba_loader_process_hollowing()` - Process hollowing (notepad.exe host)
+
+**VBA Loader Techniques:**
+
+1. **VirtualAlloc + CreateThread** (Classic, Reliable)
+   - Allocates RWX memory with VirtualAlloc
+   - Copies shellcode with RtlMoveMemory
+   - Executes via CreateThread
+   - Most compatible and straightforward approach
+
+2. **EnumSystemLocalesA Callback** (Static Analysis Bypass)
+   - Uses API callback for shellcode execution
+   - Bypasses some static analysis tools
+   - Lower detection rate than direct CreateThread
+
+3. **QueueUserAPC Injection** (APC-based)
+   - Injects shellcode via Asynchronous Procedure Call
+   - Executes in current thread context
+   - Stealthier than CreateThread
+
+4. **Process Hollowing** (Remote Injection)
+   - Creates suspended notepad.exe process
+   - Injects shellcode with VirtualAllocEx/WriteProcessMemory
+   - Resumes thread to execute payload
+   - Most complex but highest evasion potential
 
 **Features:**
 - Supports XLSM/XLAM/XLS inputs
 - Multiple execution triggers (AutoOpen, OnClose, OnSave)
 - Optional VBA obfuscation
 - Command execution or shellcode injection via VBA
+- Selectable loader techniques for different evasion scenarios
 
 **Requirements:**
 - `openpyxl` (required for Excel manipulation)
@@ -202,10 +231,17 @@ Creates or backdoors Excel documents (XLSM/XLAM/XLS) with embedded VBA payloads.
 
 **Example Usage:**
 ```python
+# Create Excel with VirtualAlloc loader
 excel_path = generate_excel_payload(
     payload_path="./payload",
     vba_payload=vba_code,
     output_path="./payload/Invoice.xlsm"
+)
+
+# Generate specific loader technique
+vba_code = plugin.generate_vba_loader_enumlocales(
+    vba_shellcode=shellcode,
+    trigger_type="AutoOpen"
 )
 ```
 

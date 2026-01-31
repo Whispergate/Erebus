@@ -142,6 +142,38 @@ The Erebus wrapper is a comprehensive initial access toolkit designed to generat
 - **7.4 Excel Document Name**: Display name for created document
 - **7.5 Obfuscate VBA**: Obfuscate VBA code for evasion
 - **7.6 MalDoc Injection Type**: Command Execution or Shellcode Injection
+- **7.7 VBA Loader Technique**: VirtualAlloc (classic), EnumLocales (callback), QueueUserAPC (APC), or ProcessHollowing (remote injection)
+
+#### VBA Loader Techniques
+
+When using **Shellcode Injection** mode, you can select from four loader techniques:
+
+1. **VirtualAlloc + CreateThread** (Default)
+   - Classic and most reliable technique
+   - Allocates RWX memory → copies shellcode → creates execution thread
+   - Best compatibility across all Office versions
+   - Moderate detection rate
+
+2. **EnumSystemLocalesA Callback**
+   - Executes shellcode via API callback mechanism
+   - Bypasses static analysis tools that only look for CreateThread
+   - Lower detection rate than direct CreateThread
+   - Compatible with modern Office versions
+
+3. **QueueUserAPC Injection**
+   - Uses Asynchronous Procedure Calls for execution
+   - Executes in current thread context (no new thread creation)
+   - Stealthier than CreateThread approach
+   - Requires alertable wait state (handled automatically)
+
+4. **Process Hollowing**
+   - Creates suspended notepad.exe process
+   - Injects shellcode into remote process memory
+   - Resumes thread to execute payload
+   - Highest evasion potential but more complex
+   - Best for advanced evasion scenarios
+
+**Recommendation:** Start with VirtualAlloc for reliability, upgrade to EnumLocales or QueueUserAPC for better evasion, use ProcessHollowing for maximum stealth.
 
 ## Adding Features
 

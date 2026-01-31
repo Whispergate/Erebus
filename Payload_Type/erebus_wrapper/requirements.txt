@@ -13,3 +13,5 @@ jinja2
 pycdlib
 olefile
 openpyxl
+python-docx
+xlsxwriter
