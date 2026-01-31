@@ -13,7 +13,7 @@ import pathlib
 from typing import Dict, Callable
 
 try:
-    from .plugin_base import ErebusPlugin, PluginMetadata, PluginCategory
+    from erebus_wrapper.erebus.modules.plugin_base import ErebusPlugin, PluginMetadata, PluginCategory
 except ImportError:
     from plugin_base import ErebusPlugin, PluginMetadata, PluginCategory
 

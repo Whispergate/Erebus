@@ -13,12 +13,12 @@ import pathlib
 from typing import Dict, Callable
 
 try:
-    from .plugin_base import ErebusPlugin, PluginMetadata, PluginCategory
+    from erebus_wrapper.erebus.modules.plugin_base import ErebusPlugin, PluginMetadata, PluginCategory
 except ImportError:
     from plugin_base import ErebusPlugin, PluginMetadata, PluginCategory
 
 try:
-    from .archive import container_clickonce
+    from erebus_wrapper.erebus.modules.archive import container_clickonce
 except ImportError:
     from archive import container_clickonce
 

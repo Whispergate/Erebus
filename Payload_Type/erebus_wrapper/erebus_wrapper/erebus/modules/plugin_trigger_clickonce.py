@@ -13,8 +13,8 @@ while potentially bypassing SmartScreen warnings.
 from typing import Dict, Callable
 
 try:
-    from .plugin_base import ErebusPlugin, PluginMetadata, PluginCategory
-    from .archive.trigger_clickonce import (
+    from erebus_wrapper.erebus.modules.plugin_base import ErebusPlugin, PluginMetadata, PluginCategory
+    from erebus_wrapper.erebus.modules.archive.trigger_clickonce import (
         create_clickonce_trigger,
         _calculate_file_hash,
         _create_application_manifest,
