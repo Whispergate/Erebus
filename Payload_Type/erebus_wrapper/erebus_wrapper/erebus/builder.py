@@ -2111,7 +2111,7 @@ generated if none have been entered.""",
                 decoy_dir = Path(agent_build_path) / "decoys"
                 decoy_file = decoy_dir / "decoy.pdf"
 
-                trigger_type = self.get_parameter("0.12 Decoy File")
+                trigger_type = self.get_parameter("0.10 Trigger Type")
 
                 try:
                     trigger_path = ""
