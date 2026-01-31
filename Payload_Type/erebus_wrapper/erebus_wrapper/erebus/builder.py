@@ -10,6 +10,7 @@ TODO:
 '''
 
 from erebus_wrapper.erebus.modules.plugin_loader import get_plugin_loader
+from erebus_wrapper.erebus.modules import run_plugin_validation, report_validation_results
 
 _plugin_loader = get_plugin_loader()
 
@@ -172,7 +173,7 @@ class ErebusWrapper(PayloadType):
 
     agent_type = AgentType.Wrapper
     agent_path = PurePath(".") / "erebus_wrapper"
-    _agent_icon_path = agent_path / "Erebus.svg"
+    _agent_icon_path = Path(__file__).resolve().parent.parent / "Erebus.svg"
     agent_icon_path = str(_agent_icon_path)
     agent_code_path = agent_path / "agent_code"
 
@@ -993,6 +994,13 @@ generated if none have been entered.""",
         output = ""
 
         try:
+            # Run plugin validation at build time (on-demand)
+            run_plugin_validation()
+            try:
+                await report_validation_results(operation_id=getattr(self, "operation_id", None))
+            except Exception as e:
+                print(f"[!] Could not report plugin status: {e}")
+
             agent_build_path = tempfile.TemporaryDirectory(suffix = self.uuid).name
             copy_tree(str(self.agent_code_path), agent_build_path)
 

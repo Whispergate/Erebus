@@ -1,11 +1,11 @@
 """
 Erebus Modules Plugin System Initialization
 Author: Whispergate
-Description: Initializes and validates all Erebus plugins on module import
+Description: Plugin discovery and validation utilities for Erebus
 
 This module:
 1. Discovers all plugins in the modules directory
-2. Runs validation tests on each plugin
+2. Runs validation tests on each plugin (on-demand)
 3. Reports results via Mythic RPC (if available)
 4. Provides plugin management utilities
 """
@@ -221,8 +221,8 @@ def _initialize_plugins():
     return results
 
 
-# Initialize on import
-_initialization_results = _initialize_plugins()
+# Initialization results are generated on-demand
+_initialization_results = None
 
 
 # Public API
@@ -269,6 +269,18 @@ def get_initialization_results() -> Dict:
     return _initialization_results
 
 
+def run_plugin_validation() -> Dict:
+    """
+    Run plugin validation and cache results.
+
+    Returns:
+        Dictionary with validation results
+    """
+    global _initialization_results
+    _initialization_results = _initialize_plugins()
+    return _initialization_results
+
+
 async def report_validation_results(operation_id: int = None):
     """
     Send plugin validation results to Mythic via RPC.
@@ -276,19 +288,6 @@ async def report_validation_results(operation_id: int = None):
     This function creates an Operation Event Log entry in Mythic showing the
     plugin validation status. It should be called from within the payload
     builder context where Mythic RPC is available.
-    
-    Python equivalent of Go:
-    ========================
-    go mythicrpc.SendMythicRPCOperationEventLogCreate(mythicrpc.MythicRPCOperationEventLogCreateMessage{
-        OperationId:  &input.OperationID,
-        Message:      "Your message here",
-        MessageLevel: mythicrpc.MESSAGE_LEVEL_WARNING,
-    })
-    
-    Python version:
-    ================
-    from erebus.modules import report_validation_results
-    await report_validation_results(operation_id=<operation_id>)
     
     Args:
         operation_id: Optional Mythic operation ID for context
@@ -303,6 +302,9 @@ async def report_validation_results(operation_id: int = None):
     except Exception as e:
         print(f"[!] Could not report plugin status: {e}")
     """
+    global _initialization_results
+    if _initialization_results is None:
+        _initialization_results = _initialize_plugins()
     await _validator.send_mythic_rpc_report(_initialization_results, operation_id)
 
 
@@ -312,6 +314,7 @@ __all__ = [
     "get_validated_plugins",
     "get_failed_plugins",
     "get_initialization_results",
+    "run_plugin_validation",
     "report_validation_results",
 ]
 
@@ -325,7 +328,7 @@ if __name__ == "__main__":
     print("Erebus Plugin System Validation Report")
     print("="*60)
     
-    results = get_initialization_results()
+    results = run_plugin_validation()
     print(_validator.get_summary_message(results))
     print(f"\nTotal Plugins: {results['total']}")
     print(f"Passed: {results['passed_count']}")
