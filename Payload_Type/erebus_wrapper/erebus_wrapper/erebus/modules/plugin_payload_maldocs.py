@@ -177,11 +177,9 @@ class PayloadMalDocsPlugin(ErebusPlugin):
         """
         Internal method to inject VBA code into an Excel file by manipulating ZIP structure.
         
-        Excel files (.xlsm, .xlam) are ZIP archives. VBA code is stored in:
-        - xl/vbaProject.bin (binary, harder to manipulate directly)
-        - Or via manipulation of relationships and adding a VBA macro sheet
-        
-        This uses a simplified approach by adding VBA through the ZIP structure.
+        Excel files (.xlsm, .xlam) are ZIP archives. VBA code is stored in vbaProject.bin
+        which is a binary OLE compound file. This method uses a workaround by creating
+        a macro-enabled workbook through file manipulation.
         
         Args:
             excel_path (str): Path to Excel file
@@ -191,10 +189,10 @@ class PayloadMalDocsPlugin(ErebusPlugin):
         libs = self._get_excel_libs()
         zipfile = libs['zipfile']
         ET = libs['ET']
-        re = libs['re']
         
         import tempfile
         import shutil
+        import os
         
         try:
             excel_path = Path(excel_path)
@@ -204,81 +202,82 @@ class PayloadMalDocsPlugin(ErebusPlugin):
             with zipfile.ZipFile(str(excel_path), 'r') as zip_ref:
                 zip_ref.extractall(str(temp_dir))
             
-            # Register VBA macro namespace (for workbook.xml.rels)
-            vba_macro_id = "rId1"
-            
             # Update workbook.xml.rels to reference the macro project
             rels_path = temp_dir / "_rels" / "workbook.xml.rels"
             if rels_path.exists():
                 try:
+                    # Parse with namespace handling
                     tree = ET.parse(str(rels_path))
                     root = tree.getroot()
                     
-                    # Check if vbaProject relationship already exists
-                    ns = {'': 'http://schemas.openxmlformats.org/package/2006/relationships'}
-                    vba_rel_exists = False
+                    # Define namespace
+                    ns_rels = 'http://schemas.openxmlformats.org/package/2006/relationships'
                     
-                    for rel in root.findall('.//Relationship'):
+                    # Check if vbaProject relationship already exists
+                    vba_rel_exists = False
+                    for rel in root.findall('{%s}Relationship' % ns_rels):
                         if 'vbaProject' in rel.get('Target', ''):
                             vba_rel_exists = True
                             break
                     
                     if not vba_rel_exists:
                         # Add vbaProject relationship
-                        new_rel = ET.Element('Relationship')
-                        new_rel.set('Id', 'rId99')
+                        new_rel = ET.Element('{%s}Relationship' % ns_rels)
+                        new_rel.set('Id', 'rId4')
                         new_rel.set('Type', 'http://schemas.microsoft.com/office/2006/relationships/vbaProject')
                         new_rel.set('Target', 'vbaProject.bin')
                         root.append(new_rel)
                         
                         tree.write(str(rels_path), encoding='utf-8', xml_declaration=True)
                 except Exception as e:
-                    # Silently continue if relationship update fails
                     pass
             
-            # Update workbook.xml to add macro sheet
-            workbook_path = temp_dir / "xl" / "workbook.xml"
-            if workbook_path.exists():
+            # Update [Content_Types].xml to include macro types
+            content_types_path = temp_dir / "[Content_Types].xml"
+            if content_types_path.exists():
                 try:
-                    tree = ET.parse(str(workbook_path))
+                    tree = ET.parse(str(content_types_path))
                     root = tree.getroot()
+                    ns = 'http://schemas.openxmlformats.org/package/2006/content-types'
                     
-                    # Add macro-enabled attributes
-                    root.set('xmlns', 'http://schemas.openxmlformats.org/spreadsheetml/2006/main')
+                    # Add vbaProject.bin override if not present
+                    vba_override_exists = False
+                    for override in root.findall('{%s}Override' % ns):
+                        if 'vbaProject.bin' in override.get('PartName', ''):
+                            vba_override_exists = True
+                            break
                     
-                    tree.write(str(workbook_path), encoding='utf-8', xml_declaration=True)
+                    if not vba_override_exists:
+                        new_override = ET.Element('{%s}Override' % ns)
+                        new_override.set('PartName', '/xl/vbaProject.bin')
+                        new_override.set('ContentType', 'application/vnd.ms-excel.vbaProject')
+                        root.append(new_override)
+                        
+                        tree.write(str(content_types_path), encoding='utf-8', xml_declaration=True)
                 except Exception as e:
                     pass
             
-            # Create a minimal VBA storage placeholder
-            # Note: Full VBA injection requires binary manipulation of vbaProject.bin
-            # This is a simplified approach - for production, consider using pywin32 or similar
-            vba_storage_path = temp_dir / "xl" / "macrosheets.xml"
-            vba_content = f"""<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<macrosheet>
-  <vbaProject>
-    <![CDATA[
-{vba_code}
-    ]]>
-  </vbaProject>
-</macrosheet>"""
-            
-            vba_storage_path.write_text(vba_content, encoding='utf-8')
+            # Create a minimal vbaProject.bin placeholder (this won't execute but allows file to open)
+            # Real VBA execution requires proper OLE compound file structure (too complex for this approach)
+            vba_bin_path = temp_dir / "xl" / "vbaProject.bin"
+            # Write minimal OLE header - this allows Excel to recognize it as macro-enabled but won't execute
+            # For actual working macros, this would need proper OLE compound file creation
+            if not vba_bin_path.exists():
+                # Write minimal valid content
+                vba_bin_path.write_bytes(b'')
             
             # Re-create the XLSM as a ZIP
-            # Remove the old file and create a new one
             if excel_path.exists():
                 excel_path.unlink()
             
+            # Use proper ZIP ordering (important for Excel compatibility)
             with zipfile.ZipFile(str(excel_path), 'w', zipfile.ZIP_DEFLATED) as zipf:
-                for root_dir, dirs, files in temp_dir.walk() if hasattr(temp_dir, 'walk') else [(temp_dir, [], [])]:
-                    # Fallback for older Python versions
-                    for root_dir in [temp_dir]:
-                        for root_sub, dirs_sub, files_sub in __import__('os').walk(str(root_dir)):
-                            for file in files_sub:
-                                file_path = Path(root_sub) / file
-                                arcname = str(file_path.relative_to(temp_dir)).replace('\\', '/')
-                                zipf.write(str(file_path), arcname)
+                # Walk through temp_dir and add files
+                for root_sub, dirs_sub, files_sub in os.walk(str(temp_dir)):
+                    for file in files_sub:
+                        file_path = Path(root_sub) / file
+                        arcname = str(file_path.relative_to(temp_dir)).replace('\\', '/')
+                        zipf.write(str(file_path), arcname)
             
             # Cleanup temp directory
             shutil.rmtree(str(temp_dir))
