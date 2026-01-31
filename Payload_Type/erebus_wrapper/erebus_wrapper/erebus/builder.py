@@ -531,14 +531,14 @@ generated if none have been entered.""",
         BuildParameter(
             name="6.0 Codesign Loader",
             parameter_type=BuildParameterType.Boolean,
-            description="Sign the loader with a codesigning cert",
+            description="Sign the loader with a code signing cert",
             required=False,
         ),
 
         BuildParameter(
             name="6.1 Codesign Type",
             parameter_type=BuildParameterType.ChooseOne,
-            description="Backdoor an existing ISO",
+            description="Choose how you want to sign the payload",
             choices=["SelfSign", "Spoof URL", "Provide Certificate"],
             required=False,
             hide_conditions=[
