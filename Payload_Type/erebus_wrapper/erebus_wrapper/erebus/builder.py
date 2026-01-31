@@ -1927,8 +1927,49 @@ generated if none have been entered.""",
                             cmd += ["-c", COMPRESSION_METHODS[self.get_parameter("2.0 Compression Type")]]
 
                         # Run shellcrypt to get VBA shellcode
-                        shellcode_vba = subprocess.check_output(cmd, text=True)
-                        output += f"[DEBUG] Shellcrypt VBA output length: {len(shellcode_vba)} bytes\n"
+                        shellcode_output = subprocess.check_output(cmd, text=True)
+                        output += f"[DEBUG] Shellcrypt raw output length: {len(shellcode_output)} bytes\n"
+
+                        # Parse shellcrypt output to extract only key and shellcode arrays
+                        shellcode_vba = ""
+                        lines = shellcode_output.split('\n')
+                        in_key = False
+                        in_shellcode = False
+                        key_lines = []
+                        shellcode_lines = []
+
+                        for line in lines:
+                            # Capture key array
+                            if 'key = Array' in line:
+                                in_key = True
+                                in_shellcode = False
+                                key_lines.append(line.strip())
+                            elif in_key:
+                                if line.strip().endswith(')'):
+                                    key_lines.append(line.strip())
+                                    in_key = False
+                                elif line.strip():
+                                    key_lines.append(line.strip())
+
+                            # Capture shellcode array
+                            if 'shellcode = Array' in line:
+                                in_shellcode = True
+                                in_key = False
+                                shellcode_lines.append(line.strip())
+                            elif in_shellcode:
+                                if line.strip().endswith(')'):
+                                    shellcode_lines.append(line.strip())
+                                    in_shellcode = False
+                                elif line.strip():
+                                    shellcode_lines.append(line.strip())
+
+                        # Combine extracted lines
+                        if key_lines:
+                            shellcode_vba += ' '.join(key_lines) + '\n'
+                        if shellcode_lines:
+                            shellcode_vba += ' '.join(shellcode_lines) + '\n'
+
+                        output += f"[DEBUG] Parsed shellcode_vba length: {len(shellcode_vba)} bytes\n"
 
                         # Map loader selection to plugin parameter
                         loader_map = {
