@@ -95,23 +95,25 @@ class DllProxyPlugin(ErebusPlugin):
 
 
 if __name__ == "__main__":
-    print("Testing DLL Proxy Plugin...")
+    _plugin = DllProxyPlugin()
+    _metadata = _plugin.get_metadata()
+    print(f"[*] {_metadata.name} v{_metadata.version}")
+    print(f"[*] Category: {_metadata.category.value}")
+    print(f"[*] Description: {_metadata.description}")
+    print()
     
-    plugin = DllProxyPlugin()
+    # Display all registered functions
+    registered = _plugin.register()
+    registered_names = sorted(registered.keys()) if registered else []
+    print(f"[*] Registered functions ({len(registered_names)}):")
+    for func_name in registered_names:
+        print(f"    - {func_name}")
+    print()
     
-    metadata = plugin.get_metadata()
-    print(f"Plugin: {metadata.name} v{metadata.version}")
-    print(f"Category: {metadata.category.value}")
-    print(f"Description: {metadata.description}")
-    
-    is_valid, error = plugin.validate()
+    is_valid, error = _plugin.validate()
     if is_valid:
-        print("✓ Plugin validation passed - pefile library available")
+        print("[+] Validation passed - pefile library available")
     else:
-        print(f"✗ Plugin validation failed: {error}")
-    
-    print("\nRegistered functions:")
-    for func_name in plugin.register().keys():
-        print(f"  - {func_name}")
+        print(f"[-] Validation failed: {error}")
     
     print("\nTesting complete!")

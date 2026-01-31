@@ -155,17 +155,23 @@ class BatTriggerPlugin(ErebusPlugin):
 
 # Testing code
 if __name__ == "__main__":
-    print("Testing BAT Trigger Plugin...")
+    _plugin = BatTriggerPlugin()
+    _metadata = _plugin.get_metadata()
+    print(f"[*] {_metadata.name} v{_metadata.version}")
+    print(f"[*] Category: {_metadata.category.value}")
+    print(f"[*] Description: {_metadata.description}")
+    print()
     
-    plugin = BatTriggerPlugin()
+    # Display all registered functions
+    registered = _plugin.register()
+    registered_names = sorted(registered.keys()) if registered else []
+    print(f"[*] Registered functions ({len(registered_names)}):")
+    for func_name in registered_names:
+        print(f"    - {func_name}")
+    print()
     
-    metadata = plugin.get_metadata()
-    print(f"Plugin: {metadata.name} v{metadata.version}")
-    
-    is_valid, error = plugin.validate()
+    is_valid, error = _plugin.validate()
     if is_valid:
-        print("✓ Plugin validation passed")
+        print("[+] Validation passed")
     else:
-        print(f"✗ Plugin validation failed: {error}")
-    
-    print("Testing complete!")
+        print(f"[-] Validation failed: {error}")

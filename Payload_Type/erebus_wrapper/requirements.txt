@@ -12,3 +12,4 @@ lznt1
 jinja2
 pycdlib
 olefile
+openpyxl

