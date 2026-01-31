@@ -1883,7 +1883,8 @@ generated if none have been entered.""",
                         ))
             ######################### End of Decoy Section #########################
             ######################### MalDoc Creation Section #########################
-            if self.get_parameter("7.0 Create MalDoc"):
+            maldoc_mode = self.get_parameter("7.0 Create MalDoc")
+            if maldoc_mode != "None":
                 payload_dir = Path(agent_build_path) / "payload"
                 maldoc_type = self.get_parameter("7.1 MalDoc Type")
                 vba_trigger = self.get_parameter("7.3 VBA Execution Trigger")
@@ -1951,7 +1952,38 @@ generated if none have been entered.""",
                     if obfuscate:
                         vba_code = await self.obfuscate_vba(vba_code)
 
-                    if maldoc_type == "Create New":
+                    # Handle VBA Module Only export
+                    if maldoc_mode == "VBA Module Only":
+                        from erebus_wrapper.erebus.modules.plugin_payload_maldocs import PayloadMalDocsPlugin
+                        plugin = PayloadMalDocsPlugin()
+                        
+                        # Export as .bas file (importable VBA module)
+                        bas_output = payload_dir / f"{doc_name}_payload.bas"
+                        bas_path = plugin.export_vba_as_bas(
+                            vba_code=vba_code,
+                            output_path=str(bas_output),
+                            module_name=doc_name
+                        )
+                        
+                        # Also export as plain text for reference
+                        txt_output = payload_dir / f"{doc_name}_payload.txt"
+                        plugin.export_vba_as_text(vba_code, str(txt_output))
+                        
+                        success_msg = f"[+] Created VBA module for manual import: {bas_path.name}\n"
+                        success_msg += f"[*] .bas file can be imported into Excel via VBA Editor > File > Import\n"
+                        success_msg += f"[*] .txt file contains the raw VBA code for reference"
+                        
+                        output += success_msg + "\n"
+                        
+                        await SendMythicRPCPayloadUpdatebuildStep(
+                            MythicRPCPayloadUpdateBuildStepMessage(
+                                PayloadUUID=self.uuid,
+                                StepName="Creating MalDoc",
+                                StepStdout=success_msg,
+                                StepSuccess=True
+                            ))
+
+                    elif maldoc_type == "Create New":
                         # Create a new Excel document
                         excel_output = payload_dir / f"{doc_name}.xlsm"
                         excel_path = generate_excel_payload(
