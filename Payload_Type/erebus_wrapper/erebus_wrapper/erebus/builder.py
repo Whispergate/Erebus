@@ -1094,7 +1094,10 @@ generated if none have been entered.""",
                 payload_path = PurePath(agent_build_path) / "payload" / dll_file_name
                 payload_path = str(payload_path)
 
-                exports = await generate_proxies(dll_file=dll_target_path,dll_file_name=dll_file_name)
+                exports = await generate_proxies(dll_file=dll_target_path, dll_file_name=dll_file_name)
+
+                # Debug logging
+                output += f"[DEBUG] Generated exports ({len(exports) if exports else 0} chars):\n{exports[:500] if exports else 'None'}\n"
 
                 exports_list = {
                     "EXPORTS": exports
@@ -1106,15 +1109,16 @@ generated if none have been entered.""",
                 with open(dll_exports_path, "w") as file:
                     file.write(proxy_output)
 
-                # Check if the file size stayed the same as the template
-                if os.stat(dll_target_path).st_size >= 2688 or os.stat(dll_exports_path).st_size == 13:
+                # Validate that proxy.def was generated with actual exports
+                # The file should contain "EXPORTS" header (8 bytes) plus at least one export line
+                if not exports or len(exports.strip()) == 0 or os.stat(dll_exports_path).st_size <= 20:
                     response.status = BuildStatus.Error
-                    response.build_message = "Failed to proxy the given file."
+                    response.build_message = f"Failed to proxy the given file. No exports found or file too small ({os.stat(dll_exports_path).st_size} bytes)."
                     await SendMythicRPCPayloadUpdatebuildStep(
                         MythicRPCPayloadUpdateBuildStepMessage(
                         PayloadUUID=self.uuid,
                         StepName="Gathering DLL Exports for Hijacking",
-                        StepStdout="Failed to proxy the given file.",
+                        StepStdout=f"Failed to proxy the given file. Generated proxy.def is {os.stat(dll_exports_path).st_size} bytes.",
                         StepSuccess=False,
                     ))
                     return response
@@ -1166,9 +1170,6 @@ generated if none have been entered.""",
                     output += f"[stdout]\n{stdout.decode()}"
                 if stderr:
                     output += f"[stderr]\n{stderr.decode()}"
-
-                # Copy the compiled DLL to the payload path
-                shutil.copy(dst=payload_path, src=f"{hijack_dir_str}/bin/{dll_file_name}")
 
                 if os.path.exists(payload_path):
                     # response.payload = open(payload_path, "rb").read()
@@ -1559,7 +1560,11 @@ generated if none have been entered.""",
             ######################### Code Signing Section #########################
             if self.get_parameter("6.0 Codesign Loader"):
                 try:
-                    payload_path = Path(agent_build_path) / "payload" / "erebus.exe"
+                    if self.get_parameter("0.0 Main Payload Type") == "Loader":
+                        payload_path = Path(agent_build_path) / "payload" / "erebus.exe"
+                    else:
+                        payload_path = Path(agent_build_path) / "payload" / dll_file_name
+                        
 
                     if not payload_path.exists():
                         raise FileNotFoundError(f"Payload not found for signing at: {payload_path}")

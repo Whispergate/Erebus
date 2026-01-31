@@ -1,6 +1,6 @@
-CC = x86_64-w64-mingw32-gcc
-CFLAGS = -shared -DDLL -fPIC -fno-asynchronous-unwind-tables
-INCLUDES = $(PWD) -I/usr/x86_64-w64-mingw32/include
+CXX = x86_64-w64-mingw32-g++
+CXXFLAGS = -shared -DDLL -fPIC -fno-asynchronous-unwind-tables -static-libgcc -static-libstdc++
+INCLUDES = -I. -I/usr/x86_64-w64-mingw32/include
 LIBDIRS = -L/usr/x86_64-w64-mingw32/lib
 ENTRY_POINT = -e DllMain
 LIBS = -lkernel32 -lntdll
@@ -15,12 +15,12 @@ DLL_EXPORTS = $(TEMPLATE_PATH)/proxy.def
 all: $(OUTPUT_DLL)
 
 %.o: %.cpp
-	$(CC) $(CFLAGS) $(INCLUDES) -c $< -o $@
+	$(CXX) $(CXXFLAGS) $(INCLUDES) -c $< -o $@
 
-$(OUTPUT_DLL): $(DLL_EXPORTS)
-	$(CC) $(CFLAGS) $(INCLUDES) $(LIBDIRS) $(ENTRY_POINT) \
+$(OUTPUT_DLL): $(OBJECTS) $(DLL_EXPORTS)
+	$(CXX) $(CXXFLAGS) $(INCLUDES) $(LIBDIRS) $(ENTRY_POINT) \
 		-o $@ \
-		$(DLL_TEMPLATE) \
+		$(OBJECTS) \
 		$(DLL_EXPORTS) \
 		$(LIBS)
 
@@ -31,4 +31,3 @@ distclean: clean
 	rm -f $(OUTPUT_DLL)
 
 .PHONY: all clean distclean
-
