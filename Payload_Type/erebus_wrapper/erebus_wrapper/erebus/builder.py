@@ -175,7 +175,7 @@ class ErebusWrapper(PayloadType):
     agent_path = PurePath(".") / "erebus_wrapper"
     _agent_icon_path = Path(__file__).resolve().parent.parent / "Erebus.png"
     agent_icon_path = str(_agent_icon_path)
-    agent_code_path = agent_path / "agent_code"
+    agent_code_path = Path(__file__).resolve().parent.parent / "agent_code"
 
     build_parameters = [
         BuildParameter(
