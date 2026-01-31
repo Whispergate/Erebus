@@ -47,6 +47,12 @@ The Erebus wrapper is a comprehensive initial access toolkit designed to generat
 - Create LNK trigger with decoy execution
 - Sign with selected certificate
 
+### 4.1 Optional MalDocs (Excel)
+- Create a new XLSM document with embedded VBA payload
+- Or backdoor an existing Excel document (XLSM/XLAM/XLS)
+- Select VBA trigger (AutoOpen, OnClose, OnSave)
+- Build step name: `Creating MalDoc`
+
 ### 5. Delivery
 - Output final packaged payload
 
@@ -127,6 +133,15 @@ The Erebus wrapper is a comprehensive initial access toolkit designed to generat
 - **6.4 Codesign Spoof URL**: URL to clone cert from
 - **6.5 Codesign Cert**: PFX/P12 certificate file
 - **6.6 Codesign Cert Password**: Certificate password
+
+### MalDocs Options (Section 7.0-7.6)
+- **7.0 Create MalDoc**: Enable Excel maldoc generation
+- **7.1 MalDoc Type**: Create New or Backdoor Existing
+- **7.2 Excel Source File**: Upload Excel file to backdoor (XLSM/XLS/XLAM)
+- **7.3 VBA Execution Trigger**: AutoOpen, OnClose, or OnSave
+- **7.4 Excel Document Name**: Display name for created document
+- **7.5 Obfuscate VBA**: Obfuscate VBA code for evasion
+- **7.6 MalDoc Injection Type**: Command Execution or Shellcode Injection
 
 ## Adding Features
 

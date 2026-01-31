@@ -2,7 +2,7 @@
 title = "Plugin Development"
 chapter = false
 weight = 25
-pre = "<b>5. </b>"
+pre = "<b>4. </b>"
 +++
 
 ## Plugin Development Guide

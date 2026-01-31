@@ -181,6 +181,34 @@ Generates DLL proxy/hijack code for DLL sideloading.
 - C/C++ proxy generation
 - Function forwarding
 
+#### MalDocs (Excel) Plugin
+Creates or backdoors Excel documents (XLSM/XLAM/XLS) with embedded VBA payloads.
+
+**Functions:**
+- `generate_excel_payload()` - Create a new XLSM with embedded VBA payload
+- `backdoor_existing_excel()` - Inject VBA payload into an existing Excel file
+
+**Features:**
+- Supports XLSM/XLAM/XLS inputs
+- Multiple execution triggers (AutoOpen, OnClose, OnSave)
+- Optional VBA obfuscation
+- Command execution or shellcode injection via VBA
+
+**Requirements:**
+- `openpyxl` (required for Excel manipulation)
+
+**Build Step:**
+- `Creating MalDoc` - Generates or backdoors the Excel document during the build pipeline
+
+**Example Usage:**
+```python
+excel_path = generate_excel_payload(
+    payload_path="./payload",
+    vba_payload=vba_code,
+    output_path="./payload/Invoice.xlsm"
+)
+```
+
 ### CodeSigner Plugins
 
 #### CodeSigner Plugin

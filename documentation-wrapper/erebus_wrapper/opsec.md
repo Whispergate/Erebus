@@ -170,6 +170,33 @@ byte[] shellcode = new byte[] {
 
 ---
 
+## MalDocs (Excel VBA) OPSEC Considerations
+
+**Build Step**
+- The build pipeline logs MalDoc generation under the `Creating MalDoc` step.
+
+**Macro Security Prompts**
+- Office often blocks macros from the internet (Mark-of-the-Web).
+- Users may see warnings requiring explicit enablement.
+
+**File Type & Extension**
+- Prefer XLSM/XLAM for macro-enabled content.
+- Ensure the file name and content appear legitimate to reduce suspicion.
+
+**Execution Triggers**
+- AutoOpen/OnClose/OnSave triggers can be noisy if used indiscriminately.
+- Consider user workflow to avoid unexpected macro execution.
+
+**Evasion & Visibility**
+- VBA obfuscation may help evade simple signature-based detection.
+- Over-obfuscation can increase anomaly scores in modern detections.
+
+**Operational Risk**
+- Macro-based delivery is high-visibility in monitored environments.
+- Use only when tradecraft and campaign constraints allow.
+
+---
+
 ## Injection Methods & OPSEC
 
 ### Shellcode Loader Injection Types (C++)
