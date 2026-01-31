@@ -452,6 +452,187 @@ if __name__ == "__main__":
 - **Plugin Base:** `modules/plugin_base.py`
 - **Plugin Loader:** `modules/plugin_loader.py`
 
+## Plugin Validation System
+
+### Automatic Plugin Testing
+
+All plugins are automatically tested when the modules package is imported. Each plugin's `__init__.py` runs a comprehensive validation suite that:
+
+1. **Discovers all plugins** - Scans the `modules/` directory for `plugin_*.py` files
+2. **Validates each plugin** - Runs the plugin's validation test
+3. **Reports results** - Displays pass/fail status for each plugin
+4. **Sends Mythic RPC** - Optionally reports validation status to Mythic operation log
+
+### Standardized Plugin Test Block
+
+Every plugin now includes a standardized test block that runs when the plugin file is executed directly:
+
+```python
+if __name__ == "__main__":
+    _plugin = YourPluginName()
+    _metadata = _plugin.get_metadata()
+    print(f"[*] {_metadata.name} v{_metadata.version}")
+    print(f"[*] Category: {_metadata.category.value}")
+    print(f"[*] Description: {_metadata.description}")
+    print()
+    
+    # Display all registered functions
+    registered = _plugin.register()
+    registered_names = sorted(registered.keys()) if registered else []
+    print(f"[*] Registered functions ({len(registered_names)}):")
+    for func_name in registered_names:
+        print(f"    - {func_name}")
+    print()
+    
+    is_valid, error = _plugin.validate()
+    if is_valid:
+        print("[+] Validation passed")
+    else:
+        print(f"[-] Validation failed: {error}")
+```
+
+### Testing a Single Plugin
+
+To test an individual plugin:
+
+```bash
+cd erebus_wrapper/Payload_Type/erebus_wrapper/erebus_wrapper/erebus/modules
+python plugin_your_plugin_name.py
+```
+
+**Output:**
+```
+[*] Your Plugin Name v1.0.0
+[*] Category: payload
+[*] Description: Brief description of plugin functionality
+
+[*] Registered functions (3):
+    - function_name_1
+    - function_name_2
+    - function_name_3
+
+[+] Validation passed
+```
+
+### Viewing Plugin System Validation
+
+To view the complete plugin validation report:
+
+```bash
+cd erebus_wrapper/Payload_Type/erebus_wrapper/erebus_wrapper/erebus/modules
+python __init__.py
+```
+
+**Output:**
+```
+[*] Initializing Erebus Plugin System...
+[*] Plugin Validation: 10/11 passed
+    [+] plugin_archive_container
+    [+] plugin_container_clickonce
+    ...
+    [-] plugin_payload_maldocs: openpyxl not found - required for advanced Excel manipulation
+[!] Warning: 1 plugin(s) failed validation
+```
+
+### Mythic RPC Integration
+
+The plugin validation system can automatically report results to Mythic's operation event log. This is useful for tracking plugin health during development or in operational environments.
+
+#### Python RPC Call (Equivalent to Go Example)
+
+**Go Original:**
+```go
+mythicrpc.SendMythicRPCOperationEventLogCreate(mythicrpc.MythicRPCOperationEventLogCreateMessage{
+    OperationId:  &input.OperationID,
+    Message:      "Your message here",
+    MessageLevel: mythicrpc.MESSAGE_LEVEL_WARNING,
+})
+```
+
+**Python Equivalent:**
+```python
+from erebus_wrapper.erebus.modules import report_validation_results
+
+# In an async context (e.g., within builder.py):
+await report_validation_results(operation_id=input.OperationID)
+```
+
+#### Using the Plugin Validation API
+
+```python
+from erebus_wrapper.erebus.modules import (
+    get_initialization_results,
+    get_validated_plugins,
+    get_failed_plugins,
+    report_validation_results
+)
+
+# Get validation results
+results = get_initialization_results()
+print(f"Passed: {results['passed_count']}/{results['total']}")
+print(f"Failed: {results['failed_count']}")
+
+# Get specific plugin statuses
+passed_plugins = get_validated_plugins()
+failed_plugins = get_failed_plugins()
+
+# Report to Mythic (async)
+await report_validation_results(operation_id=1234)
+```
+
+#### Example Integration in builder.py
+
+```python
+import asyncio
+from mythic_container.PayloadBuilder import *
+from erebus_wrapper.erebus.modules import report_validation_results
+
+class ErebusBuilder(PayloadBuilder):
+    async def build(self) -> PayloadBuildStatus:
+        try:
+            # ... build logic ...
+            
+            # Report plugin health to Mythic
+            await report_validation_results(operation_id=self.operation_id)
+            
+            return PayloadBuildStatus(success=True, payload=output)
+        except Exception as e:
+            # Report failure
+            await report_validation_results(operation_id=self.operation_id)
+            return PayloadBuildStatus(success=False, error=str(e))
+```
+
+## Plugin Metadata and Registration
+
+### Metadata Structure
+
+All plugins expose metadata via the `get_metadata()` method:
+
+```python
+PluginMetadata(
+    name="plugin_friendly_name",
+    version="1.0.0",
+    category=PluginCategory.PAYLOAD,  # or CONTAINER, TRIGGER, CODESIGNER, etc.
+    description="Human-readable description of plugin functionality",
+    author="Your Name/Organization"
+)
+```
+
+### Registered Functions
+
+Plugins must implement a `register()` method that returns a dictionary mapping function names to callables:
+
+```python
+def register(self) -> Dict[str, Callable]:
+    return {
+        "function_name_1": self.function_1,
+        "function_name_2": self.function_2,
+        "function_name_3": self.function_3,
+    }
+```
+
+These functions are automatically discovered and made available to the builder.
+
 ## Summary
 
 The Erebus plugin system provides:
@@ -460,6 +641,8 @@ The Erebus plugin system provides:
 - ✅ Easy extensibility without core modifications
 - ✅ Dependency management
 - ✅ Validation and error handling
+- ✅ Standardized testing framework
+- ✅ Mythic RPC integration for operational visibility
 - ✅ Comprehensive documentation and examples
 
 To create a new plugin, simply copy the template, implement your functionality, and save it in the `modules/` directory.

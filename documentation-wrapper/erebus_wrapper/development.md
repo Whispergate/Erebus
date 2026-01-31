@@ -130,9 +130,41 @@ The Erebus wrapper is a comprehensive initial access toolkit designed to generat
 
 ## Adding Features
 
+### Plugin System
+
+Erebus uses an extensible plugin architecture for adding new functionality. For comprehensive plugin development documentation, see [Plugin Development]({{< relref "plugin-development.md" >}}).
+
+**Quick Start:**
+1. Copy `modules/plugin_example.py.template` to `modules/plugin_your_feature.py`
+2. Implement the three required methods: `get_metadata()`, `register()`, `validate()`
+3. Test your plugin: `python plugin_your_feature.py`
+4. The plugin system will automatically discover and validate your plugin
+
+**Key Features:**
+- ✅ Automatic plugin discovery
+- ✅ Built-in validation framework
+- ✅ Standardized test blocks for all plugins
+- ✅ Mythic RPC integration for operational reporting
+- ✅ Easy registration of plugin functions
+
+**Testing Your Plugin:**
+```bash
+# Test individual plugin
+cd erebus_wrapper/Payload_Type/erebus_wrapper/erebus_wrapper/erebus/modules
+python plugin_your_feature.py
+
+# Test entire plugin system
+python __init__.py
+
+# View comprehensive validation report
+python test_validation.py
+```
+
 ### Modules
-#### Module Template
+#### Module Template (Legacy)
 Folder Location: `erebus_wrapper/erebus/modules`
+
+**Note:** Modern modules are implemented as plugins. See [Plugin Development]({{< relref "plugin-development.md" >}}) for the current approach.
 
 ```python
 import pefile, asyncio

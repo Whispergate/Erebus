@@ -172,7 +172,8 @@ class ErebusWrapper(PayloadType):
 
     agent_type = AgentType.Wrapper
     agent_path = PurePath(".") / "erebus_wrapper"
-    agent_icon_path = agent_path / "Erebus.svg"
+    _agent_icon_path = agent_path / "Erebus.svg"
+    agent_icon_path = str(_agent_icon_path)
     agent_code_path = agent_path / "agent_code"
 
     build_parameters = [
