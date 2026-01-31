@@ -91,7 +91,8 @@ class MsiContainerPlugin(ErebusPlugin):
         use_admin: bool = False,
         action_type: str = "execute",
         action_args: str = None,
-        output_name: str = None
+        output_name: str = None,
+        decoy_path: pathlib.Path = None
     ) -> pathlib.Path:
         """
         Build a new MSI installer with embedded payload.
@@ -105,6 +106,7 @@ class MsiContainerPlugin(ErebusPlugin):
             action_type: Type of custom action (execute, script, dll-load, file-drop)
             action_args: Arguments for the custom action
             output_name: Custom output filename
+            decoy_path: Optional path to a decoy file for filename matching
             
         Returns:
             pathlib.Path: Path to the created MSI file
@@ -113,6 +115,11 @@ class MsiContainerPlugin(ErebusPlugin):
             RuntimeError: If MSI creation fails
         """
         container_msi = self._get_container_msi()
+        
+        # LOGIC ADJUSTMENT: Handle dynamic output naming based on decoy if present
+        if output_name is None and decoy_path is not None:
+             output_name = f"{decoy_path.name}.msi"
+
         return container_msi.build_msi(
             build_path=build_path,
             product_name=product_name,

