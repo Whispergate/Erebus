@@ -38,6 +38,10 @@ Erebus is a modern initial access wrapper aimed at decreasing the development to
 **Delivery & Evasion:**
   - Code Signing (Self-signed, spoofed, or legitimate certificates)
   - LNK Trigger Mechanisms (Shortcut-based execution chains)
+  - MalDocs (Excel) Support:
+    - VBA Module Export (.bas files for direct import into Excel)
+    - Full XLSM Generation (standalone Excel documents)
+    - 4 VBA Loader Techniques (VirtualAlloc, EnumLocales, QueueUserAPC, ProcessHollowing)
   - Decoy File Support (Social engineering with fake content)
   - Configurable Injection Parameters (Target process, injection type)
 

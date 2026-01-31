@@ -42,8 +42,14 @@ View the rendered documentation by clicking on **Docs -> Agent Documentation** i
 ## Roadmap
 ### Features
 - [ ] Execution Guardrails
-- [ ] Increased Modularity & Customisation Support (Templating)
 - [ ] Extended support for larger shellcodes (Apollo, Athena, etc.)
+- [x] Increased Modularity & Customisation Support (Templating)
 - [ ] Extended DLL Hijacking Shellcode Obfuscation Support (More decryption, decoding, and decompression support)
+  - [x] Decoding
+  - [ ] Decryption
+  - [x] Decompression
+- [ ] Complete XLSM/XLAM phishing payloads
+- [ ] LNK Triggers
+- [ ] Hidden MSI/ISO container files
 
 ### Bug Fixes

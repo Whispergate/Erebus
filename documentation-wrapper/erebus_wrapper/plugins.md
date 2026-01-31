@@ -182,46 +182,53 @@ Generates DLL proxy/hijack code for DLL sideloading.
 - Function forwarding
 
 #### MalDocs (Excel) Plugin
-Creates or backdoors Excel documents (XLSM/XLAM/XLS) with embedded VBA payloads.
+Creates or backdoors Excel documents (XLSM/XLAM/XLS) with embedded VBA payloads, or exports VBA modules for manual import.
 
 **Functions:**
 - `generate_excel_payload()` - Create a new XLSM with embedded VBA payload
 - `backdoor_existing_excel()` - Inject VBA payload into an existing Excel file
+- `export_vba_as_bas()` - Export VBA as .bas module file (importable into Excel)
+- `export_vba_as_text()` - Export VBA as plain text for reference
 - `generate_vba_loader_virtualalloc()` - Classic VirtualAlloc + CreateThread loader
 - `generate_vba_loader_enumlocales()` - EnumSystemLocalesA callback technique
 - `generate_vba_loader_queueuserapc()` - QueueUserAPC injection technique
 - `generate_vba_loader_process_hollowing()` - Process hollowing (notepad.exe host)
 
+**Export Modes (RECOMMENDED: VBA Module Only)**
+
+**VBA Module Only** (Default)
+   - Exports as `.bas` file that can be imported into any Excel document
+   - Import: Excel → Alt+F11 → File → Import → Select .bas file
+   - Maximum flexibility - works with any Excel document
+   - No OLE/compatibility issues
+   - Generates both `.bas` (importable) and `.txt` (reference) files
+   - **Disable**: No MalDoc generation if not needed
+
 **VBA Loader Techniques:**
 
 1. **VirtualAlloc + CreateThread** (Classic, Reliable)
-   - Allocates RWX memory with VirtualAlloc
-   - Copies shellcode with RtlMoveMemory
-   - Executes via CreateThread
-   - Most compatible and straightforward approach
+   - Most compatible, straightforward approach
+   - Works on all Office versions
 
 2. **EnumSystemLocalesA Callback** (Static Analysis Bypass)
-   - Uses API callback for shellcode execution
    - Bypasses some static analysis tools
-   - Lower detection rate than direct CreateThread
+   - Lower detection rate
 
 3. **QueueUserAPC Injection** (APC-based)
-   - Injects shellcode via Asynchronous Procedure Call
-   - Executes in current thread context
+   - No suspicious thread creation
    - Stealthier than CreateThread
 
 4. **Process Hollowing** (Remote Injection)
-   - Creates suspended notepad.exe process
-   - Injects shellcode with VirtualAllocEx/WriteProcessMemory
-   - Resumes thread to execute payload
-   - Most complex but highest evasion potential
+   - Highest evasion potential
+   - Complex but most stealthy
 
 **Features:**
 - Supports XLSM/XLAM/XLS inputs
 - Multiple execution triggers (AutoOpen, OnClose, OnSave)
 - Optional VBA obfuscation
-- Command execution or shellcode injection via VBA
-- Selectable loader techniques for different evasion scenarios
+- Command execution or shellcode injection
+- Selectable loader techniques
+- Direct .bas module export for maximum compatibility
 
 **Requirements:**
 - `openpyxl` (required for Excel manipulation)

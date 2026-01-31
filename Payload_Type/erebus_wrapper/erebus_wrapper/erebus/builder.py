@@ -310,17 +310,7 @@ enumdesktops (self)""",
         ),
 
         BuildParameter(
-            name = "0.10 Decoy File",
-            parameter_type = BuildParameterType.File,
-            description = """Upload a decoy file (PDF/XLSX/etc.).
-If one is not uploaded then an example file will be used.""",
-            hide_conditions = [
-                HideCondition(name="0.0 Main Payload Type", operand=HideConditionOperand.NotEQ, value="Loader"),
-            ]
-        ),
-
-        BuildParameter(
-            name="0.11 Trigger Type",
+            name="0.10 Decoy File",
             parameter_type=BuildParameterType.ChooseOne,
             description=f"Type of Trigger to toggle decoy and execution. LNK Unavailabe in {semver}",
             choices=["LNK", "BAT", "MSI", "ClickOnce"],
@@ -328,6 +318,27 @@ If one is not uploaded then an example file will be used.""",
             required=False,
             hide_conditions = [
                 HideCondition(name="0.0 Main Payload Type", operand=HideConditionOperand.NotEQ, value="Loader"),
+            ]
+        ),
+
+        BuildParameter(
+            name = "0.11 Decoy File Inclusion",
+            parameter_type = BuildParameterType.Boolean,
+            description = "Check whether you want the decoy file in the final payload or not",
+            default_value = False,
+            required=True,
+            hide_conditions = [
+                HideCondition(name="0.0 Main Payload Type", operand=HideConditionOperand.NotEQ, value="Loader"),
+            ]
+        ),
+
+        BuildParameter(
+            name = "0.12 Decoy File",
+            parameter_type = BuildParameterType.File,
+            description = """Upload a decoy file (PDF/XLSX/etc.).
+If one is not uploaded then an example file will be used.""",
+            hide_conditions = [
+                HideCondition(name="0.11 Decoy File Inclusion", operand=HideConditionOperand.EQ, value=False),
             ]
         ),
 
@@ -663,9 +674,10 @@ generated if none have been entered.""",
         # MalDocs - Excel Backdooring
         BuildParameter(
             name="7.0 Create MalDoc",
-            parameter_type=BuildParameterType.Boolean,
-            description="Create a malicious Excel document (XLSM) with embedded VBA payload",
-            default_value=False,
+            parameter_type=BuildParameterType.ChooseOne,
+            description="Export VBA payload as .bas module file for manual import into Excel or disable MalDoc generation",
+            choices=["None", "VBA Module Only"],
+            default_value="None",
             required=False,
         ),
 
@@ -677,7 +689,7 @@ generated if none have been entered.""",
             default_value="Create New",
             required=False,
             hide_conditions=[
-                HideCondition(name="7.0 Create MalDoc", operand=HideConditionOperand.EQ, value=False)
+                HideCondition(name="7.0 Create MalDoc", operand=HideConditionOperand.EQ, value="None")
             ]
         ),
 
@@ -687,7 +699,7 @@ generated if none have been entered.""",
             description="Upload an existing Excel file to backdoor (XLSM/XLS/XLAM)",
             required=False,
             hide_conditions=[
-                HideCondition(name="7.0 Create MalDoc", operand=HideConditionOperand.EQ, value=False),
+                HideCondition(name="7.0 Create MalDoc", operand=HideConditionOperand.EQ, value="None"),
                 HideCondition(name="7.1 MalDoc Type", operand=HideConditionOperand.NotEQ, value="Backdoor Existing")
             ]
         ),
@@ -700,7 +712,7 @@ generated if none have been entered.""",
             default_value="AutoOpen",
             required=False,
             hide_conditions=[
-                HideCondition(name="7.0 Create MalDoc", operand=HideConditionOperand.EQ, value=False)
+                HideCondition(name="7.0 Create MalDoc", operand=HideConditionOperand.EQ, value="None")
             ]
         ),
 
@@ -711,7 +723,7 @@ generated if none have been entered.""",
             default_value="Invoice",
             required=False,
             hide_conditions=[
-                HideCondition(name="7.0 Create MalDoc", operand=HideConditionOperand.EQ, value=False)
+                HideCondition(name="7.0 Create MalDoc", operand=HideConditionOperand.EQ, value="None")
             ]
         ),
 
@@ -722,7 +734,7 @@ generated if none have been entered.""",
             default_value=True,
             required=False,
             hide_conditions=[
-                HideCondition(name="7.0 Create MalDoc", operand=HideConditionOperand.EQ, value=False)
+                HideCondition(name="7.0 Create MalDoc", operand=HideConditionOperand.EQ, value="None")
             ]
         ),
 
@@ -734,7 +746,7 @@ generated if none have been entered.""",
             default_value="Command Execution",
             required=False,
             hide_conditions=[
-                HideCondition(name="7.0 Create MalDoc", operand=HideConditionOperand.EQ, value=False)
+                HideCondition(name="7.0 Create MalDoc", operand=HideConditionOperand.EQ, value="None")
             ]
         ),
 
@@ -746,7 +758,7 @@ generated if none have been entered.""",
             default_value="VirtualAlloc + CreateThread",
             required=False,
             hide_conditions=[
-                HideCondition(name="7.0 Create MalDoc", operand=HideConditionOperand.EQ, value=False),
+                HideCondition(name="7.0 Create MalDoc", operand=HideConditionOperand.EQ, value="None"),
                 HideCondition(name="7.6 MalDoc Injection Type", operand=HideConditionOperand.EQ, value="Command Execution")
             ]
         ),
@@ -953,7 +965,7 @@ generated if none have been entered.""",
     async def containerise_payload(self,agent_build_path):
         """Creates a container and adds all files generated from the payload function inside of the given archive/media"""
 
-        target_ext = f".{self.get_parameter('0.11 Trigger Type').lower()}"
+        target_ext = f".{self.get_parameter('0.10 Decoy File').lower()}"
 
         match(self.get_parameter("3.0 Container Type")):
             case "7z":
@@ -1822,52 +1834,53 @@ generated if none have been entered.""",
                     return response
 
             ######################### Creating Decoy Section #########################
-            decoy_dir = Path(agent_build_path) / "decoys"
-            decoy_file_uuid = self.get_parameter("0.10 Decoy File")
+            if self.get_parameter("0.11 Decoy File Inclusion"):
+                decoy_dir = Path(agent_build_path) / "decoys"
+                decoy_file_uuid = self.get_parameter("0.12 Decoy File")
 
-            if decoy_file_uuid:
-                try:
-                    file_resp = await SendMythicRPCFileGetContent(
-                        MythicRPCFileGetContentMessage(AgentFileId=decoy_file_uuid)
-                    )
+                if decoy_file_uuid:
+                    try:
+                        file_resp = await SendMythicRPCFileGetContent(
+                            MythicRPCFileGetContentMessage(AgentFileId=decoy_file_uuid)
+                        )
 
-                    file_name_resp = await SendMythicRPCFileSearch(
-                        MythicRPCFileSearchMessage(AgentFileID=decoy_file_uuid)
-                    )
-                    custom_filename = "decoy.pdf"
-                    if file_name_resp.Success and len(file_name_resp.Files) > 0:
-                        custom_filename = file_name_resp.Files[0].Filename
+                        file_name_resp = await SendMythicRPCFileSearch(
+                            MythicRPCFileSearchMessage(AgentFileID=decoy_file_uuid)
+                        )
+                        custom_filename = "decoy.pdf"
+                        if file_name_resp.Success and len(file_name_resp.Files) > 0:
+                            custom_filename = file_name_resp.Files[0].Filename
 
-                    if decoy_dir.exists():
-                        shutil.rmtree(decoy_dir)
-                    decoy_dir.mkdir(parents=True, exist_ok=True)
-                    custom_decoy_path = decoy_dir / custom_filename
-                    custom_decoy_path.write_bytes(file_resp.Content)
+                        if decoy_dir.exists():
+                            shutil.rmtree(decoy_dir)
+                        decoy_dir.mkdir(parents=True, exist_ok=True)
+                        custom_decoy_path = decoy_dir / custom_filename
+                        custom_decoy_path.write_bytes(file_resp.Content)
 
+                        await SendMythicRPCPayloadUpdatebuildStep(
+                            MythicRPCPayloadUpdateBuildStepMessage(
+                                PayloadUUID=self.uuid,
+                                StepName="Creating Decoy",
+                                StepStdout=f"Replaced default decoys with custom file: {custom_filename}",
+                                StepSuccess=True
+                            ))
+
+                    except Exception as e:
+                        await SendMythicRPCPayloadUpdatebuildStep(
+                            MythicRPCPayloadUpdateBuildStepMessage(
+                                PayloadUUID=self.uuid,
+                                StepName="Creating Decoy",
+                                StepStdout=f"Failed to process custom decoy: {str(e)}",
+                                StepSuccess=False
+                            ))
+                else:
                     await SendMythicRPCPayloadUpdatebuildStep(
                         MythicRPCPayloadUpdateBuildStepMessage(
                             PayloadUUID=self.uuid,
                             StepName="Creating Decoy",
-                            StepStdout=f"Replaced default decoys with custom file: {custom_filename}",
+                            StepStdout="Using default decoy files.",
                             StepSuccess=True
                         ))
-
-                except Exception as e:
-                    await SendMythicRPCPayloadUpdatebuildStep(
-                        MythicRPCPayloadUpdateBuildStepMessage(
-                            PayloadUUID=self.uuid,
-                            StepName="Creating Decoy",
-                            StepStdout=f"Failed to process custom decoy: {str(e)}",
-                            StepSuccess=False
-                        ))
-            else:
-                await SendMythicRPCPayloadUpdatebuildStep(
-                    MythicRPCPayloadUpdateBuildStepMessage(
-                        PayloadUUID=self.uuid,
-                        StepName="Creating Decoy",
-                        StepStdout="Using default decoy files.",
-                        StepSuccess=True
-                    ))
             ######################### End of Decoy Section #########################
             ######################### MalDoc Creation Section #########################
             if self.get_parameter("7.0 Create MalDoc"):
@@ -2018,7 +2031,7 @@ generated if none have been entered.""",
                 decoy_dir = Path(agent_build_path) / "decoys"
                 decoy_file = decoy_dir / "decoy.pdf"
 
-                trigger_type = self.get_parameter("0.11 Trigger Type")
+                trigger_type = self.get_parameter("0.12 Decoy File")
 
                 try:
                     trigger_path = ""
