@@ -1912,7 +1912,7 @@ generated if none have been entered.""",
                         )
                     
                     if obfuscate:
-                        vba_code = obfuscate_vba(vba_code)
+                        vba_code = await self.obfuscate_vba(vba_code)
 
                     if maldoc_type == "Create New":
                         # Create a new Excel document
