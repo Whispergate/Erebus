@@ -1,0 +1,263 @@
+"""
+Erebus Plugin Template
+Author: [Your Name]
+Description: [Brief description of what this plugin does]
+
+This is a template file that can be copied to create new Erebus plugins.
+Replace all [PLACEHOLDER] text with your actual implementation.
+
+Instructions:
+1. Copy this file to the modules directory
+2. Rename it to plugin_[your_plugin_name].py (e.g., plugin_my_container.py)
+3. Update the class name to match your plugin (e.g., MyContainerPlugin)
+4. Fill in all the [PLACEHOLDER] sections
+5. Implement your plugin functionality
+6. Test your plugin
+7. The plugin will be automatically discovered and loaded!
+"""
+
+import pathlib
+from typing import Dict, Callable, Optional, List
+
+# Import the plugin base classes
+try:
+    from .plugin_base import ErebusPlugin, PluginMetadata, PluginCategory
+except ImportError:
+    from plugin_base import ErebusPlugin, PluginMetadata, PluginCategory
+
+
+class [YourPluginName]Plugin(ErebusPlugin):
+    """
+    [Brief description of your plugin]
+    
+    [Longer description explaining what this plugin does, its purpose,
+    and any important usage notes]
+    """
+    
+    def __init__(self):
+        """
+        Initialize your plugin.
+        
+        Set up any instance variables, paths, or configuration here.
+        """
+        super().__init__()
+        
+        # Example: Setup paths relative to the modules directory
+        self.REPO_ROOT = pathlib.Path(__file__).resolve().parents[2]
+        self.AGENT_CODE = self.REPO_ROOT / "agent_code"
+        
+        # Add your initialization code here
+        # self.some_config = None
+        # self.some_cache = {}
+    
+    def get_metadata(self) -> PluginMetadata:
+        """
+        Return metadata about this plugin.
+        
+        This information is used by the plugin system for identification,
+        categorization, and management.
+        """
+        return PluginMetadata(
+            name="[your_plugin_name]",  # Unique identifier (lowercase, underscore-separated)
+            version="1.0.0",  # Semantic versioning
+            author="[Your Name]",  # Your name or organization
+            description="[Brief description of what this plugin does]",  # One-line description
+            category=PluginCategory.[CATEGORY],  # Choose: TRIGGER, CONTAINER, PAYLOAD, CODESIGNER, OTHER
+            enabled=True  # Set to False to disable this plugin
+        )
+    
+    def register(self) -> Dict[str, Callable]:
+        """
+        Register the functions this plugin provides.
+        
+        Return a dictionary mapping function names to the actual functions.
+        These functions will be available to the builder system.
+        
+        Example:
+            {
+                "my_function": self.my_function,
+                "another_function": self.another_function,
+            }
+        """
+        return {
+            "[function_name]": self.[method_name],
+            # Add more functions here as needed
+        }
+    
+    def validate(self) -> tuple[bool, Optional[str]]:
+        """
+        Validate that this plugin can run properly.
+        
+        Check for required dependencies, files, configurations, etc.
+        
+        Returns:
+            tuple[bool, Optional[str]]: (is_valid, error_message)
+                If valid: (True, None)
+                If invalid: (False, "description of what's wrong")
+        """
+        try:
+            # Example: Check if required Python packages are available
+            # import some_required_package
+            
+            # Example: Check if required files exist
+            # if not (self.AGENT_CODE / "required_file.txt").exists():
+            #     return (False, "Required file not found: required_file.txt")
+            
+            # If everything is okay
+            return (True, None)
+            
+        except ImportError as e:
+            return (False, f"Missing required dependency: {e}")
+        except Exception as e:
+            return (False, f"Validation error: {e}")
+    
+    def on_load(self):
+        """
+        Called when the plugin is loaded.
+        
+        Use this to perform any initialization that should happen
+        after the plugin is validated and ready to use.
+        """
+        print(f"[Plugin] [YourPluginName] loaded successfully")
+        
+        # Add any initialization code here
+        # Example: Load configuration, set up caches, etc.
+    
+    def on_unload(self):
+        """
+        Called when the plugin is unloaded.
+        
+        Use this to perform cleanup tasks like closing files,
+        releasing resources, etc.
+        """
+        # Add cleanup code here if needed
+        pass
+    
+    def get_dependencies(self) -> List[str]:
+        """
+        Return a list of other plugins this plugin depends on.
+        
+        The plugin system will ensure these plugins are loaded first.
+        
+        Returns:
+            List[str]: List of plugin names (from their metadata)
+        """
+        return [
+            # Example: "codesigner",  # If you need the codesigner plugin
+        ]
+    
+    def get_config_schema(self) -> Optional[Dict[str, any]]:
+        """
+        Return a JSON schema for plugin configuration (optional).
+        
+        If your plugin needs configuration, define the schema here.
+        This is optional and can return None if no configuration is needed.
+        """
+        return None
+        
+        # Example configuration schema:
+        # return {
+        #     "type": "object",
+        #     "properties": {
+        #         "setting_name": {
+        #             "type": "string",
+        #             "description": "Description of this setting",
+        #             "default": "default_value"
+        #         }
+        #     }
+        # }
+    
+    # ==================== Plugin Functions ====================
+    # 
+    # Add your plugin's actual functionality below this line.
+    # These are the functions you registered in the register() method.
+    #
+    
+    def [method_name](
+        self,
+        param1: str,
+        param2: int = 0,
+        optional_param: Optional[str] = None
+    ) -> pathlib.Path:
+        """
+        [Brief description of what this function does]
+        
+        Args:
+            param1: [Description of param1]
+            param2: [Description of param2] (default: 0)
+            optional_param: [Description of optional_param] (optional)
+            
+        Returns:
+            pathlib.Path: [Description of return value]
+            
+        Raises:
+            RuntimeError: [When this error might be raised]
+            ValueError: [When this error might be raised]
+        
+        Example:
+            >>> result = plugin.[method_name]("value", 5)
+            >>> print(result)
+        """
+        try:
+            # Your implementation goes here
+            
+            # Example structure:
+            # 1. Validate inputs
+            # if not param1:
+            #     raise ValueError("param1 cannot be empty")
+            
+            # 2. Set up paths and directories
+            # output_dir = self.AGENT_CODE / "output"
+            # output_dir.mkdir(parents=True, exist_ok=True)
+            
+            # 3. Perform the main work
+            # result = self._do_something(param1, param2)
+            
+            # 4. Return the result
+            # return result
+            
+            pass  # Remove this and add your implementation
+            
+        except Exception as e:
+            raise RuntimeError(f"[YourPluginName] error: {e}")
+    
+    # Add more methods as needed for your plugin's functionality
+    # Remember to register them in the register() method above!
+    
+    def _helper_method(self):
+        """
+        Private helper methods (prefixed with _) are not registered
+        and are only used internally within the plugin.
+        """
+        pass
+
+
+# ==================== Testing Code (Optional) ====================
+#
+# You can add test code here that runs when the file is executed directly.
+# This is useful for testing your plugin during development.
+#
+
+if __name__ == "__main__":
+    # Example test code
+    print("Testing [YourPluginName] Plugin...")
+    
+    # Create plugin instance
+    plugin = [YourPluginName]Plugin()
+    
+    # Check metadata
+    metadata = plugin.get_metadata()
+    print(f"Plugin: {metadata}")
+    
+    # Validate
+    is_valid, error = plugin.validate()
+    if is_valid:
+        print("✓ Plugin validation passed")
+    else:
+        print(f"✗ Plugin validation failed: {error}")
+    
+    # Test your functions here
+    # result = plugin.[method_name]("test", 123)
+    # print(f"Result: {result}")
+    
+    print("Testing complete!")

@@ -8,22 +8,73 @@ TODO:
     - LNK
         -   https://github.com/strayge/pylnk
 '''
-from erebus_wrapper.erebus.modules.payload_dll_proxy import generate_proxies
-from erebus_wrapper.erebus.modules.container_clickonce import build_clickonce
-from erebus_wrapper.erebus.modules.container_msi import (
-    build_msi,
-    hijack_msi,
-    add_multiple_files_to_msi,
-    ErebusActionTypes,
-    ErebusInstallerToolkit
-)
-from erebus_wrapper.erebus.modules.trigger_lnk import create_payload_trigger
-from erebus_wrapper.erebus.modules.trigger_bat import create_bat_payload_trigger
-from erebus_wrapper.erebus.modules.trigger_msi import create_msi_payload_trigger
-from erebus_wrapper.erebus.modules.trigger_clickonce import create_clickonce_trigger
-from erebus_wrapper.erebus.modules.container_archive import build_7z, build_zip
-from erebus_wrapper.erebus.modules.container_iso import build_iso
-from erebus_wrapper.erebus.modules.codesigner import self_sign_payload, get_remote_cert_details, sign_with_provided_cert
+
+from erebus_wrapper.erebus.modules.plugin_loader import get_plugin_loader
+
+_plugin_loader = get_plugin_loader()
+
+try:
+    from erebus_wrapper.erebus.modules.archive.payload_dll_proxy import generate_proxies
+except ImportError:
+    generate_proxies = _plugin_loader.get_function("generate_proxies")
+
+try:
+    from erebus_wrapper.erebus.modules.archive.container_clickonce import build_clickonce
+except ImportError:
+    build_clickonce = _plugin_loader.get_function("build_clickonce")
+
+try:
+    from erebus_wrapper.erebus.modules.archive.container_msi import (
+        build_msi,
+        hijack_msi,
+        add_multiple_files_to_msi,
+        ErebusActionTypes,
+        ErebusInstallerToolkit
+    )
+except ImportError:
+    build_msi = _plugin_loader.get_function("build_msi")
+    hijack_msi = _plugin_loader.get_function("hijack_msi")
+    add_multiple_files_to_msi = _plugin_loader.get_function("add_multiple_files_to_msi")
+
+try:
+    from erebus_wrapper.erebus.modules.archive.trigger_lnk import create_payload_trigger
+except ImportError:
+    create_payload_trigger = _plugin_loader.get_function("create_payload_trigger")
+
+try:
+    from erebus_wrapper.erebus.modules.archive.trigger_bat import create_bat_payload_trigger
+except ImportError:
+    create_bat_payload_trigger = _plugin_loader.get_function("create_bat_payload_trigger")
+
+try:
+    from erebus_wrapper.erebus.modules.archive.trigger_msi import create_msi_payload_trigger
+except ImportError:
+    create_msi_payload_trigger = _plugin_loader.get_function("create_msi_payload_trigger")
+
+try:
+    from erebus_wrapper.erebus.modules.archive.trigger_clickonce import create_clickonce_trigger
+except ImportError:
+    create_clickonce_trigger = _plugin_loader.get_function("create_clickonce_trigger")
+
+try:
+    from erebus_wrapper.erebus.modules.archive.container_archive import build_7z, build_zip
+except ImportError:
+    build_7z = _plugin_loader.get_function("build_7z")
+    build_zip = _plugin_loader.get_function("build_zip")
+
+try:
+    from erebus_wrapper.erebus.modules.archive.container_iso import build_iso
+except ImportError:
+    build_iso = _plugin_loader.get_function("build_iso")
+
+try:
+    from erebus_wrapper.erebus.modules.archive.codesigner import self_sign_payload, get_remote_cert_details, sign_with_provided_cert
+except ImportError:
+    self_sign_payload = _plugin_loader.get_function("self_sign_payload")
+    get_remote_cert_details = _plugin_loader.get_function("get_remote_cert_details")
+    sign_with_provided_cert = _plugin_loader.get_function("sign_with_provided_cert")
+
+# ==================== End Plugin System ====================
 
 from mythic_container.PayloadBuilder import *
 from mythic_container.MythicCommandBase import *
