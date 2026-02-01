@@ -170,7 +170,7 @@ class ErebusWrapper(PayloadType):
     wrapper = True
     wrapped_payloads = []
     c2_profiles = []
-    
+
     # Plugin validation flag - run only once at startup
     _validation_run = False
 
@@ -766,7 +766,7 @@ generated if none have been entered.""",
             ]
         ),
 
-    
+
         BuildParameter(
             name="9.0 Output Extension Source",
             parameter_type=BuildParameterType.ChooseOne,
@@ -976,7 +976,7 @@ generated if none have been entered.""",
     async def containerise_payload(self,agent_build_path):
         """Creates a container and adds all files generated from the payload function inside of the given archive/media"""
 
-        
+
         ext_source = self.get_parameter("9.0 Output Extension Source")
         if ext_source == "MalDoc":
             maldoc_mode = self.get_parameter("7.0 Create MalDoc")
@@ -1778,7 +1778,7 @@ generated if none have been entered.""",
                         payload_path = Path(agent_build_path) / "payload" / "erebus.exe"
                     else:
                         payload_path = Path(agent_build_path) / "payload" / dll_file_name
-                        
+
 
                     if not payload_path.exists():
                         raise FileNotFoundError(f"Payload not found for signing at: {payload_path}")
@@ -1907,7 +1907,7 @@ generated if none have been entered.""",
             ######################### End of Decoy Section #########################
             ######################### MalDoc Creation Section #########################
             maldoc_mode = self.get_parameter("7.0 Create MalDoc")
-            
+
             if maldoc_mode != "None" and self.get_parameter("9.0 Output Extension Source") == "Trigger":
                 await SendMythicRPCPayloadUpdatebuildStep(
                     MythicRPCPayloadUpdateBuildStepMessage(
@@ -1931,7 +1931,7 @@ generated if none have been entered.""",
                         # Use WScript.Shell to execute trigger binary and command
                         trigger_binary = self.get_parameter("0.8 Trigger Binary")
                         trigger_command = self.get_parameter("0.9 Trigger Command")
-                        
+
                         # Import the plugin function to generate command execution VBA
                         from erebus_wrapper.erebus.modules.plugin_payload_maldocs import PayloadMalDocsPlugin
                         plugin = PayloadMalDocsPlugin()
@@ -2027,7 +2027,7 @@ generated if none have been entered.""",
                             loader_type=loader_type,
                             target_process=target_process
                         )
-                    
+
                     if obfuscate:
                         vba_code = await self.obfuscate_vba(vba_code)
 
@@ -2035,7 +2035,7 @@ generated if none have been entered.""",
                     if maldoc_mode == "VBA Module Only":
                         from erebus_wrapper.erebus.modules.plugin_payload_maldocs import PayloadMalDocsPlugin
                         plugin = PayloadMalDocsPlugin()
-                        
+
                         # Export as .bas file (importable VBA module)
                         bas_output = payload_dir / f"{doc_name}_payload.bas"
                         bas_path = plugin.export_vba_as_bas(
@@ -2043,17 +2043,17 @@ generated if none have been entered.""",
                             output_path=str(bas_output),
                             module_name=doc_name
                         )
-                        
+
                         # Also export as plain text for reference
                         txt_output = payload_dir / f"{doc_name}_payload.txt"
                         plugin.export_vba_as_text(vba_code, str(txt_output))
-                        
+
                         success_msg = f"[+] Created VBA module for manual import: {bas_path.name}\n"
                         success_msg += f"[*] .bas file can be imported into Excel via VBA Editor > File > Import\n"
                         success_msg += f"[*] .txt file contains the raw VBA code for reference"
-                        
+
                         output += success_msg + "\n"
-                        
+
                         await SendMythicRPCPayloadUpdatebuildStep(
                             MythicRPCPayloadUpdateBuildStepMessage(
                                 PayloadUUID=self.uuid,
@@ -2070,7 +2070,7 @@ generated if none have been entered.""",
                             vba_payload=vba_code,
                             output_path=excel_output
                         )
-                        
+
                         success_msg = f"Created malicious Excel document: {excel_path.name}"
 
                     else:  # Backdoor Existing
@@ -2090,7 +2090,7 @@ generated if none have been entered.""",
                         file_name_resp = await SendMythicRPCFileSearch(
                             MythicRPCFileSearchMessage(AgentFileID=excel_uuid)
                         )
-                        
+
                         original_filename = "document.xlsm"
                         if file_name_resp.Success and len(file_name_resp.Files) > 0:
                             original_filename = file_name_resp.Files[0].Filename
@@ -2102,7 +2102,7 @@ generated if none have been entered.""",
                         # Backdoor the Excel file
                         output_name = f"{Path(original_filename).stem}_backdoored.xlsm"
                         excel_output = payload_dir / output_name
-                        
+
                         excel_path = backdoor_existing_excel(
                             source_excel=str(temp_excel),
                             vba_payload=vba_code,
@@ -2136,7 +2136,7 @@ generated if none have been entered.""",
 
             ######################### End of MalDoc Section #########################
             ######################### Trigger Generation Section #########################
-            
+
             if self.get_parameter("0.0 Main Payload Type") == "Loader" and self.get_parameter("9.0 Output Extension Source") == "MalDoc":
                 await SendMythicRPCPayloadUpdatebuildStep(
                     MythicRPCPayloadUpdateBuildStepMessage(
