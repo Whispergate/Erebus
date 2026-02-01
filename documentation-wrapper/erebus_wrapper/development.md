@@ -145,35 +145,44 @@ The comprehensive build workflow for Erebus is shown below:
 ### 2. Shellcode Obfuscation
 - **Input**: Raw shellcode binary from Mythic
 - **Compression**: LZNT1, RLE, or NONE
-- **Encryption**: RC4, XOR
+- **Encryption**: AES128_CBC, AES256_CBC, AES256_ECB, RC4, or XOR
+  - Additional options (TODO): CHACHA20, SALSA20, XOR_COMPLEX
 - **Encoding**: ALPHA32, ASCII85, BASE64, WORDS256, or NONE
 - **Output Format**: C, CSharp, or Raw
+  - Additional formats available for custom loaders: Nim, Go, Python, PowerShell, VBA, VBScript, Rust, JavaScript, Zig
 
 ### 3. Loader Compilation
 - **Shellcode Loader**: C++ executable/DLL with configurable injection
 - **ClickOnce**: .NET application with manifests
 - Configuration applied based on user parameters
 
-### 4. Optional Container & Trigger
+### 4. Optional Code Signing
+- Sign with selected certificate (self-signed, spoofed, or provided)
+- Build step name: `Sign Shellcode Loader`
+
+### 5. Optional Trigger or MalDoc
+- **Trigger Option**: Create LNK, BAT, MSI, or ClickOnce trigger with decoy execution
+  - Build step name: `Adding Trigger`
+- **MalDoc Option**: Create or backdoor Excel document with VBA payload
+  - Build step name: `Creating MalDoc`
+  - Supports AutoOpen, OnClose, or OnSave triggers
+  - VBA loader techniques: VirtualAlloc, EnumLocales, QueueUserAPC, or ProcessHollowing
+
+### 6. Containerization
 - Package in ISO, 7z, ZIP, or MSI
-- Create LNK trigger with decoy execution
-- Sign with selected certificate
+- Build step name: `Containerising`
 
-### 4.1 Optional MalDocs (Excel)
-- Create a new XLSM document with embedded VBA payload
-- Or backdoor an existing Excel document (XLSM/XLAM/XLS)
-- Select VBA trigger (AutoOpen, OnClose, OnSave)
-- Build step name: `Creating MalDoc`
-
-### 5. Delivery
+### 7. Delivery
 - Output final packaged payload
 
 ## Build Parameters Reference
 
 ### Main Payload Selection (Section 0.0-0.2)
 - **0.0 Main Payload Type**: Choose "Loader" or "Hijack"
-- **0.1 Loader Type**: Select "Shellcode Loader" or "ClickOnce" (Loader only)
-- **0.2 Loader Format**: Select "EXE" or "DLL" (Shellcode Loader Only)
+  - **Loader**: Uses Shellcode Loader (C++) or ClickOnce (.NET) - requires Raw shellcode format for Loader
+  - **Hijack**: Uses DLL proxy hijacking - requires C format shellcode
+- **0.1 Loader Type**: Select "Shellcode Loader" or "ClickOnce" (visible when Main Payload Type = Loader)
+- **0.1 Loader Type** (alternate): Select "EXE" or "DLL" (visible when Main Payload Type = Shellcode Loader)
 
 ### Shellcode Loader Configuration (Section 0.3-0.5)
 - **0.3 Loader Build Configuration**: Debug or Release build
@@ -185,8 +194,9 @@ The comprehensive build workflow for Erebus is shown below:
   - 5 = PoolParty (Worker Factory thread pool injection - Remote)
 - **0.5 Shellcode Loader - Target Process**: Process name for remote injection
 
-### ClickOnce Configuration (Section 0.3 & 0.6-0.7)
+### ClickOnce Configuration (Section 0.3-0.7)
 - **0.3 ClickOnce Build Configuration**: Debug or Release build
+- **0.4 ClickOnce RID**: Runtime Identifier (default: win-x64) for .NET publishing
 - **0.6 ClickOnce - Injection Method**:
   - createfiber: Fiber-based self-injection
   - earlycascade: Early Bird APC injection (remote)
@@ -194,23 +204,52 @@ The comprehensive build workflow for Erebus is shown below:
   - classic: Classic CreateRemoteThread injection (remote)
   - enumdesktops: EnumDesktops callback injection (self)
   - appdomain: AppDomain injection for .NET assemblies (self)
-- **0.7 ClickOnce - Target Process**: Target process for remote injection
+- **0.7 ClickOnce - Target Process**: Target process for remote injection (default: explorer.exe)
+  - Only visible for remote injection methods
 
 ### DLL Hijacking (Section 1.0)
-- **1.0 DLL Hijacking**: Upload DLL for proxy-based hijacking (requires C format shellcode)
+- **1.0 DLL Hijacking**: Upload DLL for proxy-based hijacking
+  - **Requirements**: Shellcode Format must be set to C
+  - **Note**: v0.0.1 only supports XOR encryption - does not currently support encoded or compressed payloads
 
-### Trigger Configuration (Section 0.8-0.11)
-- **0.8 Trigger Binary**: Executable to run when trigger is activated
-- **0.9 Trigger Command**: Command arguments to pass
-- **0.12 Decoy File**: Optional decoy file (PDF/XLSX/etc.)
-- **0.10 Trigger Type**: Select trigger mechanism - LNK (default), BAT, or MSI
+### Output Extension Source (Section 0.8)
+- **0.8 Output Extension Source**: Choose whether the visible file extension comes from Trigger or MalDoc
+  - Trigger: Use LNK/BAT/MSI/ClickOnce trigger files
+  - MalDoc: Use Excel document with VBA payload
+
+### Trigger Configuration (Section 0.9-0.9b)
+- **0.9 Trigger Type**: Select trigger mechanism - LNK, BAT, MSI, or ClickOnce
+  - Only visible when Output Extension Source = Trigger
+- **0.9a Trigger Binary**: Executable to run when trigger is activated (default: C:\Windows\System32\conhost.exe)
+  - Hidden for MSI and ClickOnce triggers
+- **0.9b Trigger Command**: Command arguments to pass (default: --headless cmd.exe /Q /c erebus.exe | decoy.pdf)
+  - Hidden for MSI and ClickOnce triggers
+
+### MalDoc Configuration (Section 0.9-0.9g)
+- **0.9 Create MalDoc**: None, Create/Backdoor Excel, or VBA Module Only
+  - Only visible when Output Extension Source = MalDoc
+- **0.9a MalDoc Type**: Create New or Backdoor Existing
+- **0.9b Excel Source File**: Upload existing Excel file to backdoor (XLSM/XLS/XLAM)
+  - Only visible when MalDoc Type = Backdoor Existing
+- **0.9c VBA Execution Trigger**: AutoOpen, OnClose, or OnSave (default: AutoOpen)
+- **0.9d Excel Document Name**: Name/title for Excel document (default: Invoice)
+- **0.9e Obfuscate VBA**: Boolean - obfuscate VBA code for evasion (default: True)
+- **0.9f MalDoc Injection Type**: Command Execution or Shellcode Injection
+- **0.9g VBA Loader Technique**: VirtualAlloc + CreateThread, EnumSystemLocalesA Callback, QueueUserAPC Injection, or Process Hollowing
+  - Only visible when MalDoc Injection Type = Shellcode Injection
+
+### Decoy File (Section 0.13)
+- **0.13 Decoy File Inclusion**: Boolean - include decoy file in final payload (default: False)
+- **0.13 Decoy File**: Upload decoy file (PDF/XLSX/etc.) - if none uploaded, example file is used
 
 ### Shellcrypt Options (Section 2.0-2.4)
 - **2.0 Compression Type**: LZNT1, RLE, or NONE
-- **2.1 Encryption Type**: Select encryption algorithm
-- **2.2 Encryption Key**: Custom key or auto-generate
+- **2.1 Encryption Type**: AES128_CBC, AES256_CBC, AES256_ECB, RC4, or XOR
+  - Note: CHACHA20, SALSA20, and XOR_COMPLEX are currently disabled (TODO: Add decryption support to loaders)
+- **2.2 Encryption Key**: Custom key or "NONE" for auto-generate
 - **2.3 Encoding Type**: ALPHA32, ASCII85, BASE64, WORDS256, or NONE
-- **2.4 Shellcode Format**: Output format for obfuscated shellcode
+- **2.4 Shellcode Format**: C, CSharp, or Raw
+  - Note: Nim, Go, Python, PowerShell, VBA, VBScript, Rust, JavaScript, and Zig formats commented out (uncomment for custom loaders)
 
 ### Container Options (Section 3.0-3.2)
 - **3.0 Container Type**: ISO, 7z, ZIP, or MSI
@@ -247,19 +286,7 @@ The comprehensive build workflow for Erebus is shown below:
 - **6.5 Codesign Cert**: PFX/P12 certificate file
 - **6.6 Codesign Cert Password**: Certificate password
 
-### MalDocs Options (Section 7.0-7.6)
-- **7.0 Create MalDoc**: Enable Excel maldoc generation
-- **7.1 MalDoc Type**: Create New or Backdoor Existing
-- **7.0 Create MalDoc**: Export VBA Module or Disable
-  - **Disable**: No MalDoc generation
-  - **VBA Module Only**: Export as .bas file for manual import (RECOMMENDED) - provides .bas and .txt files
-- **7.1 MalDoc Type**: Create New or Backdoor Existing
-- **7.2 Excel Source File**: Upload Excel file to backdoor (XLSM/XLS/XLAM)
-- **7.3 VBA Execution Trigger**: AutoOpen, OnClose, or OnSave
-- **7.4 Excel Document Name**: Display name for created document or module
-- **7.5 Obfuscate VBA**: Obfuscate VBA code for evasion
-- **7.6 MalDoc Injection Type**: Command Execution or Shellcode Injection
-- **7.7 VBA Loader Technique**: VirtualAlloc (classic), EnumLocales (callback), QueueUserAPC (APC), or ProcessHollowing (remote injection)
+
 
 #### VBA Module Import Instructions
 
@@ -446,19 +473,38 @@ During the build process:
 
 1. **Shellcode Obfuscation**: Raw shellcode is processed through shellcrypt with user options
 2. **Loader Configuration**:
-   - `config.hpp` template is rendered with injection type and target process
-   - Written to `Erebus.Loader/include/config.hpp`
-   - `InjectionConfig.cs` template is rendered with injection method and target process
-   - Encryption key is extracted from obfuscation and included
-   - Written to `Erebus.ClickOnce/InjectionConfig.cs`
+   - **Shellcode Loader (C++)**:
+     - `config.hpp` template is rendered with injection type and target process
+     - Written to `Erebus.Loader/include/config.hpp`
+     - Compiled using CMake with specified build configuration
+   - **ClickOnce (.NET)**:
+     - `InjectionConfig.cs` template is rendered with injection method and target process
+     - Encryption key extracted from obfuscation and included as byte array
+     - Written to `Erebus.ClickOnce/InjectionConfig.cs`
+     - Compiled using Makefile with CONFIG and RID parameters
+     - Makefile targets:
+       - `publish`: Builds release binary and runs cleanup script
+       - `release`: Publishes with PublishSingleFile, SelfContained, and PublishTrimmed
+       - `cleanup`: Removes debug symbols and unnecessary runtime files
 3. **Compilation**: Loaders are compiled with their respective configurations
-4. **Trigger Setup**: Based on selected trigger type:
+   - Output directory for ClickOnce: `bin/{CONFIG}/{TFM}/{RID}/publish`
+   - All debug symbols (.pdb files) removed by cleanup script
+4. **Trigger Setup** (if Output Extension Source = Trigger):
    - **LNK Trigger**: Creates .lnk shortcut that executes trigger binary with command arguments and displays decoy
    - **BAT Trigger**: Generates batch script that executes payload and shows decoy file
    - **MSI Trigger**: Embeds trigger into MSI package with execution conditions
-    - **ClickOnce Trigger**: Creates ClickOnce deployment manifests for trusted code execution (See: https://specterops.io/blog/2023/06/07/less-smartscreen-more-caffeine-abusing-clickonce-for-trusted-code-execution/)
-5. **Containerization**: Final payload is packaged into selected container format
-6. **Code Signing**: (Optional) Payload is signed with certificate
+   - **ClickOnce Trigger**: Creates ClickOnce deployment manifests for trusted code execution
+     - Generates .application deployment manifest (entry point)
+     - Generates .exe.manifest application manifest (assembly identity)
+     - Calculates SHA256 hashes and file sizes for integrity verification
+     - Reference: https://specterops.io/blog/2023/06/07/less-smartscreen-more-caffeine-abusing-clickonce-for-trusted-code-execution/
+5. **MalDoc Creation** (if Output Extension Source = MalDoc):
+   - Creates new XLSM document or backdoors existing Excel file
+   - Embeds VBA payload with selected execution trigger (AutoOpen/OnClose/OnSave)
+   - Applies VBA obfuscation if enabled
+   - Supports Command Execution or Shellcode Injection modes
+6. **Containerization**: Final payload is packaged into selected container format
+7. **Code Signing**: (Optional) Payload is signed with certificate
 
 ## Trigger System Details
 

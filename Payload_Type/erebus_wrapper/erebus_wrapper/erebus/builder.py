@@ -1411,8 +1411,10 @@ generated if none have been entered.""",
 
                 # Load and render the config template
                 config_template = environment.get_template("config.hpp")
+                # Escape backslashes for C++ wide string literal
+                target_process = self.get_parameter("0.5 Shellcode Loader - Target Process").replace("\\", "\\\\")
                 config_data = {
-                    "TARGET_PROCESS": self.get_parameter("0.5 Shellcode Loader - Target Process"),
+                    "TARGET_PROCESS": target_process,
                     "INJECTION_TYPE": self.get_parameter("0.4 Shellcode Loader - Injection Type"),
                     "ENCRYPTION_TYPE": encryption_type_value,
                     "ENCRYPTION_KEY": encryption_key_bytes,
@@ -1501,8 +1503,10 @@ generated if none have been entered.""",
                     try:
                         # Load and render the config template
                         config_template = environment.get_template("config.hpp")
+                        # Escape backslashes for C++ wide string literal
+                        target_process = self.get_parameter("0.5 Shellcode Loader - Target Process").replace("\\", "\\\\")
                         config_data = {
-                            "TARGET_PROCESS": self.get_parameter("0.5 Shellcode Loader - Target Process"),
+                            "TARGET_PROCESS": target_process,
                             "INJECTION_TYPE": self.get_parameter("0.4 Shellcode Loader - Injection Type"),
                             "ENCRYPTION_TYPE": encryption_type_value,
                             "ENCRYPTION_KEY": encryption_key_bytes,
