@@ -495,9 +495,9 @@ NOTE: ({semver}) Only supports XOR for now. Does not (currently) support encoded
             parameter_type = BuildParameterType.ChooseOne,
             description = "Choose an encryption type for the shellcode.",
             choices = [
-                # "AES128_CBC",
-                # "AES256_CBC",
-                # "AES256_ECB",
+                "AES128_CBC",
+                "AES256_CBC",
+                "AES256_ECB",
                 # "CHACHA20",
                 # "SALSA20",
                 "RC4",
