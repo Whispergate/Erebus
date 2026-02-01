@@ -1242,11 +1242,9 @@ generated if none have been entered.""",
                         MythicRPCPayloadUpdateBuildStepMessage(
                         PayloadUUID=self.uuid,
                         StepName="Shellcode Obfuscation",
-                        StepStdout="Obfuscating Shellcode - Continuing to Shellcode Loader",
+                        StepStdout="Obfuscated Shellcode - Continuing to Next Step",
                         StepSuccess=True,
                     ))
-                    # Remove this line to continue to the next exec cycle (Triggers, Containers, etc.)
-                    # return response
                 else:
                     response.status = BuildStatus.Success
                     response.build_message = "Shellcode Generated!"
@@ -1254,7 +1252,7 @@ generated if none have been entered.""",
                         MythicRPCPayloadUpdateBuildStepMessage(
                         PayloadUUID=self.uuid,
                         StepName="Shellcode Obfuscation",
-                        StepStdout="Obfuscating Shellcode - Continuing to DLL Loader",
+                        StepStdout="Obfuscated Shellcode - Continuing to Next Step",
                         StepSuccess=True,
                     ))
 
