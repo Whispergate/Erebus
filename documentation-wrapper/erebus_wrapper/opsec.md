@@ -2,7 +2,7 @@
 title = "OPSEC"
 chapter = false
 weight = 15
-pre = "<b>2. </b>"
+pre = "<b>1. </b>"
 +++
 
 ## Obfuscation & Security Considerations

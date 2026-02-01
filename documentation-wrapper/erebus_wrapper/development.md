@@ -2,7 +2,7 @@
 title = "Development"
 chapter = false
 weight = 15
-pre = "<b>1. </b>"
+pre = "<b>2. </b>"
 +++
 
 ## Project Overview
@@ -22,7 +22,119 @@ The Erebus wrapper is a comprehensive initial access toolkit designed to generat
 
 ## High Level Flow Chart
 
-![High Level Flow Chart of Erebus' Workflow](/wrappers/erebus_wrapper/flow.png)
+The comprehensive build workflow for Erebus is shown below:
+
+```
+                            ┌─────────────────────┐
+                            │   Start Build       │
+                            └──────────┬──────────┘
+                                       │
+                            ┌──────────▼──────────┐
+                            │  Input Shellcode    │
+                            │   from Mythic       │
+                            └──────────┬──────────┘
+                                       │
+                         ┌─────────────▼──────────────┐
+                         │  Main Payload Type?        │
+                         │  Loader / Hijack           │
+                         └──┬──────────────────────┬──┘
+                    ┌───────┘                      └────────┐
+                    │                                       │
+        ┌───────────▼──────────┐             ┌──────────────▼───────────┐
+        │  Loader Type?        │             │  DLL Hijacking Config    │
+        │  Shellcode/ClickOnce │             │  - Upload DLL            │
+        └──┬──────────────┬────┘             │  - Create Proxy          │
+           │              │                  └──────────────┬───────────┘
+    ┌──────▼────┐  ┌──────▼─────┐                           │
+    │Shellcode  │  │ClickOnce   │                           │
+    │Loader Cfg │  │Cfg         │                           │
+    │- Injection│  │- Method    │                           │
+    │- Target   │  │- Target    │                           │
+    └──────┬────┘  └──────┬─────┘                           │
+           │              │                                 │
+           └──────────────┼─────────────────────────────────┘
+                          │
+         ┌────────────────▼─────────────────┐
+         │  Shellcode Obfuscation           │
+         │  (Shellcrypt)                    │
+         │  ┌─────────────────────────────┐ │
+         │  │ Compression: LZNT1/RLE/NONE │ │
+         │  │ Encryption: AES*/CHACHA20   │ │
+         │  │ Encoding: ALPHA32/BASE64    │ │
+         │  └─────────────────────────────┘ │
+         └────────────────┬─────────────────┘
+                          │
+           ┌──────────────▼───────────────┐
+           │  Output Format?              │
+           │  C/CSharp/Python/Go/Nim...   │
+           └────────────────┬─────────────┘
+                            │
+             ┌──────────────▼───────────────┐
+             │  Obfuscated Shellcode        │
+             │  Ready                       │
+             └────────────────┬─────────────┘
+                              │
+               ┌──────────────▼───────────────┐
+               │  Compilation Path?           │
+               │  Shellcode/ClickOnce/Hijack  │
+               └──┬─────────────────┬─────┬───┘
+         ┌────────┘                 │     └───────┐
+         │                          │             │
+    ┌────▼────────┐  ┌──────────────▼───┐  ┌──────▼──────┐
+    │ Compile C++ │  │Compile .NET      │  │Compile DLL  │
+    │ Shellcode   │  │ClickOnce         │  │ Proxy       │
+    │ Loader      │  │                  │  │             │
+    └────┬────────┘  └──────────┬───────┘  └──────┬──────┘
+         │                      │                 │
+         └──────────────┬───────┴─────────────────┘
+                        │
+                 ┌──────▼──────────┐
+                 │ Payload         │
+                 │ Compiled        │
+                 └──────┬──────────┘
+                        │
+              ┌─────────▼──────────┐
+              │ Sign Payload?      │
+              │ Self/Spoof/Provide │
+              └──────────┬─────────┘
+                         │
+              ┌──────────▼──────────┐
+              │ Add Trigger?        │
+              │ LNK/BAT/MSI/CO      │
+              └──────────┬──────────┘
+                         │
+            ┌────────────▼────────────┐
+            │ Package Container?      │
+            │ ISO/7z/ZIP/MSI          │
+            └──────────┬──────────────┘
+                       │
+             ┌─────────▼──────────┐
+             │ Create MalDoc?     │
+             │ New/Backdoor       │
+             └──────────┬─────────┘
+                        │
+             ┌──────────▼─────────┐
+             │ Output Final       │
+             │ Payload            │
+             └──────────┬─────────┘
+                        │
+                 ┌──────▼────────┐
+                 │ Build         │
+                 │ Complete      │
+                 └───────────────┘
+```
+
+**Build Process Stages:**
+
+1. **Input** → Receive shellcode from Mythic C2
+2. **Configuration** → Select payload type and loader configuration
+3. **Obfuscation** → Apply compression, encryption, and encoding
+4. **Compilation** → Compile selected loader with obfuscated shellcode
+5. **Signing** → Optional code signing (self-signed, spoofed, or provided)
+6. **Triggering** → Add execution trigger (LNK, BAT, MSI, or ClickOnce)
+7. **Packaging** → Container the payload (ISO, 7z, ZIP, or MSI)
+8. **MalDocs** → Optional Excel document generation or injection
+9. **Output** → Final packaged payload ready for delivery
 
 ## Build Workflow
 
@@ -33,9 +145,9 @@ The Erebus wrapper is a comprehensive initial access toolkit designed to generat
 ### 2. Shellcode Obfuscation
 - **Input**: Raw shellcode binary from Mythic
 - **Compression**: LZNT1, RLE, or NONE
-- **Encryption**: AES128_CBC, AES256_CBC, AES256_ECB, CHACHA20, SALSA20, XOR, XOR_COMPLEX
+- **Encryption**: RC4, XOR
 - **Encoding**: ALPHA32, ASCII85, BASE64, WORDS256, or NONE
-- **Output Format**: C, CSharp, Nim, Go, Python, PowerShell, VBA, VBScript, Rust, JavaScript, Zig, or Raw
+- **Output Format**: C, CSharp, or Raw
 
 ### 3. Loader Compilation
 - **Shellcode Loader**: C++ executable/DLL with configurable injection
@@ -81,6 +193,7 @@ The Erebus wrapper is a comprehensive initial access toolkit designed to generat
   - poolparty: Worker Factory thread pool injection (remote)
   - classic: Classic CreateRemoteThread injection (remote)
   - enumdesktops: EnumDesktops callback injection (self)
+  - appdomain: AppDomain injection for .NET assemblies (self)
 - **0.7 ClickOnce - Target Process**: Target process for remote injection
 
 ### DLL Hijacking (Section 1.0)

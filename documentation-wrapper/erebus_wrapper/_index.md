@@ -16,18 +16,19 @@ Erebus is a modern initial access wrapper aimed at decreasing the development to
 
 **Shellcode Obfuscation Pipeline:**
   - Compression: LZNT1, RLE, or None
-  - Encryption: AES variants, CHACHA20, SALSA20, XOR variants
+  - Encryption: RC4, XOR
   - Encoding: BASE64, ALPHA32, ASCII85, WORDS256
-  - Multiple output formats (C, C#, Python, PowerShell, Nim, Go, Rust, JavaScript, Zig, Raw)
+  - Output formats: C, C#, Raw
 
 **Injection Methods:**
-  - NtQueueApcThread (APC injection)
-  - NtMapViewOfSection (Section mapping)
-  - CreateFiber (Self-injection)
-  - EarlyCascade (Early Bird APC)
-  - PoolParty (Worker Factory)
+  - NtQueueApcThread
+  - NtMapViewOfSection
+  - CreateFiber
+  - EarlyCascade
+  - PoolParty
   - Classic CreateRemoteThread
   - EnumDesktops callback injection
+  - AppDomain Injection
 
 **Container Formats:**
   - ISO (Bootable media with optional autorun)
@@ -40,7 +41,6 @@ Erebus is a modern initial access wrapper aimed at decreasing the development to
   - LNK Trigger Mechanisms (Shortcut-based execution chains)
   - MalDocs (Excel) Support:
     - VBA Module Export (.bas files for direct import into Excel)
-    - Full XLSM Generation (standalone Excel documents)
     - 4 VBA Loader Techniques (VirtualAlloc, EnumLocales, QueueUserAPC, ProcessHollowing)
   - Decoy File Support (Social engineering with fake content)
   - Configurable Injection Parameters (Target process, injection type)

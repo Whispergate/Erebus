@@ -1,0 +1,623 @@
+<mxfile host="65bd71144e">
+    <diagram id="jmDGsMhDS0lKZFvdnZDC" name="Page-1">
+        <mxGraphModel dx="1086" dy="787" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="850" pageHeight="1100" math="0" shadow="0">
+            <root>
+                <mxCell id="0"/>
+                <mxCell id="1" parent="0"/>
+                
+                <!-- START -->
+                <mxCell id="start" value="Start Build" style="strokeWidth=2;html=1;shape=mxgraph.flowchart.start_1;whiteSpace=wrap;strokeColor=#4C0099;fillColor=#E8D4F8;" vertex="1" parent="1">
+                    <mxGeometry x="600" y="20" width="100" height="60" as="geometry"/>
+                </mxCell>
+                
+                <!-- Input Shellcode -->
+                <mxCell id="edge_start_input" style="edgeStyle=orthogonalEdgeStyle;html=1;strokeWidth=2;strokeColor=#9785D4;shape=connector;rounded=1;entryX=0.5;entryY=0;entryDx=0;entryDy=0;" edge="1" parent="1" source="start" target="input">
+                    <mxGeometry relative="1" as="geometry"/>
+                </mxCell>
+                
+                <mxCell id="input" value="Input Shellcode from Mythic" style="rounded=1;whiteSpace=wrap;html=1;strokeWidth=2;strokeColor=#4C0099;fillColor=#E8D4F8;arcSize=10;" vertex="1" parent="1">
+                    <mxGeometry x="575" y="100" width="150" height="50" as="geometry"/>
+                </mxCell>
+                
+                <!-- Main Payload Type Decision -->
+                <mxCell id="edge_input_maintype" style="edgeStyle=orthogonalEdgeStyle;html=1;strokeWidth=2;strokeColor=#9785D4;shape=connector;rounded=1;entryX=0.5;entryY=0;entryDx=0;entryDy=0;" edge="1" parent="1" source="input" target="main_type">
+                    <mxGeometry relative="1" as="geometry"/>
+                </mxCell>
+                
+                <mxCell id="main_type" value="Main Payload Type?" style="rhombus;whiteSpace=wrap;html=1;strokeWidth=2;strokeColor=#4C0099;fillColor=#FFE6CC;" vertex="1" parent="1">
+                    <mxGeometry x="600" y="170" width="100" height="100" as="geometry"/>
+                </mxCell>
+                
+                <!-- LOADER PATH -->
+                <mxCell id="edge_loader_path" style="edgeStyle=orthogonalEdgeStyle;html=1;strokeWidth=2;strokeColor=#9785D4;shape=connector;rounded=1;entryX=0.5;entryY=0;entryDx=0;entryDy=0;" edge="1" parent="1" source="main_type" target="loader_type">
+                    <mxGeometry relative="1" as="geometry">
+                        <mxPoint x="550" y="290"/>
+                        <Array as="points">
+                            <mxPoint x="550" y="220"/>
+                            <mxPoint x="550" y="290"/>
+                        </Array>
+                    </mxGeometry>
+                </mxCell>
+                
+                <mxCell id="label_loader" value="Loader" style="edgeLabel;html=1;align=center;verticalAlign=middle;resizable=0;points=[];rounded=1;strokeColor=#4C0099;strokeWidth=2;arcSize=12;fontFamily=Helvetica;fontSize=11;fontColor=default;fillColor=default;" vertex="1" connectable="0" parent="edge_loader_path">
+                    <mxGeometry x="-0.5" y="-10" relative="1" as="geometry">
+                        <mxPoint as="offset"/>
+                    </mxGeometry>
+                </mxCell>
+                
+                <mxCell id="loader_type" value="Loader Type?" style="rhombus;whiteSpace=wrap;html=1;strokeWidth=2;strokeColor=#4C0099;fillColor=#FFE6CC;" vertex="1" parent="1">
+                    <mxGeometry x="500" y="290" width="100" height="100" as="geometry"/>
+                </mxCell>
+                
+                <!-- SHELLCODE LOADER PATH -->
+                <mxCell id="edge_shellcode_loader" style="edgeStyle=orthogonalEdgeStyle;html=1;strokeWidth=2;strokeColor=#9785D4;shape=connector;rounded=1;entryX=1;entryY=0.5;entryDx=0;entryDy=0;" edge="1" parent="1" source="loader_type" target="shellcode_config">
+                    <mxGeometry relative="1" as="geometry">
+                        <mxPoint x="400" y="340"/>
+                        <Array as="points">
+                            <mxPoint x="450" y="340"/>
+                            <mxPoint x="450" y="380"/>
+                            <mxPoint x="400" y="380"/>
+                        </Array>
+                    </mxGeometry>
+                </mxCell>
+                
+                <mxCell id="label_shellcode" value="Shellcode Loader" style="edgeLabel;html=1;align=center;verticalAlign=middle;resizable=0;points=[];rounded=1;strokeColor=#4C0099;strokeWidth=2;arcSize=12;fontFamily=Helvetica;fontSize=11;fontColor=default;fillColor=default;" vertex="1" connectable="0" parent="edge_shellcode_loader">
+                    <mxGeometry x="-0.3" y="-10" relative="1" as="geometry">
+                        <mxPoint as="offset"/>
+                    </mxGeometry>
+                </mxCell>
+                
+                <mxCell id="shellcode_config" value="Shellcode Loader Config&#10;- Injection Type&#10;- Target Process&#10;- Build Config" style="rounded=1;whiteSpace=wrap;html=1;strokeWidth=2;strokeColor:#4C0099;fillColor:#D4E8F8;arcSize=10;fontSize=10;" vertex="1" parent="1">
+                    <mxGeometry x="300" y="350" width="120" height="80" as="geometry"/>
+                </mxCell>
+                
+                <!-- CLICKONCE PATH -->
+                <mxCell id="edge_clickonce" style="edgeStyle=orthogonalEdgeStyle;html=1;strokeWidth=2;strokeColor:#9785D4;shape=connector;rounded=1;entryX=0;entryY=0.5;entryDx=0;entryDy=0;" edge="1" parent="1" source="loader_type" target="clickonce_config">
+                    <mxGeometry relative="1" as="geometry">
+                        <mxPoint x="600" y="340"/>
+                        <Array as="points">
+                            <mxPoint x="550" y="340"/>
+                            <mxPoint x="550" y="380"/>
+                            <mxPoint x="600" y="380"/>
+                        </Array>
+                    </mxGeometry>
+                </mxCell>
+                
+                <mxCell id="label_clickonce" value="ClickOnce" style="edgeLabel;html=1;align=center;verticalAlign=middle;resizable=0;points=[];rounded=1;strokeColor=#4C0099;strokeWidth=2;arcSize=12;fontFamily=Helvetica;fontSize=11;fontColor=default;fillColor=default;" vertex="1" connectable="0" parent="edge_clickonce">
+                    <mxGeometry x="0.3" y="-10" relative="1" as="geometry">
+                        <mxPoint as="offset"/>
+                    </mxGeometry>
+                </mxCell>
+                
+                <mxCell id="clickonce_config" value="ClickOnce Config&#10;- Injection Method&#10;- Target Process&#10;- Build Config" style="rounded=1;whiteSpace=wrap;html=1;strokeWidth=2;strokeColor:#4C0099;fillColor:#D4E8F8;arcSize=10;fontSize=10;" vertex="1" parent="1">
+                    <mxGeometry x="600" y="350" width="120" height="80" as="geometry"/>
+                </mxCell>
+                
+                <!-- HIJACK PATH -->
+                <mxCell id="edge_hijack_path" style="edgeStyle=orthogonalEdgeStyle;html=1;strokeWidth=2;strokeColor:#9785D4;shape=connector;rounded=1;entryX=0.5;entryY=0;entryDx=0;entryDy=0;" edge="1" parent="1" source="main_type" target="hijack_config">
+                    <mxGeometry relative="1" as="geometry">
+                        <mxPoint x="700" y="340"/>
+                        <Array as="points">
+                            <mxPoint x="700" y="220"/>
+                            <mxPoint x="700" y="290"/>
+                            <mxPoint x="750" y="290"/>
+                            <mxPoint x="750" y="360"/>
+                        </Array>
+                    </mxGeometry>
+                </mxCell>
+                
+                <mxCell id="label_hijack" value="Hijack" style="edgeLabel;html=1;align=center;verticalAlign=middle;resizable=0;points=[];rounded=1;strokeColor=#4C0099;strokeWidth=2;arcSize=12;fontFamily=Helvetica;fontSize=11;fontColor=default;fillColor=default;" vertex="1" connectable="0" parent="edge_hijack_path">
+                    <mxGeometry x="0.3" y="-10" relative="1" as="geometry">
+                        <mxPoint as="offset"/>
+                    </mxGeometry>
+                </mxCell>
+                
+                <mxCell id="hijack_config" value="DLL Hijacking Config&#10;- Upload DLL&#10;- Create Proxy" style="rounded=1;whiteSpace=wrap;html=1;strokeWidth=2;strokeColor=#4C0099;fillColor:#D4E8F8;arcSize=10;fontSize=10;" vertex="1" parent="1">
+                    <mxGeometry x="700" y="350" width="120" height="80" as="geometry"/>
+                </mxCell>
+                
+                <!-- Merge to Shellcrypt -->
+                <mxCell id="edge_merge_shellcrypt_1" style="edgeStyle=orthogonalEdgeStyle;html=1;strokeWidth=2;strokeColor:#9785D4;shape=connector;rounded=1;entryX=0.25;entryY=0;entryDx=0;entryDy=0;" edge="1" parent="1" source="shellcode_config" target="shellcrypt">
+                    <mxGeometry relative="1" as="geometry">
+                        <Array as="points">
+                            <mxPoint x="360" y="460"/>
+                        </Array>
+                    </mxGeometry>
+                </mxCell>
+                
+                <mxCell id="edge_merge_shellcrypt_2" style="edgeStyle=orthogonalEdgeStyle;html=1;strokeWidth=2;strokeColor:#9785D4;shape=connector;rounded=1;entryX=0.5;entryY=0;entryDx=0;entryDy=0;" edge="1" parent="1" source="clickonce_config" target="shellcrypt">
+                    <mxGeometry relative="1" as="geometry">
+                        <Array as="points">
+                            <mxPoint x="660" y="460"/>
+                            <mxPoint x="500" y="460"/>
+                        </Array>
+                    </mxGeometry>
+                </mxCell>
+                
+                <mxCell id="edge_merge_shellcrypt_3" style="edgeStyle=orthogonalEdgeStyle;html=1;strokeWidth=2;strokeColor:#9785D4;shape=connector;rounded=1;entryX=0.75;entryY=0;entryDx=0;entryDy=0;" edge="1" parent="1" source="hijack_config" target="shellcrypt">
+                    <mxGeometry relative="1" as="geometry">
+                        <Array as="points">
+                            <mxPoint x="760" y="460"/>
+                            <mxPoint x="640" y="460"/>
+                        </Array>
+                    </mxGeometry>
+                </mxCell>
+                
+                <!-- Shellcrypt Block -->
+                <mxCell id="shellcrypt" value="Shellcode Obfuscation (Shellcrypt)&#10;Compression: LZNT1 | RLE | NONE&#10;Encryption: AES-* | CHACHA20 | SALSA20 | XOR&#10;Encoding: ALPHA32 | ASCII85 | BASE64 | WORDS256" style="rounded=1;whiteSpace=wrap;html=1;strokeWidth=2;strokeColor:#4C0099;fillColor:#D4E8F8;arcSize=10;fontSize=9;" vertex="1" parent="1">
+                    <mxGeometry x="380" y="460" width="240" height="100" as="geometry"/>
+                </mxCell>
+                
+                <!-- Output Format Decision -->
+                <mxCell id="edge_shellcrypt_format" style="edgeStyle=orthogonalEdgeStyle;html=1;strokeWidth=2;strokeColor:#9785D4;shape=connector;rounded=1;entryX=0.5;entryY=0;entryDx=0;entryDy=0;" edge="1" parent="1" source="shellcrypt" target="output_format">
+                    <mxGeometry relative="1" as="geometry"/>
+                </mxCell>
+                
+                <mxCell id="output_format" value="Output Format?" style="rhombus;whiteSpace=wrap;html=1;strokeWidth=2;strokeColor:#4C0099;fillColor=#FFE6CC;" vertex="1" parent="1">
+                    <mxGeometry x="450" y="600" width="100" height="100" as="geometry"/>
+                </mxCell>
+                
+                <!-- Format Outputs -->
+                <mxCell id="edge_format_c" style="edgeStyle=orthogonalEdgeStyle;html=1;strokeWidth=1.5;strokeColor:#9785D4;shape=connector;rounded=1;entryX=1;entryY=0.5;entryDx=0;entryDy=0;" edge="1" parent="1" source="output_format" target="format_c">
+                    <mxGeometry relative="1" as="geometry">
+                        <Array as="points">
+                            <mxPoint x="350" y="650"/>
+                        </Array>
+                    </mxGeometry>
+                </mxCell>
+                
+                <mxCell id="label_format_c" value="C/CSharp/Nim/Go/etc" style="edgeLabel;html=1;align=center;verticalAlign=middle;resizable=0;points=[];rounded=1;strokeColor=#4C0099;strokeWidth=1;arcSize=12;fontFamily=Helvetica;fontSize=8;fontColor=default;fillColor=default;" vertex="1" connectable="0" parent="edge_format_c">
+                    <mxGeometry x="-0.3" y="-5" relative="1" as="geometry">
+                        <mxPoint as="offset"/>
+                    </mxGeometry>
+                </mxCell>
+                
+                <mxCell id="format_c" value="Format Output" style="rounded=1;whiteSpace=wrap;html=1;strokeWidth=1.5;strokeColor:#4C0099;fillColor:#E8F4F8;arcSize=8;fontSize=9;" vertex="1" parent="1">
+                    <mxGeometry x="250" y="630" width="80" height="40" as="geometry"/>
+                </mxCell>
+                
+                <!-- Obfuscated Shellcode -->
+                <mxCell id="edge_merge_obfuscated" style="edgeStyle=orthogonalEdgeStyle;html=1;strokeWidth=2;strokeColor:#9785D4;shape=connector;rounded=1;entryX=0.5;entryY=0;entryDx=0;entryDy=0;" edge="1" parent="1" source="format_c" target="obfuscated">
+                    <mxGeometry relative="1" as="geometry">
+                        <Array as="points">
+                            <mxPoint x="290" y="740"/>
+                            <mxPoint x="500" y="740"/>
+                        </Array>
+                    </mxGeometry>
+                </mxCell>
+                
+                <mxCell id="obfuscated" value="Obfuscated Shellcode Ready" style="ellipse;whiteSpace=wrap;html=1;strokeWidth=2;strokeColor:#4C0099;fillColor:#F0E6F8;fontSize=10;" vertex="1" parent="1">
+                    <mxGeometry x="400" y="740" width="140" height="80" as="geometry"/>
+                </mxCell>
+                
+                <!-- Compilation Decision -->
+                <mxCell id="edge_obf_compile" style="edgeStyle=orthogonalEdgeStyle;html=1;strokeWidth=2;strokeColor:#9785D4;shape=connector;rounded=1;entryX=0.5;entryY=0;entryDx=0;entryDy=0;" edge="1" parent="1" source="obfuscated" target="compile_type">
+                    <mxGeometry relative="1" as="geometry"/>
+                </mxCell>
+                
+                <mxCell id="compile_type" value="Payload Type?" style="rhombus;whiteSpace=wrap;html=1;strokeWidth=2;strokeColor:#4C0099;fillColor:#FFE6CC;" vertex="1" parent="1">
+                    <mxGeometry x="400" y="860" width="100" height="100" as="geometry"/>
+                </mxCell>
+                
+                <!-- Compile Shellcode Loader -->
+                <mxCell id="edge_compile_shellcode" style="edgeStyle=orthogonalEdgeStyle;html=1;strokeWidth=2;strokeColor:#9785D4;shape=connector;rounded=1;entryX=1;entryY=0.5;entryDx=0;entryDy=0;" edge="1" parent="1" source="compile_type" target="compile_shellcode">
+                    <mxGeometry relative="1" as="geometry">
+                        <Array as="points">
+                            <mxPoint x="300" y="910"/>
+                        </Array>
+                    </mxGeometry>
+                </mxCell>
+                
+                <mxCell id="label_compile_shellcode" value="Shellcode Loader" style="edgeLabel;html=1;align=center;verticalAlign=middle;resizable=0;points=[];rounded=1;strokeColor=#4C0099;strokeWidth=1;arcSize=12;fontFamily=Helvetica;fontSize=9;fontColor=default;fillColor=default;" vertex="1" connectable="0" parent="edge_compile_shellcode">
+                    <mxGeometry x="-0.3" y="-10" relative="1" as="geometry">
+                        <mxPoint as="offset"/>
+                    </mxGeometry>
+                </mxCell>
+                
+                <mxCell id="compile_shellcode" value="Compile C++ Loader&#10;- Render config.hpp&#10;- Embed Shellcode" style="rounded=1;whiteSpace=wrap;html=1;strokeWidth=2;strokeColor:#4C0099;fillColor:#C8E6C9;arcSize=10;fontSize=9;" vertex="1" parent="1">
+                    <mxGeometry x="150" y="880" width="130" height="80" as="geometry"/>
+                </mxCell>
+                
+                <!-- Compile ClickOnce -->
+                <mxCell id="edge_compile_clickonce" style="edgeStyle=orthogonalEdgeStyle;html=1;strokeWidth=2;strokeColor:#9785D4;shape=connector;rounded=1;entryX=0;entryY=0.5;entryDx=0;entryDy=0;" edge="1" parent="1" source="compile_type" target="compile_clickonce">
+                    <mxGeometry relative="1" as="geometry">
+                        <Array as="points">
+                            <mxPoint x="500" y="910"/>
+                        </Array>
+                    </mxGeometry>
+                </mxCell>
+                
+                <mxCell id="label_compile_clickonce" value="ClickOnce" style="edgeLabel;html=1;align=center;verticalAlign=middle;resizable=0;points=[];rounded=1;strokeColor=#4C0099;strokeWidth=1;arcSize=12;fontFamily=Helvetica;fontSize=9;fontColor=default;fillColor=default;" vertex="1" connectable="0" parent="edge_compile_clickonce">
+                    <mxGeometry x="0.3" y="-10" relative="1" as="geometry">
+                        <mxPoint as="offset"/>
+                    </mxGeometry>
+                </mxCell>
+                
+                <mxCell id="compile_clickonce" value="Compile .NET ClickOnce&#10;- Render InjectionConfig.cs&#10;- Add Encryption Key" style="rounded=1;whiteSpace=wrap;html=1;strokeWidth=2;strokeColor:#4C0099;fillColor:#C8E6C9;arcSize=10;fontSize=9;" vertex="1" parent="1">
+                    <mxGeometry x="500" y="880" width="130" height="80" as="geometry"/>
+                </mxCell>
+                
+                <!-- Compile DLL Hijack -->
+                <mxCell id="edge_compile_hijack" style="edgeStyle=orthogonalEdgeStyle;html=1;strokeWidth=2;strokeColor:#9785D4;shape=connector;rounded=1;entryX=1;entryY=0.5;entryDx=0;entryDy=0;" edge="1" parent="1" source="compile_type" target="compile_hijack">
+                    <mxGeometry relative="1" as="geometry">
+                        <Array as="points">
+                            <mxPoint x="700" y="910"/>
+                        </Array>
+                    </mxGeometry>
+                </mxCell>
+                
+                <mxCell id="label_compile_hijack" value="DLL Hijack" style="edgeLabel;html=1;align=center;verticalAlign=middle;resizable=0;points=[];rounded=1;strokeColor:#4C0099;strokeWidth=1;arcSize=12;fontFamily=Helvetica;fontSize=9;fontColor=default;fillColor=default;" vertex="1" connectable="0" parent="edge_compile_hijack">
+                    <mxGeometry x="0.3" y="-10" relative="1" as="geometry">
+                        <mxPoint as="offset"/>
+                    </mxGeometry>
+                </mxCell>
+                
+                <mxCell id="compile_hijack" value="Compile DLL Proxy&#10;- Analyze Exports&#10;- Create Forwarding" style="rounded=1;whiteSpace=wrap;html=1;strokeWidth=2;strokeColor:#4C0099;fillColor:#C8E6C9;arcSize=10;fontSize=9;" vertex="1" parent="1">
+                    <mxGeometry x="850" y="880" width="120" height="80" as="geometry"/>
+                </mxCell>
+                
+                <!-- Merge Compilation -->
+                <mxCell id="edge_merge_compiled_1" style="edgeStyle=orthogonalEdgeStyle;html=1;strokeWidth=2;strokeColor:#9785D4;shape=connector;rounded=1;entryX=0.25;entryY=0;entryDx=0;entryDy=0;" edge="1" parent="1" source="compile_shellcode" target="compiled">
+                    <mxGeometry relative="1" as="geometry">
+                        <Array as="points">
+                            <mxPoint x="215" y="1020"/>
+                        </Array>
+                    </mxGeometry>
+                </mxCell>
+                
+                <mxCell id="edge_merge_compiled_2" style="edgeStyle=orthogonalEdgeStyle;html=1;strokeWidth=2;strokeColor:#9785D4;shape=connector;rounded=1;entryX=0.5;entryY=0;entryDx=0;entryDy=0;" edge="1" parent="1" source="compile_clickonce" target="compiled">
+                    <mxGeometry relative="1" as="geometry">
+                        <Array as="points">
+                            <mxPoint x="565" y="1020"/>
+                        </Array>
+                    </mxGeometry>
+                </mxCell>
+                
+                <mxCell id="edge_merge_compiled_3" style="edgeStyle=orthogonalEdgeStyle;html=1;strokeWidth=2;strokeColor:#9785D4;shape=connector;rounded=1;entryX=0.75;entryY=0;entryDx=0;entryDy=0;" edge="1" parent="1" source="compile_hijack" target="compiled">
+                    <mxGeometry relative="1" as="geometry">
+                        <Array as="points">
+                            <mxPoint x="910" y="1020"/>
+                            <mxPoint x="480" y="1020"/>
+                        </Array>
+                    </mxGeometry>
+                </mxCell>
+                
+                <mxCell id="compiled" value="Payload Compiled" style="ellipse;whiteSpace=wrap;html=1;strokeWidth=2;strokeColor:#4C0099;fillColor:#F0E6F8;fontSize=10;" vertex="1" parent="1">
+                    <mxGeometry x="380" y="1020" width="140" height="80" as="geometry"/>
+                </mxCell>
+                
+                <!-- Code Signing Decision -->
+                <mxCell id="edge_compiled_codesign" style="edgeStyle=orthogonalEdgeStyle;html=1;strokeWidth=2;strokeColor:#9785D4;shape=connector;rounded=1;entryX=0.5;entryY=0;entryDx=0;entryDy=0;" edge="1" parent="1" source="compiled" target="codesign">
+                    <mxGeometry relative="1" as="geometry"/>
+                </mxCell>
+                
+                <mxCell id="codesign" value="Sign Payload?" style="rhombus;whiteSpace=wrap;html=1;strokeWidth=2;strokeColor:#4C0099;fillColor:#FFE6CC;" vertex="1" parent="1">
+                    <mxGeometry x="400" y="1140" width="100" height="100" as="geometry"/>
+                </mxCell>
+                
+                <!-- Signing Options -->
+                <mxCell id="edge_sign_selfsign" style="edgeStyle=orthogonalEdgeStyle;html=1;strokeWidth=1.5;strokeColor:#9785D4;shape=connector;rounded=1;entryX=1;entryY=0.5;entryDx=0;entryDy=0;" edge="1" parent="1" source="codesign" target="sign_self">
+                    <mxGeometry relative="1" as="geometry">
+                        <Array as="points">
+                            <mxPoint x="300" y="1190"/>
+                        </Array>
+                    </mxGeometry>
+                </mxCell>
+                
+                <mxCell id="label_sign_self" value="Self-Sign" style="edgeLabel;html=1;align=center;verticalAlign=middle;resizable=0;points=[];rounded=1;strokeColor=#4C0099;strokeWidth=1;arcSize=12;fontFamily=Helvetica;fontSize=8;fontColor=default;fillColor=default;" vertex="1" connectable="0" parent="edge_sign_selfsign">
+                    <mxGeometry x="-0.3" y="-5" relative="1" as="geometry">
+                        <mxPoint as="offset"/>
+                    </mxGeometry>
+                </mxCell>
+                
+                <mxCell id="sign_self" value="Generate Self-Signed Cert" style="rounded=1;whiteSpace=wrap;html=1;strokeWidth=1.5;strokeColor:#4C0099;fillColor=#F8E8E8;arcSize=8;fontSize=8;" vertex="1" parent="1">
+                    <mxGeometry x="200" y="1170" width="90" height="40" as="geometry"/>
+                </mxCell>
+                
+                <mxCell id="edge_sign_spoof" style="edgeStyle=orthogonalEdgeStyle;html=1;strokeWidth=1.5;strokeColor:#9785D4;shape=connector;rounded=1;entryX=0;entryY=0.5;entryDx=0;entryDy=0;" edge="1" parent="1" source="codesign" target="sign_spoof">
+                    <mxGeometry relative="1" as="geometry">
+                        <Array as="points">
+                            <mxPoint x="500" y="1190"/>
+                        </Array>
+                    </mxGeometry>
+                </mxCell>
+                
+                <mxCell id="label_sign_spoof" value="Spoof" style="edgeLabel;html=1;align=center;verticalAlign=middle;resizable=0;points=[];rounded=1;strokeColor:#4C0099;strokeWidth=1;arcSize=12;fontFamily=Helvetica;fontSize=8;fontColor=default;fillColor=default;" vertex="1" connectable="0" parent="edge_sign_spoof">
+                    <mxGeometry x="0.3" y="-5" relative="1" as="geometry">
+                        <mxPoint as="offset"/>
+                    </mxGeometry>
+                </mxCell>
+                
+                <mxCell id="sign_spoof" value="Clone Cert from URL" style="rounded=1;whiteSpace=wrap;html=1;strokeWidth=1.5;strokeColor:#4C0099;fillColor:#F8E8E8;arcSize=8;fontSize=8;" vertex="1" parent="1">
+                    <mxGeometry x="450" y="1170" width="90" height="40" as="geometry"/>
+                </mxCell>
+                
+                <mxCell id="edge_sign_provided" style="edgeStyle=orthogonalEdgeStyle;html=1;strokeWidth=1.5;strokeColor:#9785D4;shape=connector;rounded=1;entryX=1;entryY=0.5;entryDx=0;entryDy=0;" edge="1" parent="1" source="codesign" target="sign_provided">
+                    <mxGeometry relative="1" as="geometry">
+                        <Array as="points">
+                            <mxPoint x="700" y="1190"/>
+                        </Array>
+                    </mxGeometry>
+                </mxCell>
+                
+                <mxCell id="label_sign_provided" value="Provided" style="edgeLabel;html=1;align=center;verticalAlign=middle;resizable=0;points=[];rounded=1;strokeColor=#4C0099;strokeWidth=1;arcSize=12;fontFamily=Helvetica;fontSize=8;fontColor=default;fillColor=default;" vertex="1" connectable="0" parent="edge_sign_provided">
+                    <mxGeometry x="0.3" y="-5" relative="1" as="geometry">
+                        <mxPoint as="offset"/>
+                    </mxGeometry>
+                </mxCell>
+                
+                <mxCell id="sign_provided" value="Use Provided PFX/P12" style="rounded=1;whiteSpace=wrap;html=1;strokeWidth=1.5;strokeColor:#4C0099;fillColor:#F8E8E8;arcSize=8;fontSize=8;" vertex="1" parent="1">
+                    <mxGeometry x="650" y="1170" width="90" height="40" as="geometry"/>
+                </mxCell>
+                
+                <!-- Merge Signed -->
+                <mxCell id="edge_merge_signed_1" style="edgeStyle=orthogonalEdgeStyle;html=1;strokeWidth=1.5;strokeColor:#9785D4;shape=connector;rounded=1;entryX=0.2;entryY=0;entryDx=0;entryDy=0;" edge="1" parent="1" source="sign_self" target="trigger_decision">
+                    <mxGeometry relative="1" as="geometry">
+                        <Array as="points">
+                            <mxPoint x="245" y="1280"/>
+                        </Array>
+                    </mxGeometry>
+                </mxCell>
+                
+                <mxCell id="edge_merge_signed_2" style="edgeStyle=orthogonalEdgeStyle;html=1;strokeWidth=1.5;strokeColor=#9785D4;shape=connector;rounded=1;entryX=0.5;entryY=0;entryDx=0;entryDy=0;" edge="1" parent="1" source="sign_spoof" target="trigger_decision">
+                    <mxGeometry relative="1" as="geometry">
+                        <Array as="points">
+                            <mxPoint x="495" y="1280"/>
+                        </Array>
+                    </mxGeometry>
+                </mxCell>
+                
+                <mxCell id="edge_merge_signed_3" style="edgeStyle=orthogonalEdgeStyle;html=1;strokeWidth=1.5;strokeColor=#9785D4;shape=connector;rounded=1;entryX=0.8;entryY=0;entryDx=0;entryDy=0;" edge="1" parent="1" source="sign_provided" target="trigger_decision">
+                    <mxGeometry relative="1" as="geometry">
+                        <Array as="points">
+                            <mxPoint x="695" y="1280"/>
+                        </Array>
+                    </mxGeometry>
+                </mxCell>
+                
+                <!-- Trigger Decision -->
+                <mxCell id="trigger_decision" value="Add Trigger?" style="rhombus;whiteSpace=wrap;html=1;strokeWidth=2;strokeColor:#4C0099;fillColor:#FFE6CC;" vertex="1" parent="1">
+                    <mxGeometry x="400" y="1280" width="100" height="100" as="geometry"/>
+                </mxCell>
+                
+                <!-- Trigger Types -->
+                <mxCell id="edge_trigger_lnk" style="edgeStyle=orthogonalEdgeStyle;html=1;strokeWidth=1.5;strokeColor:#9785D4;shape=connector;rounded=1;entryX=1;entryY=0.5;entryDx=0;entryDy=0;" edge="1" parent="1" source="trigger_decision" target="trigger_lnk">
+                    <mxGeometry relative="1" as="geometry">
+                        <Array as="points">
+                            <mxPoint x="300" y="1330"/>
+                        </Array>
+                    </mxGeometry>
+                </mxCell>
+                
+                <mxCell id="label_trigger_lnk" value="LNK" style="edgeLabel;html=1;align=center;verticalAlign=middle;resizable=0;points=[];rounded=1;strokeColor:#4C0099;strokeWidth=1;arcSize=12;fontFamily=Helvetica;fontSize=8;fontColor=default;fillColor=default;" vertex="1" connectable="0" parent="edge_trigger_lnk">
+                    <mxGeometry x="-0.3" y="-5" relative="1" as="geometry">
+                        <mxPoint as="offset"/>
+                    </mxGeometry>
+                </mxCell>
+                
+                <mxCell id="trigger_lnk" value=".LNK Shortcut&#10;- Execute Binary&#10;- Pass Args&#10;- Show Decoy" style="rounded=1;whiteSpace=wrap;html=1;strokeWidth=1.5;strokeColor:#4C0099;fillColor:#F0E6F8;arcSize=8;fontSize=8;" vertex="1" parent="1">
+                    <mxGeometry x="200" y="1310" width="90" height="70" as="geometry"/>
+                </mxCell>
+                
+                <mxCell id="edge_trigger_bat" style="edgeStyle=orthogonalEdgeStyle;html=1;strokeWidth=1.5;strokeColor:#9785D4;shape=connector;rounded=1;entryX=0;entryY=0.5;entryDx=0;entryDy=0;" edge="1" parent="1" source="trigger_decision" target="trigger_bat">
+                    <mxGeometry relative="1" as="geometry">
+                        <Array as="points">
+                            <mxPoint x="500" y="1330"/>
+                        </Array>
+                    </mxGeometry>
+                </mxCell>
+                
+                <mxCell id="label_trigger_bat" value="BAT" style="edgeLabel;html=1;align=center;verticalAlign=middle;resizable=0;points=[];rounded=1;strokeColor=#4C0099;strokeWidth=1;arcSize=12;fontFamily=Helvetica;fontSize=8;fontColor=default;fillColor=default;" vertex="1" connectable="0" parent="edge_trigger_bat">
+                    <mxGeometry x="0.3" y="-5" relative="1" as="geometry">
+                        <mxPoint as="offset"/>
+                    </mxGeometry>
+                </mxCell>
+                
+                <mxCell id="trigger_bat" value=".BAT Script&#10;- Execute Payload&#10;- Show Decoy" style="rounded=1;whiteSpace=wrap;html=1;strokeWidth=1.5;strokeColor:#4C0099;fillColor:#F0E6F8;arcSize=8;fontSize=8;" vertex="1" parent="1">
+                    <mxGeometry x="450" y="1310" width="90" height="70" as="geometry"/>
+                </mxCell>
+                
+                <mxCell id="edge_trigger_msi" style="edgeStyle=orthogonalEdgeStyle;html=1;strokeWidth=1.5;strokeColor:#9785D4;shape=connector;rounded=1;entryX=1;entryY=0.5;entryDx=0;entryDy=0;" edge="1" parent="1" source="trigger_decision" target="trigger_msi">
+                    <mxGeometry relative="1" as="geometry">
+                        <Array as="points">
+                            <mxPoint x="700" y="1330"/>
+                        </Array>
+                    </mxGeometry>
+                </mxCell>
+                
+                <mxCell id="label_trigger_msi" value="MSI" style="edgeLabel;html=1;align=center;verticalAlign=middle;resizable=0;points=[];rounded=1;strokeColor:#4C0099;strokeWidth=1;arcSize=12;fontFamily=Helvetica;fontSize=8;fontColor=default;fillColor=default;" vertex="1" connectable="0" parent="edge_trigger_msi">
+                    <mxGeometry x="0.3" y="-5" relative="1" as="geometry">
+                        <mxPoint as="offset"/>
+                    </mxGeometry>
+                </mxCell>
+                
+                <mxCell id="trigger_msi" value="MSI Custom Action&#10;- Embed Payload&#10;- Execute Conditions" style="rounded=1;whiteSpace=wrap;html=1;strokeWidth=1.5;strokeColor:#4C0099;fillColor:#F0E6F8;arcSize=8;fontSize=8;" vertex="1" parent="1">
+                    <mxGeometry x="650" y="1310" width="90" height="70" as="geometry"/>
+                </mxCell>
+                
+                <!-- Merge Triggers -->
+                <mxCell id="edge_merge_trigger_1" style="edgeStyle=orthogonalEdgeStyle;html=1;strokeWidth=2;strokeColor:#9785D4;shape=connector;rounded=1;entryX=0.2;entryY=0;entryDx=0;entryDy=0;" edge="1" parent="1" source="trigger_lnk" target="container_decision">
+                    <mxGeometry relative="1" as="geometry">
+                        <Array as="points">
+                            <mxPoint x="245" y="1450"/>
+                        </Array>
+                    </mxGeometry>
+                </mxCell>
+                
+                <mxCell id="edge_merge_trigger_2" style="edgeStyle=orthogonalEdgeStyle;html=1;strokeWidth=2;strokeColor:#9785D4;shape=connector;rounded=1;entryX=0.4;entryY=0;entryDx=0;entryDy=0;" edge="1" parent="1" source="trigger_bat" target="container_decision">
+                    <mxGeometry relative="1" as="geometry">
+                        <Array as="points">
+                            <mxPoint x="495" y="1450"/>
+                        </Array>
+                    </mxGeometry>
+                </mxCell>
+                
+                <mxCell id="edge_merge_trigger_3" style="edgeStyle=orthogonalEdgeStyle;html=1;strokeWidth=2;strokeColor:#9785D4;shape=connector;rounded=1;entryX=0.8;entryY=0;entryDx=0;entryDy=0;" edge="1" parent="1" source="trigger_msi" target="container_decision">
+                    <mxGeometry relative="1" as="geometry">
+                        <Array as="points">
+                            <mxPoint x="695" y="1450"/>
+                        </Array>
+                    </mxGeometry>
+                </mxCell>
+                
+                <!-- Container Decision -->
+                <mxCell id="container_decision" value="Package Container?" style="rhombus;whiteSpace=wrap;html=1;strokeWidth=2;strokeColor:#4C0099;fillColor:#FFE6CC;" vertex="1" parent="1">
+                    <mxGeometry x="400" y="1450" width="100" height="100" as="geometry"/>
+                </mxCell>
+                
+                <!-- Container Types -->
+                <mxCell id="edge_container_iso" style="edgeStyle=orthogonalEdgeStyle;html=1;strokeWidth=1.5;strokeColor:#9785D4;shape=connector;rounded=1;entryX=1;entryY=0.5;entryDx=0;entryDy=0;" edge="1" parent="1" source="container_decision" target="container_iso">
+                    <mxGeometry relative="1" as="geometry">
+                        <Array as="points">
+                            <mxPoint x="300" y="1500"/>
+                        </Array>
+                    </mxGeometry>
+                </mxCell>
+                
+                <mxCell id="label_container_iso" value="ISO" style="edgeLabel;html=1;align=center;verticalAlign=middle;resizable=0;points=[];rounded=1;strokeColor=#4C0099;strokeWidth=1;arcSize=12;fontFamily=Helvetica;fontSize=8;fontColor=default;fillColor=default;" vertex="1" connectable="0" parent="edge_container_iso">
+                    <mxGeometry x="-0.3" y="-5" relative="1" as="geometry">
+                        <mxPoint as="offset"/>
+                    </mxGeometry>
+                </mxCell>
+                
+                <mxCell id="container_iso" value="ISO Archive" style="rounded=1;whiteSpace=wrap;html=1;strokeWidth=1.5;strokeColor:#4C0099;fillColor:#F8E8F8;arcSize=8;fontSize=8;" vertex="1" parent="1">
+                    <mxGeometry x="200" y="1480" width="90" height="40" as="geometry"/>
+                </mxCell>
+                
+                <mxCell id="edge_container_7z" style="edgeStyle=orthogonalEdgeStyle;html=1;strokeWidth=1.5;strokeColor:#9785D4;shape=connector;rounded=1;entryX=0;entryY=0.5;entryDx=0;entryDy=0;" edge="1" parent="1" source="container_decision" target="container_7z">
+                    <mxGeometry relative="1" as="geometry">
+                        <Array as="points">
+                            <mxPoint x="500" y="1500"/>
+                        </Array>
+                    </mxGeometry>
+                </mxCell>
+                
+                <mxCell id="label_container_7z" value="7z" style="edgeLabel;html=1;align=center;verticalAlign=middle;resizable=0;points=[];rounded=1;strokeColor=#4C0099;strokeWidth=1;arcSize=12;fontFamily=Helvetica;fontSize=8;fontColor=default;fillColor=default;" vertex="1" connectable="0" parent="edge_container_7z">
+                    <mxGeometry x="0.3" y="-5" relative="1" as="geometry">
+                        <mxPoint as="offset"/>
+                    </mxGeometry>
+                </mxCell>
+                
+                <mxCell id="container_7z" value="7z Archive" style="rounded=1;whiteSpace=wrap;html=1;strokeWidth=1.5;strokeColor:#4C0099;fillColor:#F8E8F8;arcSize=8;fontSize=8;" vertex="1" parent="1">
+                    <mxGeometry x="450" y="1480" width="90" height="40" as="geometry"/>
+                </mxCell>
+                
+                <mxCell id="edge_container_zip" style="edgeStyle=orthogonalEdgeStyle;html=1;strokeWidth=1.5;strokeColor:#9785D4;shape=connector;rounded=1;entryX=1;entryY=0.5;entryDx=0;entryDy=0;" edge="1" parent="1" source="container_decision" target="container_zip">
+                    <mxGeometry relative="1" as="geometry">
+                        <Array as="points">
+                            <mxPoint x="700" y="1500"/>
+                        </Array>
+                    </mxGeometry>
+                </mxCell>
+                
+                <mxCell id="label_container_zip" value="ZIP" style="edgeLabel;html=1;align=center;verticalAlign=middle;resizable=0;points=[];rounded=1;strokeColor=#4C0099;strokeWidth=1;arcSize=12;fontFamily=Helvetica;fontSize=8;fontColor=default;fillColor=default;" vertex="1" connectable="0" parent="edge_container_zip">
+                    <mxGeometry x="0.3" y="-5" relative="1" as="geometry">
+                        <mxPoint as="offset"/>
+                    </mxGeometry>
+                </mxCell>
+                
+                <mxCell id="container_zip" value="ZIP Archive" style="rounded=1;whiteSpace=wrap;html=1;strokeWidth=1.5;strokeColor:#4C0099;fillColor:#F8E8F8;arcSize=8;fontSize=8;" vertex="1" parent="1">
+                    <mxGeometry x="650" y="1480" width="90" height="40" as="geometry"/>
+                </mxCell>
+                
+                <!-- Merge Containers -->
+                <mxCell id="edge_merge_container_1" style="edgeStyle=orthogonalEdgeStyle;html=1;strokeWidth=2;strokeColor:#9785D4;shape=connector;rounded=1;entryX=0.3;entryY=0;entryDx=0;entryDy=0;" edge="1" parent="1" source="container_iso" target="maldoc_decision">
+                    <mxGeometry relative="1" as="geometry">
+                        <Array as="points">
+                            <mxPoint x="245" y="1600"/>
+                        </Array>
+                    </mxGeometry>
+                </mxCell>
+                
+                <mxCell id="edge_merge_container_2" style="edgeStyle=orthogonalEdgeStyle;html=1;strokeWidth=2;strokeColor:#9785D4;shape=connector;rounded=1;entryX=0.5;entryY=0;entryDx=0;entryDy=0;" edge="1" parent="1" source="container_7z" target="maldoc_decision">
+                    <mxGeometry relative="1" as="geometry">
+                        <Array as="points">
+                            <mxPoint x="495" y="1600"/>
+                        </Array>
+                    </mxGeometry>
+                </mxCell>
+                
+                <mxCell id="edge_merge_container_3" style="edgeStyle=orthogonalEdgeStyle;html=1;strokeWidth=2;strokeColor:#9785D4;shape=connector;rounded=1;entryX=0.7;entryY=0;entryDx=0;entryDy=0;" edge="1" parent="1" source="container_zip" target="maldoc_decision">
+                    <mxGeometry relative="1" as="geometry">
+                        <Array as="points">
+                            <mxPoint x="695" y="1600"/>
+                        </Array>
+                    </mxGeometry>
+                </mxCell>
+                
+                <!-- MalDoc Decision -->
+                <mxCell id="maldoc_decision" value="Create MalDoc?" style="rhombus;whiteSpace=wrap;html=1;strokeWidth=2;strokeColor:#4C0099;fillColor=#FFE6CC;" vertex="1" parent="1">
+                    <mxGeometry x="400" y="1600" width="100" height="100" as="geometry"/>
+                </mxCell>
+                
+                <!-- MalDoc Options -->
+                <mxCell id="edge_maldoc_new" style="edgeStyle=orthogonalEdgeStyle;html=1;strokeWidth=1.5;strokeColor:#9785D4;shape=connector;rounded=1;entryX=1;entryY=0.5;entryDx=0;entryDy=0;" edge="1" parent="1" source="maldoc_decision" target="maldoc_new">
+                    <mxGeometry relative="1" as="geometry">
+                        <Array as="points">
+                            <mxPoint x="300" y="1650"/>
+                        </Array>
+                    </mxGeometry>
+                </mxCell>
+                
+                <mxCell id="label_maldoc_new" value="Create New" style="edgeLabel;html=1;align=center;verticalAlign=middle;resizable=0;points=[];rounded=1;strokeColor=#4C0099;strokeWidth=1;arcSize=12;fontFamily=Helvetica;fontSize=8;fontColor=default;fillColor=default;" vertex="1" connectable="0" parent="edge_maldoc_new">
+                    <mxGeometry x="-0.3" y="-5" relative="1" as="geometry">
+                        <mxPoint as="offset"/>
+                    </mxGeometry>
+                </mxCell>
+                
+                <mxCell id="maldoc_new" value="Generate XLSM&#10;- VBA Payload&#10;- VBA Technique&#10;- Execution Trigger" style="rounded=1;whiteSpace=wrap;html=1;strokeWidth=1.5;strokeColor:#4C0099;fillColor:#F8F0E8;arcSize=8;fontSize=8;" vertex="1" parent="1">
+                    <mxGeometry x="200" y="1630" width="90" height="70" as="geometry"/>
+                </mxCell>
+                
+                <mxCell id="edge_maldoc_backdoor" style="edgeStyle=orthogonalEdgeStyle;html=1;strokeWidth=1.5;strokeColor:#9785D4;shape=connector;rounded=1;entryX=0;entryY=0.5;entryDx=0;entryDy=0;" edge="1" parent="1" source="maldoc_decision" target="maldoc_backdoor">
+                    <mxGeometry relative="1" as="geometry">
+                        <Array as="points">
+                            <mxPoint x="500" y="1650"/>
+                        </Array>
+                    </mxGeometry>
+                </mxCell>
+                
+                <mxCell id="label_maldoc_backdoor" value="Backdoor" style="edgeLabel;html=1;align=center;verticalAlign=middle;resizable=0;points=[];rounded=1;strokeColor:#4C0099;strokeWidth=1;arcSize=12;fontFamily=Helvetica;fontSize=8;fontColor=default;fillColor=default;" vertex="1" connectable="0" parent="edge_maldoc_backdoor">
+                    <mxGeometry x="0.3" y="-5" relative="1" as="geometry">
+                        <mxPoint as="offset"/>
+                    </mxGeometry>
+                </mxCell>
+                
+                <mxCell id="maldoc_backdoor" value="Inject VBA&#10;- Existing Excel&#10;- Preserve Structure" style="rounded=1;whiteSpace=wrap;html=1;strokeWidth=1.5;strokeColor:#4C0099;fillColor:#F8F0E8;arcSize=8;fontSize=8;" vertex="1" parent="1">
+                    <mxGeometry x="450" y="1630" width="90" height="70" as="geometry"/>
+                </mxCell>
+                
+                <!-- Merge MalDocs -->
+                <mxCell id="edge_merge_maldoc_1" style="edgeStyle=orthogonalEdgeStyle;html=1;strokeWidth=2;strokeColor:#9785D4;shape=connector;rounded=1;entryX=0.4;entryY=0;entryDx=0;entryDy=0;" edge="1" parent="1" source="maldoc_new" target="output">
+                    <mxGeometry relative="1" as="geometry">
+                        <Array as="points">
+                            <mxPoint x="245" y="1760"/>
+                        </Array>
+                    </mxGeometry>
+                </mxCell>
+                
+                <mxCell id="edge_merge_maldoc_2" style="edgeStyle=orthogonalEdgeStyle;html=1;strokeWidth=2;strokeColor=#9785D4;shape=connector;rounded=1;entryX=0.6;entryY=0;entryDx=0;entryDy=0;" edge="1" parent="1" source="maldoc_backdoor" target="output">
+                    <mxGeometry relative="1" as="geometry">
+                        <Array as="points">
+                            <mxPoint x="495" y="1760"/>
+                        </Array>
+                    </mxGeometry>
+                </mxCell>
+                
+                <!-- Final Output -->
+                <mxCell id="output" value="Output Final Payload" style="rounded=1;whiteSpace=wrap;html=1;strokeWidth=2;strokeColor:#4C0099;fillColor:#C8E6C9;arcSize=10;fontSize=10;" vertex="1" parent="1">
+                    <mxGeometry x="380" y="1760" width="140" height="60" as="geometry"/>
+                </mxCell>
+                
+                <!-- END -->
+                <mxCell id="edge_output_end" style="edgeStyle=orthogonalEdgeStyle;html=1;strokeWidth=2;strokeColor:#9785D4;shape=connector;rounded=1;entryX=0.5;entryY=0;entryDx=0;entryDy=0;" edge="1" parent="1" source="output" target="end">
+                    <mxGeometry relative="1" as="geometry"/>
+                </mxCell>
+                
+                <mxCell id="end" value="Build Complete" style="strokeWidth=2;html=1;shape=mxgraph.flowchart.end;whiteSpace=wrap;strokeColor=#4C0099;fillColor=#E8D4F8;" vertex="1" parent="1">
+                    <mxGeometry x="600" y="1860" width="100" height="60" as="geometry"/>
+                </mxCell>
+            </root>
+        </mxGraphModel>
+    </diagram>
+</mxfile>

@@ -1,9 +1,8 @@
 <p align="center">
- <img src="agent_icons/Erebus.svg" alt="Erebus Logo" style="width: 300px;"/>
+ <img src="agent_icons/ErebusBannerText.png" alt="Erebus Banner" style="width: 800px;"/>
 </p>
 
 # Erebus
-
 Erebus is a modern initial access wrapper aimed at decreasing the development to deployment time, when preparing for intrusion operations. Erebus comes with multiple techniques out of the box to craft complex chains, and assist in bypassing the toughest security measures.
 
 This project is meant to be an extension to your offensive capabilities, and is by no means a silver bullet against all environments. If you would like to add your own techniques or modify the existing ones then check out the project's documentation page for more info.
@@ -51,5 +50,6 @@ View the rendered documentation by clicking on **Docs -> Agent Documentation** i
 - [ ] Complete XLSM/XLAM phishing payloads
 - [ ] LNK Triggers
 - [ ] Hidden MSI/ISO container files
+- [ ] Maldocs VBA generator
 
 ### Bug Fixes

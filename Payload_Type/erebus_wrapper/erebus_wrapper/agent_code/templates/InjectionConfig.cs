@@ -16,6 +16,7 @@ namespace Erebus.ClickOnce
         /// - "poolparty"      : Worker Factory thread pool injection (remote)
         /// - "classic"        : Classic CreateRemoteThread injection (remote)
         /// - "enumdesktops"   : EnumDesktops callback injection (self)
+        /// - "appdomain"      : AppDomain injection for .NET assemblies (self) 
         /// </summary>
         public static string InjectionMethod = "{{ INJECTION_METHOD }}";
 
