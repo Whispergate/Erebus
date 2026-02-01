@@ -766,7 +766,15 @@ generated if none have been entered.""",
             ]
         ),
 
-    ]
+    
+        BuildParameter(
+            name="9.0 Output Extension Source",
+            parameter_type=BuildParameterType.ChooseOne,
+            description="Choose source for the payload ignition and visible extension inside the container (Trigger or MalDoc)",
+            choices=["Trigger", "MalDoc"],
+            default_value="Trigger",
+        ),
+]
 
     build_steps = [
         BuildStep(step_name = "Gathering Files",
@@ -968,7 +976,17 @@ generated if none have been entered.""",
     async def containerise_payload(self,agent_build_path):
         """Creates a container and adds all files generated from the payload function inside of the given archive/media"""
 
-        target_ext = f".{self.get_parameter('0.10 Trigger Type').lower()}"
+        
+        ext_source = self.get_parameter("9.0 Output Extension Source")
+        if ext_source == "MalDoc":
+            maldoc_mode = self.get_parameter("7.0 Create MalDoc")
+            if maldoc_mode == "VBA Module Only":
+                target_ext = ".bas"
+            else:
+                target_ext = ".xlsm"
+        else:
+            target_ext = f".{self.get_parameter('0.10 Trigger Type').lower()}"
+
 
         match(self.get_parameter("3.0 Container Type")):
             case "7z":
@@ -1891,7 +1909,17 @@ generated if none have been entered.""",
             ######################### End of Decoy Section #########################
             ######################### MalDoc Creation Section #########################
             maldoc_mode = self.get_parameter("7.0 Create MalDoc")
-            if maldoc_mode != "None":
+            
+            if maldoc_mode != "None" and self.get_parameter("9.0 Output Extension Source") == "Trigger":
+                await SendMythicRPCPayloadUpdatebuildStep(
+                    MythicRPCPayloadUpdateBuildStepMessage(
+                        PayloadUUID=self.uuid,
+                        StepName="Creating MalDoc",
+                        StepStdout="Skipping MalDoc Generation (Trigger selected as source).",
+                        StepSuccess=True
+                    ))
+
+            if maldoc_mode != "None" and self.get_parameter("9.0 Output Extension Source") != "Trigger":
                 payload_dir = Path(agent_build_path) / "payload"
                 maldoc_type = self.get_parameter("7.1 MalDoc Type")
                 vba_trigger = self.get_parameter("7.3 VBA Execution Trigger")
@@ -2105,7 +2133,17 @@ generated if none have been entered.""",
 
             ######################### End of MalDoc Section #########################
             ######################### Trigger Generation Section #########################
-            if self.get_parameter("0.0 Main Payload Type") == "Loader":
+            
+            if self.get_parameter("0.0 Main Payload Type") == "Loader" and self.get_parameter("9.0 Output Extension Source") == "MalDoc":
+                await SendMythicRPCPayloadUpdatebuildStep(
+                    MythicRPCPayloadUpdateBuildStepMessage(
+                    PayloadUUID=self.uuid,
+                    StepName="Adding Trigger",
+                    StepStdout="Skipping Trigger Generation (MalDoc selected as source).",
+                    StepSuccess=True,
+                ))
+
+            if self.get_parameter("0.0 Main Payload Type") == "Loader" and self.get_parameter("9.0 Output Extension Source") != "MalDoc":
 
                 payload_dir = Path(agent_build_path) / "payload"
                 decoy_dir = Path(agent_build_path) / "decoys"
