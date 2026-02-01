@@ -272,8 +272,9 @@ earlycascade (remote)
 poolparty (remote)
 classic (remote)
 createfiber (self)
-enumdesktops (self)""",
-            choices = ["createfiber", "earlycascade", "poolparty", "classic", "enumdesktops"],
+enumdesktops (self)
+appdomain (self)""",
+            choices = ["createfiber", "earlycascade", "poolparty", "classic", "enumdesktops", "appdomain"],
             default_value = "createfiber",
             hide_conditions = [
                 HideCondition(name="0.1 Loader Type", operand=HideConditionOperand.NotEQ, value="ClickOnce"),
