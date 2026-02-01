@@ -59,8 +59,8 @@ class MsiContainerPlugin(ErebusPlugin):
         """Validate that required dependencies are available"""
         try:
             import sys
-            if sys.platform != "win32":
-                return (False, "MSI manipulation requires Windows platform")
+            # if sys.platform != "win32":
+            #     return (False, "MSI manipulation requires Windows platform")
             
             import msilib
             import olefile

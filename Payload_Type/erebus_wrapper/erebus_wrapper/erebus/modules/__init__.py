@@ -145,7 +145,7 @@ class PluginValidator:
     
     async def send_mythic_rpc_report(self, results: Dict, operation_id: int = None):
         """
-        Send validation results to Mythic via RPC.
+        Send validation results to the backend event log without user popups.
         
         Args:
             results: Results dictionary from validate_plugins()
@@ -162,7 +162,7 @@ class PluginValidator:
             
             if failed_count == 0:
                 message = f"✓ Erebus Plugin System: All {total} plugins validated successfully"
-                level = "info"
+                level = "debug"
             else:
                 failed_names = ", ".join(results["failed"].keys())
                 error_details = "\n".join([
@@ -170,9 +170,9 @@ class PluginValidator:
                     for name, error in results["failed"].items()
                 ])
                 message = f"✗ Erebus Plugin Validation Failed ({failed_count}/{total}):\n{error_details}"
-                level = "warning"
+                level = "debug"
             
-            # Create RPC message
+            # Create backend alert (debug level avoids toast popups)
             rpc_msg = MythicRPCOperationEventLogCreateMessage(
                 OperationId=operation_id,
                 Message=message,
