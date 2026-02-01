@@ -37,7 +37,6 @@
 // 3 = CreateFiber         - Fiber-based execution (Self)
 // 4 = EarlyCascade        - Early Bird APC injection (Remote)
 // 5 = PoolParty           - Worker Factory thread pool injection (Remote)
-// 6 = PoolPartyAlt        - Thread Pool API injection (Remote - TpAllocWork)
 #define CONFIG_INJECTION_TYPE {{ INJECTION_TYPE }}
 
 #if CONFIG_INJECTION_TYPE == 3
