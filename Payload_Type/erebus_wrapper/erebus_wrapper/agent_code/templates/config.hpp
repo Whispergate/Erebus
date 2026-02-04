@@ -59,7 +59,7 @@
 // ============================================
 
 // Target process for remote injection
-#define CONFIG_TARGET_PROCESS L"{{ TARGET_PROCESS }}\\0"
+#define CONFIG_TARGET_PROCESS L"{{ TARGET_PROCESS }}"
 
 // Injection technique:
 // 1 = NtQueueApcThread    - APC injection to suspended thread (Remote)
