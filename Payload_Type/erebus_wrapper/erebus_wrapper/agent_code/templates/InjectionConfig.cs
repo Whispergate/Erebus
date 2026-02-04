@@ -6,8 +6,44 @@ namespace Erebus.ClickOnce
     public static class InjectionConfig
     {
         // ============================================
-        // INJECTION CONFIGURATION
+        // COMPRESSION CONFIGURATION
         // ============================================
+
+        /// <summary>
+        /// Compression format for shellcode:
+        /// - 0 = None        - No decompression
+        /// - 1 = LZNT1       - LZNT1 compression
+        /// - 2 = RLE         - Run-Length Encoding
+        /// </summary>
+        public static int CompressionType = {{ COMPRESSION_TYPE }};
+
+        // ============================================
+        // ENCODING CONFIGURATION
+        // ============================================
+
+        /// <summary>
+        /// Encoding format for shellcode:
+        /// - 0 = None        - No decoding
+        /// - 1 = Base64      - Base64 encoding
+        /// - 2 = ASCII85     - ASCII85 encoding
+        /// - 3 = ALPHA32     - ALPHA32 encoding
+        /// - 4 = WORDS256    - WORDS256 encoding
+        /// </summary>
+        public static int EncodingType = {{ ENCODING_TYPE }};
+
+        // ============================================
+        // ENCRYPTION CONFIGURATION
+        // ============================================
+
+        /// <summary>
+        /// Encryption type for shellcode:
+        /// - 0 = None        - No decryption
+        /// - 1 = XOR         - Simple XOR cipher
+        /// - 2 = RC4         - RC4 stream cipher
+        /// - 3 = AES_ECB     - AES in ECB mode
+        /// - 4 = AES_CBC     - AES in CBC mode
+        /// </summary>
+        public static int EncryptionType = {{ ENCRYPTION_TYPE }};
         
         /// <summary>
         /// Select injection method:
@@ -33,8 +69,8 @@ namespace Erebus.ClickOnce
         public static string TargetProcess = "{{ TARGET_PROCESS }}";
 
         /// <summary>
-        /// XOR encryption key for shellcode
-        /// Leave empty for no encryption
+        /// Encryption key for shellcode
+        /// Leave empty for no encryption (matches EncryptionType = 0)
         /// </summary>
         public static byte[] EncryptionKey = new byte[] { {{ ENCRYPTION_KEY }} };
         /// <summary>

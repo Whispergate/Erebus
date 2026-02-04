@@ -34,50 +34,65 @@ The Erebus wrapper uses a Python-based obfuscation pipeline to transform raw she
 
 #### Encryption Methods
 
-**AES128_CBC**
+**RC4**
+- Stream cipher with variable-length key (currently implemented)
+- Fast encryption/decryption
+- Per-session key generated
+- Moderate security level
+- **Currently Supported** ✓
+
+**XOR**
+- Single-byte XOR encryption (currently implemented)
+- Minimal performance overhead
+- Weak security - use only for testing or simple obfuscation
+- Single key byte used repeatedly
+- **Currently Supported** ✓
+
+**AES128_CBC** (TODO: Pending Loader Implementation)
 - 128-bit key AES in Cipher Block Chaining mode
 - Fast encryption/decryption
-- IV (Initialization Vector) is generated per build
+- IV (Initialization Vector) generated per build
 - Moderate security level
+- **Available in Shellcrypt, not yet in loaders**
 
-**AES256_CBC**
+**AES256_CBC** (TODO: Pending Loader Implementation)
 - 256-bit key AES in Cipher Block Chaining mode
 - Stronger than AES128, slightly slower
 - Recommended for higher security requirements
 - Good balance of security and performance
+- **Available in Shellcrypt, not yet in loaders**
 
-**AES256_ECB**
+**AES256_ECB** (TODO: Pending Loader Implementation)
 - Electronic Codebook mode (stateless)
 - Less secure than CBC mode
 - Predictable patterns possible in encrypted output
-- **Not recommended for operational use**
+- **Not recommended for operational use - pending implementation**
 
-**CHACHA20**
+**CHACHA20** (TODO: Pending Loader Implementation)
 - Stream cipher with 256-bit key
 - No mode specification needed (inherent property)
 - Good performance on low-end systems
 - Modern alternative to AES
 - Provides authenticated encryption properties
+- **Available in Shellcrypt, not yet in loaders**
 
-**SALSA20**
+**SALSA20** (TODO: Pending Loader Implementation)
 - Stream cipher variant of CHACHA20
 - 256-bit key
 - Excellent performance
 - Suitable for all systems
+- **Available in Shellcrypt, not yet in loaders**
 
-**XOR**
-- Simple single-byte XOR encryption
-- Minimal performance overhead
-- **Weak security - use only for testing or simple obfuscation**
-- Single key byte used repeatedly
-
-**XOR_COMPLEX**
+**XOR_COMPLEX** (TODO: Pending Loader Implementation)
 - Multi-byte rotating XOR encryption
 - More secure than simple XOR
 - Still weaker than AES but better than XOR
 - Low performance impact
+- **Available in Shellcrypt, not yet in loaders**
 
-**Recommendation**: AES256_CBC for strong security, CHACHA20/SALSA20 for performance-critical scenarios.
+**Current Recommendation**: Use **RC4** for most scenarios (good balance of performance and security), use **XOR** only for testing or basic obfuscation.
+
+**Future Roadmap**: AES256_CBC support is planned for all loaders to provide stronger encryption options.
 
 #### Encoding Methods
 

@@ -3,6 +3,42 @@
 #pragma once
 
 // ============================================
+// COMPRESSION CONFIGURATION
+// ============================================
+
+// Compression method used for shellcode:
+// 0 = NONE        - No decompression
+// 1 = LZNT1       - LZNT1 compression
+// 2 = RLE         - Run-Length Encoding
+#define CONFIG_COMPRESSION_TYPE {{ COMPRESSION_TYPE }}
+#if CONFIG_COMPRESSION_TYPE == 1
+#define DecompressShellcode erebus::DecompressionLZNT
+#elif CONFIG_COMPRESSION_TYPE == 2
+#define DecompressShellcode erebus::DecompressionRLE
+#endif
+
+// ============================================
+// ENCODING CONFIGURATION
+// ============================================
+
+// Encoding method used for shellcode:
+// 0 = NONE        - No decoding
+// 1 = BASE64      - Base64 encoding
+// 2 = ASCII85     - ASCII85 encoding
+// 3 = ALPHA32     - ALPHA32 encoding
+// 4 = WORDS256    - WORDS256 encoding
+#define CONFIG_ENCODING_TYPE {{ ENCODING_TYPE }}
+#if CONFIG_ENCODING_TYPE == 1
+#define DecodeShellcode erebus::DecodeBase64
+#elif CONFIG_ENCODING_TYPE == 2
+#define DecodeShellcode erebus::DecodeASCII85
+#elif CONFIG_ENCODING_TYPE == 3
+#define DecodeShellcode erebus::DecodeALPHA32
+#elif CONFIG_ENCODING_TYPE == 4
+#define DecodeShellcode erebus::DecodeWORDS256
+#endif
+
+// ============================================
 // ENCRYPTION CONFIGURATION
 // ============================================
 
@@ -13,16 +49,6 @@
 // 3 = AES_ECB     - AES in ECB mode
 // 4 = AES_CBC     - AES in CBC mode
 #define CONFIG_ENCRYPTION_TYPE {{ ENCRYPTION_TYPE }}
-
-// Encryption key (define as needed)
-// Note: Key size depends on encryption type:
-// - XOR: any size (repeating key)
-// - RC4: 1-256 bytes
-// - AES: 16, 24, or 32 bytes (128, 192, 256 bits)
-#define CONFIG_ENCRYPTION_KEY { {{ ENCRYPTION_KEY }} }
-
-// For AES_CBC mode, define the IV (must be 16 bytes)
-#define CONFIG_ENCRYPTION_IV { {{ ENCRYPTION_IV }} }
 
 // ============================================
 // INJECTION CONFIGURATION
