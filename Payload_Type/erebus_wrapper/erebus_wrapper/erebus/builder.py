@@ -184,7 +184,9 @@ class ErebusWrapper(PayloadType):
     ]
 
     wrapper = True
-    wrapped_payloads = []
+    wrapped_payloads = ["merlin", "kharon", "ceos"
+                        "sliver", "apollo", "athena",
+                        "xenon", "nimplant", "hannibal"]
     c2_profiles = []
 
     # Plugin validation flag - run only once at startup
