@@ -1,0 +1,17 @@
+mythic-container
+argparse
+pycryptodome
+cryptography
+pyfiglet
+rich
+py7zr
+pylnk3
+pypdf2
+pefile
+lznt1
+jinja2
+pycdlib
+olefile
+openpyxl
+python-docx
+xlsxwriter

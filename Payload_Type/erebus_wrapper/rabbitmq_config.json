@@ -1,0 +1,9 @@
+{
+  "rabbitmq_host": "192.168.8.128",
+  "rabbitmq_port": 5672,
+  "rabbitmq_password": "QYHn6f9NzAT4FsVwXjQYNUwWyuUDJA",
+  "mythic_server_host": "192.168.8.128",
+  "mythic_server_grpc_port": 17444,
+  "mythic_server_port": 17443,
+  "debug_level": "debug"
+}
