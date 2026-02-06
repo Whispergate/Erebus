@@ -11,12 +11,6 @@
 // 2 = RLE         - Run-Length Encoding
 #define CONFIG_COMPRESSION_TYPE {{ COMPRESSION_TYPE }}
 
-#if CONFIG_COMPRESSION_TYPE == 1
-#define DecompressShellcode erebus::DecompressionLZNT
-#elif CONFIG_COMPRESSION_TYPE == 2
-#define DecompressShellcode erebus::DecompressionRLE
-#endif
-
 // ============================================
 // ENCODING CONFIGURATION
 // ============================================
