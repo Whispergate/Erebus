@@ -1,8 +1,8 @@
 +++
 title = "Plugins"
 chapter = false
-weight = 15
-pre = "<b>3. </b>"
+weight = 2
+pre = "<b>2. </b>"
 +++
 
 ## Overview

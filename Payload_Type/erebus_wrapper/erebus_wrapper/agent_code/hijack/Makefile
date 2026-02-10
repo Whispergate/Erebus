@@ -3,7 +3,8 @@ CXXFLAGS = -shared -DDLL -fPIC -fno-asynchronous-unwind-tables -static-libgcc -s
 INCLUDES = -I. -I/usr/x86_64-w64-mingw32/include
 LIBDIRS = -L/usr/x86_64-w64-mingw32/lib
 ENTRY_POINT = -e DllMain
-LIBS = -lkernel32 -lntdll
+EXTRA_LIBS ?=
+LIBS = -lkernel32 -lntdll $(EXTRA_LIBS)
 
 OUTPUT_DLL = $(OUTPUT_PATH)/$(DLL_NAME)
 

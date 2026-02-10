@@ -7,20 +7,21 @@ from pathlib import Path
 
 # Change to modules directory
 os.chdir(Path(__file__).parent)
-sys.path.insert(0, str(Path(__file__).parent))
+sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
 
-# Import as if we're in the modules directory
-import __init__ as modules
+from erebus_wrapper.erebus import modules
 
 if __name__ == "__main__":
     print("[+] Plugin Validation Test")
     print("=" * 60)
     
     results = modules.get_initialization_results()
+    if results is None:
+        results = modules.run_plugin_validation()
     passed = modules.get_validated_plugins()
     failed = modules.get_failed_plugins()
     
-    print(f"\nValidation Results:")
+    print("\nValidation Results:")
     print(f"  Total Plugins: {results['total']}")
     print(f"  Passed: {results['passed_count']}")
     print(f"  Failed: {results['failed_count']}")
