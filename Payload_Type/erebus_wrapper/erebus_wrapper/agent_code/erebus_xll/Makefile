@@ -64,7 +64,7 @@ CXXFLAGS += -I$(SRCDIR_FULL)
 EXTRA_LIBS ?=
 
 # DLL linking flags - ensure proper Windows DLL export handling
-DLL_FLAGS = -shared -Wl,--out-implib,libxll.a -Wl,--enable-auto-import
+DLL_FLAGS = -shared -Wall,--out-implib,libxll.a -Wl,--enable-auto-import
 LDFLAGS = $(ARCH_FLAGS) -shared -lkernel32 -luser32 -ladvapi32 -lole32 -loleaut32 -lstdc++ $(EXTRA_LIBS)
 
 ifeq ($(RELEASE),1)
