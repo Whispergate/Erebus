@@ -75,11 +75,12 @@ class DllProxyPlugin(ErebusPlugin):
         Generate proxy export definitions for DLL hijacking (async version).
         """
         try:
-            if not dll_file.exists():
-                raise FileNotFoundError(f"DLL file not found: {dll_file}")
+            dll_path = pathlib.Path(dll_file)
+            if not dll_path.exists():
+                raise FileNotFoundError(f"DLL file not found: {dll_path}")
             
             payload_dll_proxy = self._get_payload_dll_proxy()
-            return await payload_dll_proxy.generate_proxies(str(dll_file), dll_file_name)
+            return await payload_dll_proxy.generate_proxies(str(dll_path), dll_file_name)
             
         except Exception as e:
             raise RuntimeError(f"Failed to generate DLL proxies: {e}")

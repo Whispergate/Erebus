@@ -81,4 +81,33 @@
 #define ExecuteShellcode erebus::InjectionPoolParty
 #endif
 
+// ============================================
+// GUARDRAILS CONFIGURATION
+// ============================================
+
+#include "guardrails/guardrails.hpp"
+
+// Enable/disable guardrails checks at compile time
+#define CONFIG_GUARDRAILS_ENABLED {{ GUARDRAILS_ENABLED }}
+#define CONFIG_GUARDRAILS_CHECK_DEBUGGER {{ GUARDRAILS_CHECK_DEBUGGER }}
+#define CONFIG_GUARDRAILS_CHECK_REMOTE_DEBUGGER {{ GUARDRAILS_CHECK_REMOTE_DEBUGGER }}
+#define CONFIG_GUARDRAILS_CHECK_DEBUGGER_PROCESSES {{ GUARDRAILS_CHECK_DEBUGGER_PROCESSES }}
+#define CONFIG_GUARDRAILS_CHECK_HARDWARE_BREAKPOINTS {{ GUARDRAILS_CHECK_HARDWARE_BREAKPOINTS }}
+#define CONFIG_GUARDRAILS_CHECK_TIMING {{ GUARDRAILS_CHECK_TIMING }}
+
+// Helper function to get configured guardrails
+inline erebus::guardrails::GuardrailConfig GetGuardrailConfig() {
+    erebus::guardrails::GuardrailConfig config = erebus::guardrails::GetDefaultConfig();
+    
+    #if CONFIG_GUARDRAILS_ENABLED
+        config.check_debugger_present = CONFIG_GUARDRAILS_CHECK_DEBUGGER;
+        config.check_remote_debugger = CONFIG_GUARDRAILS_CHECK_REMOTE_DEBUGGER;
+        config.check_debugger_processes = CONFIG_GUARDRAILS_CHECK_DEBUGGER_PROCESSES;
+        config.check_hardware_breakpoints = CONFIG_GUARDRAILS_CHECK_HARDWARE_BREAKPOINTS;
+        config.check_timing_checks = CONFIG_GUARDRAILS_CHECK_TIMING;
+    #endif
+    
+    return config;
+}
+
 #endif
