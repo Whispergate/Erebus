@@ -50,6 +50,7 @@ import shutil
 import hashlib
 import asyncio
 import subprocess
+import zipfile
 
 ENCRYPTION_METHODS = {
     # "AES128_CBC" :  "aes_128",
@@ -160,13 +161,24 @@ NOTE: Loaders are written in C++ - Supplied shellcode format must be raw for `Lo
         ),
 
         BuildParameter(
-            name = "0.1 Loader Type",
+            name = "0.2 Loader Format",
             parameter_type = BuildParameterType.ChooseOne,
             description = f"Select the loader's filetype",
-            choices = ["EXE", "DLL"],
-            default_value = "EXE",
+            choices = ["exe", "dll"],
+            default_value = "exe",
             hide_conditions = [
-                HideCondition(name="0.0 Main Payload Type", operand=HideConditionOperand.NotEQ, value="Shellcode Loader"),
+                HideCondition(name="0.1 Loader Type", operand=HideConditionOperand.NotEQ, value="Shellcode Loader"),
+            ]
+        ),
+
+        BuildParameter(
+            name = "0.2a Loader Architecture",
+            parameter_type = BuildParameterType.ChooseOne,
+            description = "Select the target architecture for the loader",
+            choices = ["x64", "x86"],
+            default_value = "x64",
+            hide_conditions = [
+                HideCondition(name="0.1 Loader Type", operand=HideConditionOperand.NotEQ, value="Shellcode Loader"),
             ]
         ),
 
@@ -174,7 +186,7 @@ NOTE: Loaders are written in C++ - Supplied shellcode format must be raw for `Lo
             name = "0.3 Loader Build Configuration",
             parameter_type = BuildParameterType.ChooseOne,
             description = "Select the loader's build config.",
-            choices = ["debug", "release"],
+            choices = ["debug", "release", "test"],
             default_value = "debug",
             hide_conditions = [
                 HideCondition(name="0.1 Loader Type", operand=HideConditionOperand.NotEQ, value="Shellcode Loader"),
@@ -672,6 +684,17 @@ NOTE: ({semver}) Only supports XOR for now. Does not (currently) support encoded
             ]
         ),
 
+        BuildParameter(
+            name = "1.0a Hijack Loader Architecture",
+            parameter_type = BuildParameterType.ChooseOne,
+            description = "Select the target architecture for the DLL loader",
+            choices = ["x64", "x86"],
+            default_value = "x64",
+            hide_conditions = [
+                HideCondition(name="0.0 Main Payload Type", operand=HideConditionOperand.NotEQ, value="Hijack"),
+            ]
+        ),
+
         # DLL Hijack Built-in Guardrails
         BuildParameter(
             name = "1.1 Use Built-in Guardrails",
@@ -1055,6 +1078,9 @@ generated if none have been entered.""",
             parameter_type=BuildParameterType.Boolean,
             description="Sign the loader with a code signing cert",
             required=False,
+            hide_conditions = [
+                HideCondition(name="0.3 Loader Build Configuration", operand=HideConditionOperand.NotEQ, value="test"),
+            ]
         ),
 
         BuildParameter(
@@ -1475,7 +1501,6 @@ generated if none have been entered.""",
         output = ""
 
         try:
-            #Run plugin validation only once at startup
             if not ErebusWrapper._validation_run:
                 ErebusWrapper._validation_run = True
                 run_plugin_validation()
@@ -2055,6 +2080,7 @@ generated if none have been entered.""",
                     "make",
                     "-C",
                     shellcode_loader_path,
+                    f"ARCH={self.get_parameter('1.0a Hijack Loader Architecture')}",
                     f"BUILD={self.get_parameter('0.3 Loader Build Configuration')}",
                     "TARGET=dll",
                     "all"
@@ -2089,17 +2115,35 @@ generated if none have been entered.""",
                     with open(str(guardrail_hpp_path), "w") as file:
                         file.write(guardrail_output)
 
-                    cmd = [
-                        "make",
-                        "-C",
-                        shellcode_loader_path,
-                        f"BUILD={self.get_parameter('0.3 Loader Build Configuration')}",
-                        "all"
-                    ]
-                    compile_step_name = "[T1027] - Compiling Shellcode Loader"
-                    compile_step_msg = "Shellcode Loader Compiled!"
-                    payload_output_file = f"{shellcode_loader_path}/erebus.exe"
-                    payload_final_name = "erebus.exe"
+                    build_config = self.get_parameter('0.3 Loader Build Configuration')
+                    
+                    # Handle test build configuration
+                    if build_config == "test":
+                        cmd = [
+                            "make",
+                            "-C",
+                            shellcode_loader_path,
+                            "test-all-payloads"
+                        ]
+                        compile_step_name = "[T1027] - Compiling Test Payloads"
+                        compile_step_msg = "All test payloads compiled!"
+                        # For test builds, we'll zip all payloads from the payloads directory
+                        payload_output_file = f"{shellcode_loader_path}/payloads"
+                        payload_final_name = "test_payloads.zip"
+                    else:
+                        cmd = [
+                            "make",
+                            "-C",
+                            shellcode_loader_path,
+                            f"ARCH={self.get_parameter('0.2a Loader Architecture')}",
+                            f"TARGET={self.get_parameter('0.2 Loader Format')}",
+                            f"BUILD={build_config}",
+                            "all"
+                        ]
+                        compile_step_name = "[T1027] - Compiling Shellcode Loader"
+                        compile_step_msg = "Shellcode Loader Compiled!"
+                        payload_output_file = f"{shellcode_loader_path}/erebus.{self.get_parameter('0.2 Loader Format')}"
+                        payload_final_name = f"erebus.{self.get_parameter('0.2 Loader Format')}"
 
                 elif loader_type == "ClickOnce":
                     build_config = self.get_parameter('0.3 ClickOnce Build Configuration')
@@ -2166,33 +2210,126 @@ generated if none have been entered.""",
                 loader_type = self.get_parameter("0.1 Loader Type")
                 
                 if loader_type == "Shellcode Loader":
-                    payload_path = PurePath(agent_build_path) / "payload" / payload_final_name
-                    payload_path = str(payload_path)
-                    shutil.copy(dst=payload_path, src=payload_output_file)
-
-                    if os.path.exists(payload_path):
-                        response.status = BuildStatus.Success
-                        response.build_message = "Loader Compiled!"
-                        response.build_stdout = output + "\n" + payload_path
-                        await SendMythicRPCPayloadUpdatebuildStep(
-                            MythicRPCPayloadUpdateBuildStepMessage(
-                            PayloadUUID=self.uuid,
-                            StepName=compile_step_name,
-                            StepStdout=compile_step_msg,
-                            StepSuccess=True,
-                        ))
+                    build_config = self.get_parameter('0.3 Loader Build Configuration')
+                    
+                    # Handle test build - create zip of all test payloads
+                    if build_config == "test":
+                        payloads_dir = Path(payload_output_file)  # payload_output_file contains path to payloads directory
+                        
+                        output += f"[DEBUG] Payloads directory: {payloads_dir}\n"
+                        output += f"[DEBUG] Payloads directory exists: {payloads_dir.exists()}\n"
+                        
+                        if payloads_dir.exists():
+                            files_in_dir = list(payloads_dir.iterdir())
+                            output += f"[DEBUG] Files in payloads directory: {[f.name for f in files_in_dir]}\n"
+                        
+                        if not payloads_dir.exists() or not any(payloads_dir.iterdir()):
+                            response.status = BuildStatus.Error
+                            response.build_message = "Failed to compile test payloads"
+                            response.build_stderr = output + f"\nPayloads directory not found or empty: {payloads_dir}"
+                            await SendMythicRPCPayloadUpdatebuildStep(
+                                MythicRPCPayloadUpdateBuildStepMessage(
+                                PayloadUUID=self.uuid,
+                                StepName=compile_step_name,
+                                StepStdout="Failed to Compile Test Payloads",
+                                StepSuccess=False,
+                            ))
+                            return response
+                        
+                        # Create agent_code/payloads directory for persistent storage
+                        agent_code_payloads_dir = Path(__file__).resolve().parent.parent / "agent_code" / "payloads"
+                        agent_code_payloads_dir.mkdir(parents=True, exist_ok=True)
+                        
+                        # Create zip file using shutil
+                        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+                        zip_basename = f"test_payloads_{timestamp}"
+                        
+                        # Use shutil.make_archive to create zip (it adds .zip automatically)
+                        # This creates the zip in the parent directory of payloads_dir
+                        zip_archive_path = shutil.make_archive(
+                            base_name=str(payloads_dir.parent / zip_basename),
+                            format='zip',
+                            root_dir=str(payloads_dir.parent),
+                            base_dir=payloads_dir.name
+                        )
+                        
+                        output += f"[DEBUG] Created archive at: {zip_archive_path}\n"
+                        output += f"[DEBUG] Archive size: {os.path.getsize(zip_archive_path)} bytes\n"
+                        
+                        # Move the zip to agent_code/payloads
+                        final_zip_path = agent_code_payloads_dir / f"{zip_basename}.zip"
+                        shutil.move(zip_archive_path, str(final_zip_path))
+                        
+                        output += f"[DEBUG] Moved archive to: {final_zip_path}\n"
+                        
+                        # Also copy individual payloads to agent_code/payloads for easy access
+                        files_copied = 0
+                        for file in payloads_dir.iterdir():
+                            if file.is_file():
+                                shutil.copy(file, agent_code_payloads_dir / file.name)
+                                files_copied += 1
+                        
+                        output += f"[DEBUG] Copied {files_copied} individual files\n"
+                        
+                        if os.path.exists(final_zip_path) and os.path.getsize(final_zip_path) > 0:
+                            response.status = BuildStatus.Success
+                            response.build_message = f"Test payloads compiled and saved to agent_code/payloads/!"
+                            response.build_stdout = output + f"\nZip: {final_zip_path}\nIndividual files also copied\nContains {files_copied} test payloads"
+                            await SendMythicRPCPayloadUpdatebuildStep(
+                                MythicRPCPayloadUpdateBuildStepMessage(
+                                PayloadUUID=self.uuid,
+                                StepName=compile_step_name,
+                                StepStdout=f"{compile_step_msg} Saved {files_copied} payloads to {agent_code_payloads_dir}",
+                                StepSuccess=True,
+                            ))
+                            
+                            # For test builds, read the zip and return it as the payload
+                            with open(final_zip_path, "rb") as f:
+                                response.payload = f.read()
+                            response.updated_filename = f"{zip_basename}.zip"
+                            
+                            # Return early for test builds - skip containerization and other steps
+                            return response
+                        else:
+                            response.status = BuildStatus.Error
+                            response.build_message = f"Failed to create test payload zip"
+                            response.build_stderr = output + "\n" + str(final_zip_path)
+                            await SendMythicRPCPayloadUpdatebuildStep(
+                                MythicRPCPayloadUpdateBuildStepMessage(
+                                PayloadUUID=self.uuid,
+                                StepName=compile_step_name,
+                                StepStdout=f"Failed to package test payloads",
+                                StepSuccess=False,
+                            ))
+                            return response
                     else:
-                        response.status = BuildStatus.Error
-                        response.build_message = "Failed to compile loader"
-                        response.build_stderr = output + "\n" + payload_path
-                        await SendMythicRPCPayloadUpdatebuildStep(
-                            MythicRPCPayloadUpdateBuildStepMessage(
-                            PayloadUUID=self.uuid,
-                            StepName=compile_step_name,
-                            StepStdout="Failed to Compile Shellcode Loader",
-                            StepSuccess=False,
-                        ))
-                        return response
+                        payload_path = PurePath(agent_build_path) / "payload" / payload_final_name
+                        payload_path = str(payload_path)
+                        shutil.copy(dst=payload_path, src=payload_output_file)
+
+                        if os.path.exists(payload_path):
+                            response.status = BuildStatus.Success
+                            response.build_message = "Loader Compiled!"
+                            response.build_stdout = output + "\n" + payload_path
+                            await SendMythicRPCPayloadUpdatebuildStep(
+                                MythicRPCPayloadUpdateBuildStepMessage(
+                                PayloadUUID=self.uuid,
+                                StepName=compile_step_name,
+                                StepStdout=compile_step_msg,
+                                StepSuccess=True,
+                            ))
+                        else:
+                            response.status = BuildStatus.Error
+                            response.build_message = "Failed to compile loader"
+                            response.build_stderr = output + "\n" + payload_path
+                            await SendMythicRPCPayloadUpdatebuildStep(
+                                MythicRPCPayloadUpdateBuildStepMessage(
+                                PayloadUUID=self.uuid,
+                                StepName=compile_step_name,
+                                StepStdout="Failed to Compile Shellcode Loader",
+                                StepSuccess=False,
+                            ))
+                            return response
 
                 elif loader_type == "ClickOnce":
                     if process.returncode != 0:
@@ -2303,10 +2440,13 @@ generated if none have been entered.""",
             if self.get_parameter("6.0 Codesign Loader"):
                 try:
                     if self.get_parameter("0.0 Main Payload Type") == "Loader":
+                        payload_path = Path(agent_build_path) / "payload" / f"erebus.{self.get_parameter('0.2 Loader Format')}"
+                    elif self.get_parameter("0.0 Main Payload Type") == "Hijack":
+                        payload_path = Path(agent_build_path) / "payload" / dll_file_name
+                    elif self.get_parameter("0.1 Loader Type") == "ClickOnce":
                         payload_path = Path(agent_build_path) / "payload" / "erebus.exe"
                     else:
-                        payload_path = Path(agent_build_path) / "payload" / dll_file_name
-
+                        raise ValueError("Unsupported payload type for code signing")
 
                     if not payload_path.exists():
                         raise FileNotFoundError(f"Payload not found for signing at: {payload_path}")
@@ -2804,36 +2944,6 @@ static size_t key_len = sizeof(key);
                                     )
                                 output += "[+] MinGW-w64 cross-compiler found\n"
 
-                                # Setup SDK if needed and available
-                                if sdk_zip.exists() and not sdk_dir.exists():
-                                    output += "[*] Setting up Excel 2013 XLL SDK...\n"
-                                    try:
-                                        setup_cmd = [
-                                            "make",
-                                            "-f", str(xll_dir / "Makefile"),
-                                            "setup-sdk"
-                                        ]
-                                        setup_result = subprocess.run(
-                                            setup_cmd,
-                                            capture_output=True,
-                                            text=True,
-                                            timeout=60,
-                                            cwd=str(xll_dir)
-                                        )
-                                        if setup_result.returncode == 0:
-                                            output += "[+] SDK extracted successfully\n"
-                                        else:
-                                            output += f"[!] SDK extraction warning: {setup_result.stderr}\n"
-                                    except subprocess.TimeoutExpired:
-                                        output += "[!] SDK setup timed out (may still be extracting)\n"
-                                    except Exception as e:
-                                        output += f"[!] SDK setup failed: {str(e)}\n"
-                                elif sdk_dir.exists():
-                                    output += f"[+] Excel SDK already extracted at: {sdk_dir}\n"
-                                else:
-                                    output += "[*] Excel SDK not found - will compile without SDK headers (still functional)\n"
-
-                                # Prepare make command with proper paths
                                 make_cmd = [
                                     "make",
                                     "-f", str(xll_dir / "Makefile"),
@@ -2843,12 +2953,6 @@ static size_t key_len = sizeof(key);
                                     "ARCH=x64",
                                     "OPTIMIZATION=O2"
                                 ]
-
-                                # Add SDK path - prefer module directory
-                                if sdk_dir.exists():
-                                    sdk_include = sdk_dir / "INCLUDE"
-                                    if sdk_include.exists():
-                                        make_cmd.append(f"SDK_PATH={str(sdk_include)}")
 
                                 if xll_guardrail_extra_libs:
                                     make_cmd.append(f"EXTRA_LIBS={xll_guardrail_extra_libs}")
