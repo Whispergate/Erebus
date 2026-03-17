@@ -6,7 +6,7 @@ Creates, manipulates, and weaponises Windows Installer (MSI) databases.
 Capabilities
 ~~~~~~~~~~~~
 * Fresh MSI generation via WiX (wixl) with per-User / per-Machine scopes
-* MSI backdooring — inject custom actions into an existing installer
+* MSI backdooring - inject custom actions into an existing installer
 * Multiple attack vectors: command exec, EXE launch, DLL load, .NET,
   VBScript / JScript, file drop
 * Proper CAB-stream bundling when inserting extra files
@@ -45,7 +45,7 @@ except ImportError:
 
 
 # ============================================================================
-# Action code catalogue — straight from the Windows Installer SDK docs
+# Action code catalogue - straight from the Windows Installer SDK docs
 # https://learn.microsoft.com/en-us/windows/win32/msi/summary-list-of-all-custom-action-types
 # ============================================================================
 
@@ -66,7 +66,7 @@ class PackagerActionCodes:
 
 
 # ============================================================================
-# InstallerDatabase — wraps msilib with lifecycle + batch-insert semantics
+# InstallerDatabase - wraps msilib with lifecycle + batch-insert semantics
 # ============================================================================
 
 class InstallerDatabase:
@@ -101,7 +101,7 @@ class InstallerDatabase:
 
     @property
     def handle(self):
-        """Raw ``msilib`` database object — escape hatch for edge-cases."""
+        """Raw ``msilib`` database object - escape hatch for edge-cases."""
         return self._handle
 
     # -- lifecycle -----------------------------------------------------------
@@ -140,7 +140,7 @@ class InstallerDatabase:
                 msilib.add_data(self._handle, table, data)
             except (AssertionError, Exception):
                 # A few tables (e.g. CustomAction) may choke on an extra
-                # ExtendedType column — retry with the tail trimmed.
+                # ExtendedType column - retry with the tail trimmed.
                 if table == "CustomAction":
                     msilib.add_data(self._handle, table, [r[:-1] for r in rows])
                 else:
@@ -299,7 +299,7 @@ if msilib is not None:
 
     class _ShimDirectory(msilib.Directory):
         """
-        Directory helper that skips the INSERT into the Directory table —
+        Directory helper that skips the INSERT into the Directory table -
         needed when patching an existing MSI rather than building from scratch.
         """
 
@@ -445,12 +445,12 @@ def _resolve_vector(payload_path, attack_type: str, entry_point: str,
             raise ValueError("Script vectors need an entry_point function name")
         return code, entry_point
 
-    # Default — deferred command execution
+    # Default - deferred command execution
     return PackagerActionCodes.DEFERRED_IMPERSONATED, (command_args or "")
 
 
 # ============================================================================
-# Public API — build_msi
+# Public API - build_msi
 # ============================================================================
 
 def build_msi(build_path: pathlib.Path,
@@ -593,7 +593,7 @@ def build_msi(build_path: pathlib.Path,
 
 
 # ============================================================================
-# Public API — hijack_msi
+# Public API - hijack_msi
 # ============================================================================
 
 def hijack_msi(source_msi: pathlib.Path,
@@ -613,7 +613,7 @@ def hijack_msi(source_msi: pathlib.Path,
     """
     Inject a backdoor CustomAction into an existing MSI installer.
 
-    The original file is never modified — a patched copy is written to the
+    The original file is never modified - a patched copy is written to the
     build output directory instead.
 
     Parameters
@@ -777,7 +777,7 @@ def _hijack_via_msitools(patched_msi, payload_path, ca_name, stream_tag,
 
 
 # ============================================================================
-# Public API — add_multiple_files_to_msi
+# Public API - add_multiple_files_to_msi
 # ============================================================================
 
 def add_multiple_files_to_msi(source_msi: pathlib.Path,
@@ -842,7 +842,7 @@ def add_multiple_files_to_msi(source_msi: pathlib.Path,
 def _bundle_files_with_cab(db: InstallerDatabase, files: list,
                            target_dir_id: str):
     """
-    Internal helper — discovers existing Feature / Directory and creates a
+    Internal helper - discovers existing Feature / Directory and creates a
     proper CAB stream containing *files*.
     """
     raw = db.handle
@@ -923,7 +923,7 @@ def _bundle_files_with_cab(db: InstallerDatabase, files: list,
 
 
 # ============================================================================
-# Public API — create_custom_action (thin convenience wrapper)
+# Public API - create_custom_action (thin convenience wrapper)
 # ============================================================================
 
 def create_custom_action(db,
@@ -974,7 +974,7 @@ def create_custom_action(db,
 
 
 # ============================================================================
-# Legacy aliases — keep the old class names importable so existing
+# Legacy aliases - keep the old class names importable so existing
 # references elsewhere in the codebase continue to work
 # ============================================================================
 

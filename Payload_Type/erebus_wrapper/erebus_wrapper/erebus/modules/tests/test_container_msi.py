@@ -38,7 +38,7 @@ print(f"  Temp build dir : {BUILD_DIR}")
 print(f"{'='*60}\n")
 
 # -----------------------------------------------------------------------
-# 1. InstallerDatabase — open read-only and scan tables
+# 1. InstallerDatabase - open read-only and scan tables
 # -----------------------------------------------------------------------
 print("[1] InstallerDatabase read-only open + table scan")
 try:
@@ -112,7 +112,7 @@ try:
     if len(comp_rows) > 30:
         print(f"  ... and {len(comp_rows)-30} more")
 
-    # -- File table — every file that gets installed (payload paths) --
+    # -- File table - every file that gets installed (payload paths) --
     file_rows = db.read_table("File", sort=False)
     print(f"\n  ── File table ({len(file_rows)} entries) ──")
     print(f"  {'FileID':<25s} {'Component':<25s} {'FileName':<40s} {'Size':>10s}  Seq")
@@ -257,11 +257,11 @@ for ext, expected_code in [(".vbs", cm.PackagerActionCodes.BINARY_VBS),
            f"got code={code}")
 
 # -----------------------------------------------------------------------
-# 5. hijack_msi — full integration (creates a patched copy)
+# 5. hijack_msi - full integration (creates a patched copy)
 # -----------------------------------------------------------------------
 print("\n[5] hijack_msi integration test")
 try:
-    # Create a tiny dummy payload (just a few bytes — won't run, but tests the MSI plumbing)
+    # Create a tiny dummy payload (just a few bytes - won't run, but tests the MSI plumbing)
     payload_dir = BUILD_DIR / "payload"
     payload_dir.mkdir(parents=True, exist_ok=True)
     dummy_payload = payload_dir / "dummy_payload.exe"
@@ -331,7 +331,7 @@ except Exception as e:
     report("hijack_msi integration", False, f"{e}\n{traceback.format_exc()}")
 
 # -----------------------------------------------------------------------
-# 6. hijack_msi — run-exe vector
+# 6. hijack_msi - run-exe vector
 # -----------------------------------------------------------------------
 print("\n[6] hijack_msi run-exe vector")
 try:

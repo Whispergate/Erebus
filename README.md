@@ -54,19 +54,27 @@ View the rendered documentation by clicking on **Docs -> Agent Documentation** i
 ## Roadmap
 ### Features
 - [x] Execution Guardrails
-- [ ] Extended support for larger shellcodes (Apollo, Athena, etc.)
+- [x] Extended support for larger shellcodes (Apollo, Athena, etc.)
 - [x] Increased Modularity & Customisation Support (Templating)
 - [x] Extended DLL Hijacking Shellcode Obfuscation Support (More decryption, decoding, and decompression support)
   - [x] Decoding
   - [x] Decryption
   - [x] Decompression
 - [ ] Complete XLSM/XLAM phishing payloads
-- [ ] LNK Triggers
+- [x] LNK Triggers
 - [x] MSC Snap-In and GrimReaper triggers
 - [x] Hidden MSI/ISO container files
 - [ ] Maldocs VBA generator
 
 ### Bug Fixes
+
+#### [v0.0.2]
+- Fixed issues with XLL source code saving
+- Generated build_xll.bat for native Windows recompilation
+- Improved error handling and output messages during build process
+- Fixed MSI Backdoor injector
+- Added MSC GrimReaper Trigger
+- Added support for larger shellcodes (Apollo, Athena, etc.)
 
 #### [v0.0.1]
 - Minor issues with build steps

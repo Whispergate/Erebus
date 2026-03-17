@@ -1502,11 +1502,7 @@ End Sub
 
         output_path = Path(output_path)
 
-        # .bas files have a specific header format
-        bas_content = """
-{vba_code}"""
-
-        output_path.write_text(bas_content, encoding='utf-8')
+        output_path.write_text(vba_code, encoding='utf-8')
         return output_path
 
     # Plugin function registrations

@@ -1,4 +1,7 @@
 logs*
+rabbitmq_config.json
+.claude
+.planning
 
 __pycache__/
 .DS_Store
