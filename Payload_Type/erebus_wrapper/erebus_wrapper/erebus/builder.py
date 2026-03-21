@@ -1688,7 +1688,7 @@ generated if none have been entered.""",
                     output += f"[DEBUG] Copied CSharp shellcode to {encrypted_shellcode_path_sc}\n"
                 elif self.get_parameter("0.0 Main Payload Type") == "Hijack":
                     shutil.copy(src=str(obfuscated_shellcode_path),
-                                dst=str(encrypted_shellcode_path_dll))
+                                dst=str(encrypted_shellcode_path_sc))
 
                 if self.get_parameter("0.9h XLL Payload Type") == "XLL Add-In DLL":
                     shutil.copy(src=str(obfuscated_shellcode_path),
