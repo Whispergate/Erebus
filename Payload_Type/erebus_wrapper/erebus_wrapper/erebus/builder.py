@@ -116,6 +116,7 @@ class ErebusWrapper(PayloadType):
     name = "erebus_wrapper"
     author = "@Lavender-exe, @hunterino-sec"
     semver = "v0.0.2"
+    
     note = f"An Initial Access Toolkit built to speed up payload development & delivery.\nVersion: {semver}"
 
     file_extension = "zip"
