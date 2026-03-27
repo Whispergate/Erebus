@@ -185,10 +185,39 @@ byte[] shellcode = new byte[] {
 
 ---
 
+## Custom Shellcode (External C2)
+
+Erebus can use raw shellcode from any external C2 instead of (or in addition to) the Mythic-wrapped payload. Enable via the `0.0a Enable Custom Shellcode` parameter and upload the raw binary via `0.0b Custom Shellcode File`.
+
+**How It Works**
+- When enabled, the uploaded file is written to `shellcode/payload.bin` in the build tree, overriding the Mythic-generated shellcode entirely.
+- The rest of the pipeline (MZ-header check, shellcrypt obfuscation, loader compilation) runs unchanged against the custom blob.
+- The Mythic-wrapped payload selection is ignored but still required by the Mythic UI.
+
+**Supported Sources**
+- Cobalt Strike - export a raw shellcode payload (stageless, `.bin`)
+- Havoc - export a raw shellcode blob
+- Sliver - use `generate --format shellcode`
+- msfvenom - `msfvenom -f raw -o payload.bin ...`
+- Any other C2 that exports position-independent shellcode as a raw binary
+
+**Constraints**
+- The file **must** be raw shellcode - PE files (MZ header `\x4d\x5a`) are rejected and the build will fail with a clear error.
+- Architecture must match the selected loader architecture (x64 vs x86).
+- All obfuscation parameters (encryption, compression, encoding) apply normally to the custom shellcode.
+
+**OPSEC Notes**
+- Custom shellcode is not wrapped in the Mythic callback infrastructure, so Mythic will not receive a callback - this is expected when targeting an external C2.
+- Ensure the shellcode format matches the loader expectations (raw, not base64 or hex-encoded).
+
+---
+
 ## MalDocs (Excel VBA) OPSEC Considerations
 
 **Build Step**
-- The build pipeline logs MalDoc generation under the `Creating MalDoc` step.
+- The Linux builder outputs the `.bas` VBA source and a `build_maldoc.bat` runbook.
+- Final document injection is performed on a Windows host via `erebus_helper.py` using Excel COM automation. This two-phase approach avoids the corruption issues inherent in pure ZIP/OLE manipulation on Linux.
+- The helper saves to a temp path in `%TEMP%` first, then moves to the final destination - this sidesteps the `SaveAs` COM overwrite failure (`0x800A03EC`) that occurs when a file already exists at the target path.
 
 **Macro Security Prompts**
 - Office often blocks macros from the internet (Mark-of-the-Web).
@@ -205,6 +234,23 @@ byte[] shellcode = new byte[] {
 **Evasion & Visibility**
 - VBA obfuscation may help evade simple signature-based detection.
 - Over-obfuscation can increase anomaly scores in modern detections.
+
+**Dynamic Payload Discovery**
+
+When using Command Execution mode, the generated VBA resolves the payload location at runtime rather than using a hardcoded path. The `FindPayload` VBA function searches the following locations in order:
+
+1. `ThisWorkbook.Path` - same directory as the document
+2. `%TEMP%` / `%TMP%`
+3. `%APPDATA%` / `%LOCALAPPDATA%`
+4. `%USERPROFILE%\Desktop`, `\Downloads`, `\Documents`
+5. `%USERPROFILE%` root
+6. OneDrive-synced Desktop, Downloads, Documents (`%OneDrive%`)
+
+Both a direct existence check (`fso.FileExists`) and a recursive subfolder search are performed per candidate. This covers OneDrive-redirected shell folders (common on modern Windows where Desktop/Downloads live under `%OneDrive%` rather than `%USERPROFILE%`).
+
+If the payload is found, its full path is quoted with `Chr(34)` and substituted back into the shell command. The macro exits silently if the file cannot be found, avoiding a RegSvr32 / process-launch error dialog that could alert the user.
+
+**OPSEC Note**: `Scripting.FileSystemObject` is a common macro dependency and is not inherently suspicious, but recursive filesystem enumeration from EXCEL.EXE may trigger behavioral heuristics in advanced EDR products. Consider pairing with a short `Application.Wait` delay before the search.
 
 **VBA Loader Techniques**
 
@@ -1075,6 +1121,12 @@ Set-AuthenticodeSignature -FilePath "payload.exe" -Certificate $orgCert
 | NtQueueApcThread | Medium | ★★★☆☆ |
 | EarlyCascade injection | Very Low | ★★★★★ |
 | PoolParty injection | Very Low | ★★★★★ |
+| VBA VirtualAlloc + CreateThread | Very High | ★☆☆☆☆ |
+| VBA EnumSystemLocalesA | Medium | ★★★☆☆ |
+| VBA QueueUserAPC | Medium-Low | ★★★★☆ |
+| VBA Process Hollowing | Medium-High | ★★★☆☆ |
+| XLL Add-In DLL | Low | ★★★★☆ |
+| External C2 shellcode (custom) | Same as shellcode | - |
 | Self-signed cert | High | ★★☆☆☆ |
 | Spoofed cert | Medium | ★★★☆☆ |
 | Legitimate cert | Very Low | ★★★★★ |

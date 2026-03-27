@@ -182,59 +182,82 @@ Generates DLL proxy/hijack code for DLL sideloading.
 - Function forwarding
 
 #### MalDocs (Excel) Plugin
-Creates or backdoors Excel documents (XLSM/XLAM/XLS) with embedded VBA payloads, or exports VBA modules for manual import.
+Creates or backdoors Excel documents (XLSM/XLAM/XLS) with embedded VBA payloads, or exports VBA modules for manual import. Full document injection on a Windows host is handled by the `erebus_helper` deferred build step using COM automation.
 
 **Functions:**
 - `generate_excel_payload()` - Create a new XLSM with embedded VBA payload
 - `backdoor_existing_excel()` - Inject VBA payload into an existing Excel file
 - `export_vba_as_bas()` - Export VBA as .bas module file (importable into Excel)
 - `export_vba_as_text()` - Export VBA as plain text for reference
-- `generate_vba_loader_virtualalloc()` - Classic VirtualAlloc + CreateThread loader
+- `generate_command_execution_vba()` - VBA macro for trigger-binary execution with dynamic payload discovery
+- `generate_vba_loader_createthread()` - Classic VirtualAlloc + CreateThread loader
 - `generate_vba_loader_enumlocales()` - EnumSystemLocalesA callback technique
 - `generate_vba_loader_queueuserapc()` - QueueUserAPC injection technique
 - `generate_vba_loader_process_hollowing()` - Process hollowing (notepad.exe host)
+- `generate_xll_template()` - Generate XLL (Excel Add-In DLL) C/C++ source template
+- `register_xll_function()` - Register an XLL exported function
 
-**Export Modes (RECOMMENDED: VBA Module Only)**
+**Output Modes**
 
-**VBA Module Only** (Default)
-   - Exports as `.bas` file that can be imported into any Excel document
+**VBA Module Only**
+   - Exports as a `.bas` file that can be imported into any Excel document
    - Import: Excel → Alt+F11 → File → Import → Select .bas file
    - Maximum flexibility - works with any Excel document
-   - No OLE/compatibility issues
    - Generates both `.bas` (importable) and `.txt` (reference) files
-   - **Disable**: No MalDoc generation if not needed
 
-**VBA Loader Techniques:**
+**Create / Backdoor Excel** (XLSM / XLSX / XLAM)
+   - Produces a complete Excel workbook with the VBA payload embedded
+   - Requires `erebus_helper` on a Windows host for reliable COM-based injection (deferred via `build_maldoc.bat`)
+   - On Linux, a best-effort ZIP-based injection is used as a fallback
+   - `xlsx` and `xlsm` are saved with `xlOpenXMLWorkbookMacroEnabled` (format 52); `xlam` uses `xlOpenXMLAddIn` (format 55)
 
-1. **VirtualAlloc + CreateThread** (Classic, Reliable)
-   - Most compatible, straightforward approach
-   - Works on all Office versions
+**XLL Add-In DLL**
+   - Compiles a native Windows DLL that Excel loads automatically via the `.xll` extension
+   - Supports MSVC and MinGW compilers with selectable injection method (CreateThread in-process, ProcessInject remote)
+   - Custom guardrail code and extra linker flags are supported
+   - Requires `erebus_helper` on a Windows host for compilation
 
-2. **EnumSystemLocalesA Callback** (Static Analysis Bypass)
-   - Bypasses some static analysis tools
-   - Lower detection rate
+**VBA Loader Techniques (Shellcode Injection mode):**
 
-3. **QueueUserAPC Injection** (APC-based)
-   - No suspicious thread creation
-   - Stealthier than CreateThread
+| Technique | Detection Profile | Notes |
+|-----------|-------------------|-------|
+| **VirtualAlloc + CreateThread** | High | Most compatible; works on all Office versions |
+| **EnumSystemLocalesA Callback** | Medium | Bypasses some static analysis tools |
+| **QueueUserAPC Injection** | Medium-Low | No explicit thread creation |
+| **Process Hollowing** | Medium-High | Remote injection into a suspended process; highest isolation |
 
-4. **Process Hollowing** (Remote Injection)
-   - Highest evasion potential
-   - Complex but most stealthy
+**Dynamic Payload Discovery (Command Execution mode)**
+
+When the MalDoc is configured for command execution, the generated VBA does not rely on a hardcoded full path. Instead, `FindPayload` searches common filesystem locations at runtime to resolve the payload filename before constructing the shell command:
+
+1. `ThisWorkbook.Path` - same directory as the opened document (checked first)
+2. `%TEMP%` / `%TMP%`
+3. `%APPDATA%` / `%LOCALAPPDATA%`
+4. `%USERPROFILE%\Desktop`, `\Downloads`, `\Documents`
+5. `%USERPROFILE%` root
+6. `%OneDrive%\Desktop`, `\Downloads`, `\Documents`
+
+Both a direct FSO existence check and a recursive subfolder search (`RecursiveSearch`) are performed per candidate. If no match is found the original configured path is used as a fallback.
+
+A `StackSearch` (iterative, BFS via Collection stack) utility function is also included in the generated VBA for use cases where deep folder trees make recursion impractical.
 
 **Features:**
 - Supports XLSM/XLAM/XLS inputs
 - Multiple execution triggers (AutoOpen, OnClose, OnSave)
 - Optional VBA obfuscation
-- Command execution or shellcode injection
-- Selectable loader techniques
+- Command execution (WScript.Shell) or direct shellcode injection
+- Selectable shellcode loader technique
 - Direct .bas module export for maximum compatibility
+- Path quoting in shell commands (`Chr(34)`) to handle paths with spaces
+- Existence guard before execution - macro exits silently if the payload is not found
 
 **Requirements:**
-- `openpyxl` (required for Excel manipulation)
+- `openpyxl` (required for Excel manipulation on Linux)
+- `pywin32` + Microsoft Excel (required for COM-based injection on Windows)
 
 **Build Step:**
-- `Creating MalDoc` - Generates or backdoors the Excel document during the build pipeline
+- The Linux builder produces the `.bas` VBA source file and a `build_maldoc.bat` / `build_maldoc.sh` runbook
+- The operator runs `erebus_helper.py xlsm --bas-file payload.bas --output Invoice.xlsm` on a Windows host to complete injection
 
 **Example Usage:**
 ```python
@@ -245,11 +268,33 @@ excel_path = generate_excel_payload(
     output_path="./payload/Invoice.xlsm"
 )
 
-# Generate specific loader technique
+# Generate command-execution macro (dynamic payload discovery included automatically)
+vba_code = plugin.generate_command_execution_vba(
+    trigger_binary="C:\\Windows\\SysWOW64\\regsvr32.exe",
+    trigger_command="erebus.dll",   # searched for by name at runtime
+    trigger_type="AutoOpen"
+)
+
+# Generate specific shellcode loader technique
 vba_code = plugin.generate_vba_loader_enumlocales(
     vba_shellcode=shellcode,
     trigger_type="AutoOpen"
 )
+```
+
+**erebus_helper CLI (Windows-side injection)**
+```
+# Inject VBA into a new blank workbook
+python erebus_helper.py xlsm --bas-file Invoice.bas --output Invoice.xlsm
+
+# Backdoor an existing workbook
+python erebus_helper.py xlsm --bas-file Invoice.bas --source-excel template.xlsx --output Invoice.xlsm
+
+# Generate an XLAM add-in
+python erebus_helper.py xlam --bas-file Invoice.bas --output Invoice.xlam
+
+# Compile an XLL add-in DLL
+python erebus_helper.py xll --source xll_payload.cpp --output Invoice.xll --compiler MSVC
 ```
 
 ### CodeSigner Plugins

