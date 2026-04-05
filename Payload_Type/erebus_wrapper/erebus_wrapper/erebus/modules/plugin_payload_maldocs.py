@@ -144,6 +144,41 @@ class PayloadMalDocsPlugin(ErebusPlugin):
 
         return advanced_libs
 
+    def _resolve_template_path(self, output_path):
+        """
+        Resolve the correct template file (template.xlsm or template.xlsx) based on
+        the desired output extension.  Search order:
+        1. agent_code/templates/  (canonical location)
+        2. erebus/templates/      (legacy fallback)
+
+        Args:
+            output_path: Target output path whose suffix selects the template variant.
+
+        Returns:
+            Path or None: Resolved template path, or None if not found.
+        """
+        output_path = Path(output_path)
+        ext = output_path.suffix.lower()
+
+        # Pick template variant: .xlsm for macro-enabled formats, .xlsx otherwise
+        if ext in (".xlsm", ".xlam"):
+            template_name = "template.xlsm"
+        else:
+            template_name = "template.xlsx"
+
+        # agent_code/templates/ is the canonical location
+        repo_root = Path(__file__).resolve().parents[3]  # up from modules -> erebus -> erebus_wrapper -> repo root
+        candidates = [
+            repo_root / "agent_code" / "templates" / template_name,
+            Path(__file__).resolve().parent.parent / "templates" / template_name,
+        ]
+
+        for candidate in candidates:
+            if candidate.exists():
+                return candidate
+
+        return None
+
     def create_new_excel_with_payload(self, output_path, vba_code, document_name="Invoice",
                                      hidden=True, auto_open=True, template_path=None):
         """
@@ -168,17 +203,14 @@ class PayloadMalDocsPlugin(ErebusPlugin):
 
         # If template is not provided, try to locate it in the templates directory
         if template_path is None:
-            # Look for template.xlsx in the templates directory
-            plugin_dir = Path(__file__).resolve().parent.parent
-            templates_dir = plugin_dir / "templates"
-            template_path = templates_dir / "template.xlsx"
-            
-            if template_path.exists():
+            template_path = self._resolve_template_path(output_path)
+
+            if template_path and template_path.exists():
                 return self._create_excel_from_template(output_path, vba_code, template_path)
             else:
                 # Fall back to creating from scratch if template not found
                 return self._create_excel_with_openpyxl(output_path, vba_code, document_name)
-        
+
         # If template is explicitly provided, use it
         return self._create_excel_from_template(output_path, vba_code, template_path)
 

