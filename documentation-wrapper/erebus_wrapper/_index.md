@@ -14,15 +14,23 @@ Erebus is a modern initial access wrapper aimed at decreasing the development to
   - ClickOnce (.NET with 5 injection methods)
   - DLL Hijacking (Proxy-based execution)
 
+**Shellcode Source:**
+  - Mythic-wrapped C2 agent (default)
+  - Custom external shellcode upload (Cobalt Strike, Havoc, Sliver, etc.) via `Enable Custom Shellcode`
+
 **Shellcode Obfuscation Pipeline:**
   - Compression: LZNT1, RLE, or None
   - Encryption: RC4, XOR
   - Encoding: BASE64, ALPHA32, ASCII85, WORDS256
   - Output formats: C, C#, Raw
 
-**Injection Methods:**
-  - NtQueueApcThread
-  - NtMapViewOfSection
+**Injection Methods (Shellcode Loader):**
+  - NtMapViewOfSection (Type 1)
+  - CreateFiber (Type 2)
+  - EarlyCascade / NtQueueApcThread (Type 3)
+  - PoolParty (Type 4)
+
+**Injection Methods (ClickOnce):**
   - CreateFiber
   - EarlyCascade
   - PoolParty
@@ -42,6 +50,10 @@ Erebus is a modern initial access wrapper aimed at decreasing the development to
   - MalDocs (Excel) Support:
     - VBA Module Export (.bas files for direct import into Excel)
     - 4 VBA Loader Techniques (VirtualAlloc, EnumLocales, QueueUserAPC, ProcessHollowing)
+    - XLL Add-In DLL payloads (native Excel add-in execution)
+    - Dynamic payload discovery - VBA enumerates the filesystem to locate the payload by name at runtime rather than relying on a hardcoded path
+    - Output formats: XLSM, XLSX, XLAM
+    - Windows-side COM injection via `erebus_helper` (deferred build)
   - Decoy File Support (Social engineering with fake content)
   - Configurable Injection Parameters (Target process, injection type)
 

@@ -38,19 +38,44 @@ Now, you might be wondering _when_ should you or a user do this to properly add 
 
 View the rendered documentation by clicking on **Docs -> Agent Documentation** in the upper right-hand corner of the Mythic interface.
 
+## Features
+
+- **Payload Generation**: Shellcode loader, VBA macros, XLL Add-Ins, DLL hijacking, and maldocs
+- **Execution Methods**: CreateThread, Process Hollowing, QueueUserAPC, EnumLocales, and more
+- **VBA Payloads**: Command execution, PowerShell, Schtasks, WMI, Rundll32, Regsvr32, and shellcode injection
+- **Maldoc Creation**: Template-based XLSM generation with VBA injection
+- **MSI Backdooring**: Multiple attack vectors for MSI installer injection
+- **Code Signing**: Self-signed, URL spoofing, and custom certificate support
+- **Obfuscation**: VBA obfuscation, shellcode encryption, and compression
+- **IOC Tracking**: Automated hash collection and IOC report generation
+- **Decoy Files**: Custom decoy file inclusion for social engineering
+- **Plugin System**: Easily add your own plugins using the plugin system for internal use-cases
+
 ## Roadmap
 ### Features
-- [ ] Execution Guardrails
-- [ ] Extended support for larger shellcodes (Apollo, Athena, etc.)
+- [x] Execution Guardrails
+- [x] Extended support for larger shellcodes (Apollo, Athena, etc.)
 - [x] Increased Modularity & Customisation Support (Templating)
-- [ ] Extended DLL Hijacking Shellcode Obfuscation Support (More decryption, decoding, and decompression support)
+- [x] Extended DLL Hijacking Shellcode Obfuscation Support (More decryption, decoding, and decompression support)
   - [x] Decoding
-  - [ ] Decryption
+  - [x] Decryption
   - [x] Decompression
 - [ ] Complete XLSM/XLAM phishing payloads
-- [ ] LNK Triggers
-- [ ] MSC Snap-In and GrimReaper triggers
-- [ ] Hidden MSI/ISO container files
+- [x] LNK Triggers
+- [x] MSC Snap-In and GrimReaper triggers
+- [x] Hidden MSI/ISO container files
 - [ ] Maldocs VBA generator
 
 ### Bug Fixes
+
+#### [v0.0.2]
+- Fixed issues with XLL source code saving
+- Generated build_xll.bat for native Windows recompilation
+- Improved error handling and output messages during build process
+- Fixed MSI Backdoor injector
+- Added MSC GrimReaper Trigger
+- Added support for larger shellcodes (Apollo, Athena, etc.)
+
+#### [v0.0.1]
+- Minor issues with build steps
+- Loader Decompression bugs 

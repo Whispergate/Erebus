@@ -1,7 +1,7 @@
 +++
 title = "Development"
 chapter = false
-weight = 15
+weight = 1
 pre = "<b>1. </b>"
 +++
 
@@ -145,9 +145,8 @@ The comprehensive build workflow for Erebus is shown below:
 ### 2. Shellcode Obfuscation
 - **Input**: Raw shellcode binary from Mythic
 - **Compression**: LZNT1, RLE, or NONE
-- **Encryption**: RC4 or XOR
-  - Currently supported: RC4 (stream cipher), XOR (simple XOR encryption)
-  - Available but not yet supported by loaders (TODO): AES128_CBC, AES256_CBC, AES256_ECB, CHACHA20, SALSA20, XOR_COMPLEX
+- **Encryption**: RC4, XOR, AES-ECB, or AES-CBC
+  - All four methods are supported by the Shellcode Loader via BCrypt
 - **Encoding**: ALPHA32, ASCII85, BASE64, WORDS256, or NONE
 - **Output Format**: C, CSharp, or Raw
   - Additional formats available for custom loaders: Nim, Go, Python, PowerShell, VBA, VBScript, Rust, JavaScript, Zig
@@ -188,11 +187,10 @@ The comprehensive build workflow for Erebus is shown below:
 ### Shellcode Loader Configuration (Section 0.3-0.5)
 - **0.3 Loader Build Configuration**: Debug or Release build
 - **0.4 Shellcode Loader - Injection Type**:
-  - 1 = NtQueueApcThread (APC injection to suspended thread - Remote)
-  - 2 = NtMapViewOfSection (Section mapping injection - Remote)
-  - 3 = CreateFiber (Fiber-based execution - Self)
-  - 4 = EarlyCascade (Early Bird APC injection - Remote)
-  - 5 = PoolParty (Worker Factory thread pool injection - Remote)
+  - 1 = NtMapViewOfSection (Section mapping injection - Remote)
+  - 2 = CreateFiber (Fiber-based execution - Self)
+  - 3 = EarlyCascade / NtQueueApcThread (Early Bird APC injection - Remote)
+  - 4 = PoolParty (Worker Factory thread pool injection - Remote)
 - **0.5 Shellcode Loader - Target Process**: Process name for remote injection
 
 ### ClickOnce Configuration (Section 0.3-0.7)
@@ -454,7 +452,7 @@ The Erebus builder executes the following build steps in sequence. Each step is 
 - **Description**: Compile C++ Shellcode Loader with obfuscated shellcode
 - **Triggers**: Only when Loader Type = Shellcode Loader
 - **Configuration Applied**:
-  - Injection type (NtQueueApcThread, NtMapViewOfSection, CreateFiber, etc.)
+  - Injection type (NtMapViewOfSection, CreateFiber, EarlyCascade, PoolParty)
   - Target process for injection
   - Compression/Encoding type
   - Encryption type and key
@@ -549,9 +547,8 @@ If any step fails, the entire build is terminated and an error is reported to th
 ### 2. Shellcode Obfuscation
 - **Input**: Raw shellcode binary from Mythic
 - **Compression**: LZNT1, RLE, or NONE
-- **Encryption**: RC4 or XOR
-  - Currently supported: RC4 (stream cipher), XOR (simple XOR encryption)
-  - Available but not yet supported by loaders (TODO): AES128_CBC, AES256_CBC, AES256_ECB, CHACHA20, SALSA20, XOR_COMPLEX
+- **Encryption**: RC4, XOR, AES-ECB, or AES-CBC
+  - All four methods are supported by the Shellcode Loader via BCrypt
 - **Encoding**: ALPHA32, ASCII85, BASE64, WORDS256, or NONE
 - **Output Format**: C, CSharp, or Raw
   - Additional formats available for custom loaders: Nim, Go, Python, PowerShell, VBA, VBScript, Rust, JavaScript, Zig
@@ -592,11 +589,10 @@ If any step fails, the entire build is terminated and an error is reported to th
 ### Shellcode Loader Configuration (Section 0.3-0.5)
 - **0.3 Loader Build Configuration**: Debug or Release build
 - **0.4 Shellcode Loader - Injection Type**:
-  - 1 = NtQueueApcThread (APC injection to suspended thread - Remote)
-  - 2 = NtMapViewOfSection (Section mapping injection - Remote)
-  - 3 = CreateFiber (Fiber-based execution - Self)
-  - 4 = EarlyCascade (Early Bird APC injection - Remote)
-  - 5 = PoolParty (Worker Factory thread pool injection - Remote)
+  - 1 = NtMapViewOfSection (Section mapping injection - Remote)
+  - 2 = CreateFiber (Fiber-based execution - Self)
+  - 3 = EarlyCascade / NtQueueApcThread (Early Bird APC injection - Remote)
+  - 4 = PoolParty (Worker Factory thread pool injection - Remote)
 - **0.5 Shellcode Loader - Target Process**: Process name for remote injection
 
 ### ClickOnce Configuration (Section 0.3-0.7)
@@ -872,12 +868,11 @@ unsigned char iv[] = { {{ ENCRYPTION_IV }} };
 
 **Available Template Variables:**
 - `TARGET_PROCESS`: Target process path for injection (default: "C:\Windows\System32\notepad.exe")
-- `INJECTION_TYPE`: Numeric injection type ID (1-5)
-  - 1: NtQueueApcThread
-  - 2: NtMapViewOfSection
-  - 3: CreateFiber
-  - 4: EarlyCascade
-  - 5: PoolParty
+- `INJECTION_TYPE`: Numeric injection type ID (1-4)
+  - 1: NtMapViewOfSection
+  - 2: CreateFiber
+  - 3: EarlyCascade / NtQueueApcThread
+  - 4: PoolParty
 - `COMPRESSION_TYPE`: Numeric compression ID (0-2)
   - 0: NONE
   - 1: LZNT1
@@ -947,10 +942,10 @@ config_template = environment.get_template("config.hpp")
 # Prepare template data
 config_data = {
     "TARGET_PROCESS": "C:\\Windows\\System32\\notepad.exe",
-    "INJECTION_TYPE": 1,
+    "INJECTION_TYPE": 3,      # EarlyCascade
     "COMPRESSION_TYPE": 1,    # LZNT1
     "ENCODING_TYPE": 0,       # NONE
-    "ENCRYPTION_TYPE": 1,     # XOR
+    "ENCRYPTION_TYPE": 2,     # RC4
 }
 
 # Render template

