@@ -24,9 +24,13 @@ Erebus is a modern initial access wrapper aimed at decreasing the development to
   - Encoding: BASE64, ALPHA32, ASCII85, WORDS256
   - Output formats: C, C#, Raw
 
-**Injection Methods:**
-  - NtQueueApcThread
-  - NtMapViewOfSection
+**Injection Methods (Shellcode Loader):**
+  - NtMapViewOfSection (Type 1)
+  - CreateFiber (Type 2)
+  - EarlyCascade / NtQueueApcThread (Type 3)
+  - PoolParty (Type 4)
+
+**Injection Methods (ClickOnce):**
   - CreateFiber
   - EarlyCascade
   - PoolParty

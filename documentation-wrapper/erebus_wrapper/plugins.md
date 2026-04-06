@@ -182,7 +182,7 @@ Generates DLL proxy/hijack code for DLL sideloading.
 - Function forwarding
 
 #### MalDocs (Excel) Plugin
-Creates or backdoors Excel documents (XLSM/XLAM/XLS) with embedded VBA payloads, or exports VBA modules for manual import. Full document injection on a Windows host is handled by the `erebus_helper` deferred build step using COM automation.
+Creates or backdoors Excel documents (XLSM/XLAM/XLS) with embedded VBA payloads, or exports VBA modules for manual import. The builder compiles XLSM/XLSX files directly on Linux using templates from `agent_code/templates/` and a built-in VBA project compiler (`agent_code/vba_compiler/`). Optional Windows-side COM re-injection via `erebus_helper` is available for higher-fidelity output.
 
 **Functions:**
 - `generate_excel_payload()` - Create a new XLSM with embedded VBA payload
@@ -206,10 +206,11 @@ Creates or backdoors Excel documents (XLSM/XLAM/XLS) with embedded VBA payloads,
    - Generates both `.bas` (importable) and `.txt` (reference) files
 
 **Create / Backdoor Excel** (XLSM / XLSX / XLAM)
-   - Produces a complete Excel workbook with the VBA payload embedded
-   - Requires `erebus_helper` on a Windows host for reliable COM-based injection (deferred via `build_maldoc.bat`)
-   - On Linux, a best-effort ZIP-based injection is used as a fallback
-   - `xlsx` and `xlsm` are saved with `xlOpenXMLWorkbookMacroEnabled` (format 52); `xlam` uses `xlOpenXMLAddIn` (format 55)
+   - Produces a complete Excel workbook with the VBA payload embedded directly on Linux
+   - Uses templates from `agent_code/templates/` (template.xlsm / template.xlsx) as the base document
+   - VBA project compiled into a valid `vbaProject.bin` via `agent_code/vba_compiler/` (MS-OVBA spec compliant)
+   - `build_maldoc.bat` included for optional Windows-side COM re-injection via `erebus_helper`
+   - When "Backdoor Existing" is selected without uploading a file, the template is used automatically
 
 **XLL Add-In DLL**
    - Compiles a native Windows DLL that Excel loads automatically via the `.xll` extension
@@ -253,11 +254,12 @@ A `StackSearch` (iterative, BFS via Collection stack) utility function is also i
 
 **Requirements:**
 - `openpyxl` (required for Excel manipulation on Linux)
-- `pywin32` + Microsoft Excel (required for COM-based injection on Windows)
+- `ms-ovba-compression` (optional, improves VBA project compilation; built-in fallback available)
+- `pywin32` + Microsoft Excel (optional, for Windows-side COM re-injection)
 
 **Build Step:**
-- The Linux builder produces the `.bas` VBA source file and a `build_maldoc.bat` / `build_maldoc.sh` runbook
-- The operator runs `erebus_helper.py xlsm --bas-file payload.bas --output Invoice.xlsm` on a Windows host to complete injection
+- The builder compiles the XLSM/XLSX directly on Linux using the template and the VBA project compiler
+- A `.bas` file and `build_maldoc.bat` are included for optional Windows-side COM re-injection via `erebus_helper`
 
 **Example Usage:**
 ```python
