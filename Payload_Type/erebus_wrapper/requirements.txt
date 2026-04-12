@@ -16,3 +16,5 @@ olefile
 openpyxl
 python-docx
 xlsxwriter
+Pillow
+cairosvg

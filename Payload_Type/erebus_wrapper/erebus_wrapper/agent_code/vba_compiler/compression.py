@@ -55,7 +55,7 @@ def _compress_fallback(data: bytes) -> bytes:
             # Compressed chunk
             header = 0xB000 | (len(body) - 1)
         else:
-            # Raw chunk (compression didn't help) — store uncompressed
+            # Raw chunk (compression didn't help) - store uncompressed
             body = chunk_raw
             # Pad to 4096 if this is the last partial chunk
             if len(body) < 4096:

@@ -95,6 +95,10 @@
 #define CONFIG_GUARDRAILS_CHECK_DEBUGGER_PROCESSES {{ GUARDRAILS_CHECK_DEBUGGER_PROCESSES }}
 #define CONFIG_GUARDRAILS_CHECK_HARDWARE_BREAKPOINTS {{ GUARDRAILS_CHECK_HARDWARE_BREAKPOINTS }}
 #define CONFIG_GUARDRAILS_CHECK_TIMING {{ GUARDRAILS_CHECK_TIMING }}
+#define CONFIG_GUARDRAILS_CHECK_SANDBOX {{ GUARDRAILS_CHECK_SANDBOX }}
+
+// Decoy file to open when guardrails fail (empty = silent exit)
+#define CONFIG_GUARDRAILS_DECOY_FILE "{{ GUARDRAILS_DECOY_FILE }}"
 
 // Helper function to get configured guardrails
 inline erebus::guardrails::GuardrailConfig GetGuardrailConfig() {
@@ -106,6 +110,7 @@ inline erebus::guardrails::GuardrailConfig GetGuardrailConfig() {
         config.check_debugger_processes = CONFIG_GUARDRAILS_CHECK_DEBUGGER_PROCESSES;
         config.check_hardware_breakpoints = CONFIG_GUARDRAILS_CHECK_HARDWARE_BREAKPOINTS;
         config.check_timing_checks = CONFIG_GUARDRAILS_CHECK_TIMING;
+        config.check_sandbox_environment = CONFIG_GUARDRAILS_CHECK_SANDBOX;
     #endif
     
     return config;

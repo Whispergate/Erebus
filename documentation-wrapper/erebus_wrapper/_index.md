@@ -43,10 +43,18 @@ Erebus is a modern initial access wrapper aimed at decreasing the development to
   - MSI (Windows Installer packages)
   - 7z (High compression archives)
   - ZIP (Standard archives with optional encryption)
+  - **Electron fake-installer** (single portable .exe that presents a Next/Install/Finish wizard, extracts the embedded loader to `%TEMP%`, and spawns it hidden & detached — includes a two-gate interaction + environment guardrails system that defers the file copy until after real user interaction AND configurable anti-sandbox checks pass)
+
+**Trigger Mechanisms:**
+  - **LNK** - Windows shortcut (.lnk) with configurable icon, target binary, and command chain
+  - **BAT** - Batch script chaining the trigger binary with decoy display
+  - **MSI** - Windows Installer package with custom action
+  - **MSC** - Windows Management Console snap-in (Explorer-triggered)
+  - **HTML Smuggling** - Self-contained HTML page with XOR+base64 obfuscated payload that reconstructs a Blob in-browser and triggers a download, defeating gateway base64 scanning
+  - **ClickFix** - Fake CAPTCHA/verification lure page that silently copies a PowerShell/cmd command to the clipboard and walks the victim through Win+R → Ctrl+V → Enter to execute it
 
 **Delivery & Evasion:**
   - Code Signing (Self-signed, spoofed, or legitimate certificates)
-  - LNK Trigger Mechanisms (Shortcut-based execution chains)
   - MalDocs (Excel) Support:
     - VBA Module Export (.bas files for direct import into Excel)
     - 4 VBA Loader Techniques (VirtualAlloc, EnumLocales, QueueUserAPC, ProcessHollowing)

