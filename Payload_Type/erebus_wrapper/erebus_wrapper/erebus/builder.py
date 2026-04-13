@@ -2320,6 +2320,18 @@ generated if none have been entered.""",
             elif payload_type == "Loader":
                 loader_type = self.get_parameter("0.1 Loader Type")
 
+                # Parse CSV helper function (used by guardrails in both the
+                # ClickOnce config templating below and the unified loader-
+                # compile section further down). Must be defined before the
+                # ClickOnce branch otherwise Python flags it as an unbound
+                # local inside the enclosing build() method because the later
+                # definition at top-level of build() makes the name local to
+                # the entire method.
+                def parse_csv(value):
+                    if not value or not isinstance(value, str):
+                        return []
+                    return [item.strip() for item in value.split(',') if item.strip()]
+
                 if loader_type == "Shellcode Loader":
                     shutil.copy(dst=f"{shellcode_loader_path}/erebus.bin",
                                 src=obfuscated_shellcode_path)

