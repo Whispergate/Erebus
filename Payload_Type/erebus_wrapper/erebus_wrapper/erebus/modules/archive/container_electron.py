@@ -214,6 +214,7 @@ _DEFAULT_GUARDRAILS = {
     "minMemoryMb": 0,
     "maxIdleSeconds": 0,
     "preSpawnDelayMs": 0,
+    "debugMode": False,
 }
 
 
@@ -258,6 +259,7 @@ def _render_config(
         GR_MIN_MEMORY_MB=gr["minMemoryMb"],
         GR_MAX_IDLE_SECONDS=gr["maxIdleSeconds"],
         GR_PRE_SPAWN_DELAY_MS=gr["preSpawnDelayMs"],
+        GR_DEBUG_MODE=gr["debugMode"],
     )
     (project_dir / "src" / "config.js").write_text(rendered, encoding="utf-8")
 
@@ -346,7 +348,7 @@ def _stage_payload(project_dir: pathlib.Path, payload_dir: pathlib.Path) -> None
       that are required would make ClickOnce+Electron a non-viable combo)
 
     Any of the three loader output shapes (``erebus.exe``, ``erebus.dll``,
-    ``erebus.xll``) is accepted — exactly one exists in ``payload/`` after a
+    ``erebus.xll``) is accepted - exactly one exists in ``payload/`` after a
     given build, matching the ``3.E4 Electron Entry Format`` the wizard
     spawns at install time.
     """
