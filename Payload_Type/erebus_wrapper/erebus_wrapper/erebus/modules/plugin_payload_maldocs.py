@@ -68,29 +68,45 @@ class PayloadMalDocsPlugin(ErebusPlugin):
         """
         Validate that required dependencies are available.
 
+        This plugin registers a large surface area (18 functions). Most are
+        VBA string generators that require nothing beyond stdlib, but the
+        Excel file manipulation functions (generate_excel_payload,
+        backdoor_existing_excel) need openpyxl.
+
+        Historically the whole plugin failed to load when openpyxl was
+        missing, which took the VBA generators offline even though they
+        don't need the library - that's why builder.py has an inline
+        `PayloadMalDocsPlugin()` instantiation hack for the VBA path.
+        Post-R3a we validate as loaded in both cases: if openpyxl is
+        missing we print a warning and the excel-specific methods raise
+        at call time (each of those already has its own
+        `_try_import_advanced_libs()` guard), but VBA generation works.
+
         Returns:
             tuple[bool, Optional[str]]: (is_valid, error_message)
         """
         try:
-            import zipfile
-            import xml.etree.ElementTree as ET
-            # Try to import optional but recommended libraries
-            try:
-                import openpyxl
-            except ImportError:
-                return False, "openpyxl not found - required for Excel manipulation"
+            import openpyxl  # noqa: F401
+        except ImportError:
+            print(
+                "[Plugin] Payload MalDocs: openpyxl not found. "
+                "VBA generators will still load; Excel file manipulation "
+                "methods will raise at call time."
+            )
 
-            # Check for advanced library support
+        # Advanced macro libraries are optional - log what's available
+        # but never block loading on them.
+        try:
             advanced_libs = self._try_import_advanced_libs()
             if advanced_libs:
                 lib_names = ', '.join(k for k in advanced_libs.keys() if k != 'libreoffice')
                 if advanced_libs.get('libreoffice'):
                     lib_names += ', libreoffice'
                 print(f"[*] Advanced macro libraries available: {lib_names}")
+        except Exception:
+            pass
 
-            return True, None
-        except ImportError as e:
-            return False, f"Missing required module: {str(e)}"
+        return True, None
 
     def _get_excel_libs(self):
         """Lazy load Excel manipulation libraries"""

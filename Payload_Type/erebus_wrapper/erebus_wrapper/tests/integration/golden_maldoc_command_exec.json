@@ -1,0 +1,16 @@
+{
+  "response_build_message_head": "Success! Containerized (Zip)",
+  "response_status": "success",
+  "rpc_step_names": [
+    "[T1005] - Gathering Files",
+    "[T1027] - Header Check",
+    "[T1027] - Shellcode Obfuscation",
+    "[T1036] - Configuring Shellcode Loader",
+    "[T1027] - Compiling Shellcode Loader",
+    "[T1566.001] - Creating MalDoc",
+    "[T1137.006] - Adding Trigger",
+    "[T1036] - Exporting Helper",
+    "[T1005] - Gathering Files",
+    "[T1027] - Containerising"
+  ]
+}
