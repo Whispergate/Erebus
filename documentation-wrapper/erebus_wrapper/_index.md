@@ -35,7 +35,7 @@ XLSM / XLSX / XLAM + XLL Add-In DLL support. VBA is compiled directly on Linux v
 Self-signed, URL-spoofed (clone a legitimate website's cert details), or operator-provided PFX/P12 certificates, applied via `osslsigncode` to any loader or container output.
 
 ### Evasion
-Compile-time guardrails on both the C++ and C# loaders (`IsDebuggerPresent`, remote debugger, debugger processes, hardware breakpoints, timing anomalies, sandbox env, host/user/IP whitelists), runtime guardrails on the Electron fake-installer container, and decoy file support for social-engineering chains.
+Compile-time guardrails on both the C++ and C# loaders (`IsDebuggerPresent`, remote debugger, debugger processes, hardware breakpoints, timing anomalies, sandbox env, host/user/IP whitelists), runtime guardrails on the Electron fake-installer container, and decoy file support for social-engineering chains. Indirect syscalls via `TartarusGate` or `SysWhispers3`, ntdll unhook, AMSI/ETW runtime patching, and operator-configurable callstack spoofing (any gadget-host module list, defaults to `ntdll`/`kernel32`/`kernelbase`).
 
 ## Getting started
 

@@ -492,6 +492,53 @@ The C++ `Erebus.Loader` supports four injection techniques, selected via `0.4 Sh
 
 ---
 
+## Evasion Patches (Shellcode Loader / DLL Hijack)
+
+*Runtime hardening applied by `RunEvasionPatches()` before shellcode decryption and injection. Controlled by `0.5m` / `0.5n` / `0.5o`. Does not apply to ClickOnce.*
+
+### Syscall Backend (`0.5m`)
+
+Two choices, both bypass user-mode hooks on `Nt*` calls:
+
+- **TartarusGate** (default) - runtime-generated indirect syscall shim page. Each stub is `mov r10, rcx; mov eax, <ssn>; jmp <gadget_in_ntdll>`; the actual `syscall` instruction executes from inside ntdll's `.text`, which is where kernel telemetry expects it.
+- **SysWhispers3** - compile-time generated `Sw3Nt*` stubs. Requires the `include/evasion/sw3/` tree and the `Syscalls-asm.x{64,86}.asm` sources linked in the loader Makefile.
+
+**OPSEC Considerations**
+- SSN resolution walks ntdll's export table; on a process that has already lost ntdll to a deep user-mode hooking engine, the SSN table may be shifted and resolution fails silently.
+- Indirect syscalls bypass user-mode hooks but *not* kernel-mode ETW-TI (`Microsoft-Windows-Threat-Intelligence`). Protected-process EDR still sees the call.
+- `InitIndirectSyscalls()` runs after `UnhookNtdll()` - if unhook fails, the SSN table read is from the hooked ntdll and the generated stubs may carry poisoned SSNs.
+
+### Callstack Spoofing (`0.5n` + `0.5o`)
+
+*When enabled, `Nt*` calls at injection sites dispatch through `SpoofCall()` instead of calling the function directly. The target sees `[rsp+0] = Gadget` as its return address; the gadget's `add rsp, 0x68; ret` returns to the real caller. A walker (`RtlVirtualUnwind`, EDR stackwalk, `StackWalk64`) sees the gadget module as the immediate caller of the Nt* - not the loader's `.text`.*
+
+**How the module list is used**
+- `InitCallstackSpoof()` iterates `CONFIG_CALLSTACK_SPOOF_MODULES` in order and scans each module's `.text` for the byte sequence `48 83 C4 68 C3` (`add rsp, 0x68; ret`).
+- First match wins. Resolution is PEB-walk only (`GetModuleHandleC`) - no `LoadLibrary` fallback, so operator-chosen modules must already be mapped in the host process.
+- Displacement is fixed at `0x68` because it is coupled to `sub rsp, 112` in `callstack_spoof_gas.S`. Changing it requires matching ASM edits and is not exposed to the operator.
+
+**OPSEC Considerations**
+- The spoofed frame above every `Nt*` call is whichever module hosts the gadget. Defaults (`ntdll` / `kernel32` / `kernelbase`) blend into every Win32 process. A mismatched host (e.g. an ntdll gadget inside a process that normally never calls into ntdll for the spoofed API path) is still a tell.
+- Only volatile registers are touched by the trampoline (`rax`, `rcx`, `rdx`, `r8`, `r9`, `r10`, `r11`). Non-volatile state is preserved across the spoofed call, so downstream code that relies on `rbx` / `rbp` / `rsi` / `rdi` / `r12`–`r15` is unaffected.
+- If no gadget is found, `SpoofCall` still forwards the call but without spoofing - the loader continues to function, no telemetry about the fallback is emitted, and the operator loses the spoof silently.
+- The `add rsp, 0x68; ret` byte pattern is common in ntdll's epilogues but scarcer in application DLLs. Picking a small / stripped module may yield zero matches.
+- A kernel-mode stackwalk (ETW-TI on NtCreateThreadEx, for example) sees the full call chain, including the return back into the loader's `.text` after the gadget's `ret`. Callstack spoofing is a user-mode stackwalk defence only.
+
+**Improvements - For Operators**
+- Pick modules that blend with the target host's legitimate telemetry. Examples:
+  - GUI-heavy processes (`explorer.exe`, `RuntimeBroker.exe`): add `user32.dll`, `gdi32.dll`.
+  - Network tooling / browsers: add `winhttp.dll`, `wininet.dll`.
+  - Office: add `mso.dll`, `vbe7.dll` (already mapped when a macro runs).
+- Confirm the chosen module is actually mapped in the target host before shipping - `listdlls.exe <pid>` or Process Hacker. A missing module means the gadget search silently skips it and falls through to the next entry.
+- Leave the defaults in place unless you have a specific reason - they cover every Win32 process and the gadget density in ntdll alone is ~100+ candidates.
+
+**Improvements - For Erebus Developers**
+- Surface a gadget-search telemetry knob so the operator sees which module / offset was selected per build (ship it in the IOC report).
+- Extend the ASM to accept the displacement as a parameter (currently hardcoded), which would let the search accept any `add rsp, N; ret` found rather than requiring `N == 0x68`.
+- Add a second spoof tier that swaps the gadget host mid-campaign (rebuild with a different `0.5o` list) so two builds from the same operator don't share the exact same first-frame module.
+
+---
+
 ## ClickOnce Injection Methods (C# / .NET)
 
 The `Erebus.ClickOnce` loader is a .NET 7 single-file publish with six selectable injection methods via `0.6 ClickOnce - Injection Method`. All .NET-specific considerations (CLR ETW, AMSI for .NET, JIT logging) apply across every method in addition to the per-technique notes below.

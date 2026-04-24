@@ -170,6 +170,14 @@ Compile-time anti-analysis checks baked into the C++ loader. All are hidden unle
 
 The DLL-hijack path has an equivalent set under `1.1` – `1.1k` (see below).
 
+### 0.5m – 0.5o · Evasion backends
+
+Shared between the Shellcode Loader and DLL-hijack paths (both render into `config.hpp`). ClickOnce path is unaffected.
+
+- **0.5m Syscall Backend** - `TartarusGate` (built-in indirect-syscall shim page, default) or `SysWhispers3` (generated `Sw3Nt*` stubs). Hidden when `0.1 Loader Type = ClickOnce`.
+- **0.5n Callstack Spoofing** - enable `SpoofCall()` dispatch for Nt* calls. `InitCallstackSpoof()` runs in `RunEvasionPatches()` and locates an `add rsp, 0x68; ret` gadget inside the configured module list (see `0.5o`). Call sites fill `SpoofContext` and jump through the gadget, leaving a fake return frame pointing at the host module. Hidden for ClickOnce and x86.
+- **0.5o Callstack Spoof Modules** - comma-separated module names scanned, in order, for the gadget. First match wins. PEB-walk only - modules must already be mapped in the host process. Default: `ntdll.dll,kernel32.dll,kernelbase.dll`. Hidden unless `0.5n = True`. Displacement is fixed at `0x68` to match the `sub rsp, 112` frame in `callstack_spoof_gas.S`; changing it requires matching ASM edits. Operators can swap in modules that blend with the target host's benign telemetry (e.g. `user32.dll` in GUI procs, `winhttp.dll` in network tools) so the first spoofed frame above the Nt* call looks unremarkable.
+
 ### 0.8 · Output Extension Source
 
 - **0.8 Output Extension Source** - `Trigger` or `MalDoc`. Determines whether the `0.9*` block renders as trigger parameters or MalDoc parameters.
