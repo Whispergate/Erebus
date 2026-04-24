@@ -652,6 +652,29 @@ NOTE: Loaders are written in C++ - Supplied shellcode format must be raw for `Lo
             ]
         ),
 
+        # Operator-selectable gadget host modules. InitCallstackSpoof() scans
+        # each module's .text for `add rsp, 0x68; ret` (the disp is fixed by
+        # callstack_spoof_gas.S's `sub rsp, 112`). Pick modules already mapped
+        # into the host process — defaults cover every Win32 process.
+        BuildParameter(
+            name = "0.5o Callstack Spoof Modules",
+            parameter_type = BuildParameterType.String,
+            description = (
+                "Comma-separated module names scanned for the `add rsp, 0x68; ret` gadget. "
+                "First match wins. Modules must already be loaded in the host process "
+                "(PEB-walk only, no LoadLibrary). "
+                "Default: ntdll.dll,kernel32.dll,kernelbase.dll"
+            ),
+            default_value = "ntdll.dll,kernel32.dll,kernelbase.dll",
+            required = False,
+            hide_conditions = [
+                HideCondition(name="0.0 Main Payload Type", operand=HideConditionOperand.NotEQ, value="Loader"),
+                HideCondition(name="0.1 Loader Type", operand=HideConditionOperand.EQ, value="ClickOnce"),
+                HideCondition(name="0.2a Loader Architecture", operand=HideConditionOperand.EQ, value="x86"),
+                HideCondition(name="0.5n Callstack Spoofing", operand=HideConditionOperand.EQ, value=False),
+            ]
+        ),
+
         # ClickOnce Loader Injection Configuration
         BuildParameter(
             name = "0.6 ClickOnce - Injection Method",
@@ -2693,6 +2716,10 @@ generated if none have been entered.""",
                             gr_block=gr_block,
                             syscall_backend=(1 if self.get_parameter("0.5m Syscall Backend") == "SysWhispers3" else 0),
                             callstack_spoof_enabled=(1 if self.get_parameter("0.5n Callstack Spoofing") else 0),
+                            callstack_spoof_modules=(
+                                parse_csv(self.get_parameter("0.5o Callstack Spoof Modules"))
+                                or ["ntdll.dll", "kernel32.dll", "kernelbase.dll"]
+                            ),
                         )
                         rendered_config = config_template.render(**config_data)
 
@@ -2874,6 +2901,10 @@ generated if none have been entered.""",
                         gr_block=gr_block_hijack,
                         syscall_backend=(1 if self.get_parameter("0.5m Syscall Backend") == "SysWhispers3" else 0),
                         callstack_spoof_enabled=(1 if self.get_parameter("0.5n Callstack Spoofing") else 0),
+                        callstack_spoof_modules=(
+                            parse_csv(self.get_parameter("0.5o Callstack Spoof Modules"))
+                            or ["ntdll.dll", "kernel32.dll", "kernelbase.dll"]
+                        ),
                     )
                     rendered_config = config_template.render(**config_data)
                     config_hpp_destination = str(PurePath(shellcode_loader_path) / "include" / "config.hpp")

