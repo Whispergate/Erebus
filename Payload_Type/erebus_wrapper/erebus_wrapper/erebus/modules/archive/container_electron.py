@@ -469,11 +469,26 @@ def build_electron_installer(
     )
 
     if build_mode == "In-Container (Wine)":
-        proc = subprocess.run(
-            ["make", "-C", str(project_dir), f"ARCH={arch}", "release"],
-            capture_output=True,
-            text=True,
-        )
+        # Wine + electron-builder is slow even after caches are prewarmed:
+        # rcedit alone takes ~30s, NSIS pack another ~30-60s on cold wine.
+        # Cap at 15 minutes to surface stalled builds with a useful error
+        # rather than a silent timeout from whatever harness is calling us.
+        try:
+            proc = subprocess.run(
+                ["make", "-C", str(project_dir), f"ARCH={arch}", "release"],
+                capture_output=True,
+                text=True,
+                timeout=900,
+            )
+        except subprocess.TimeoutExpired as e:
+            raise RuntimeError(
+                "Electron in-container build exceeded 15 minute timeout. "
+                "Check that node_modules and ELECTRON_*_CACHE were prewarmed "
+                "in the Docker image; a cold build re-downloads ~400 npm "
+                "deps + electron + winCodeSign + nsis-resources via wine.\n"
+                f"partial stdout:\n{(e.stdout or b'').decode(errors='replace') if isinstance(e.stdout, (bytes, bytearray)) else (e.stdout or '')}\n"
+                f"partial stderr:\n{(e.stderr or b'').decode(errors='replace') if isinstance(e.stderr, (bytes, bytearray)) else (e.stderr or '')}"
+            ) from e
         if proc.returncode != 0:
             raise RuntimeError(
                 f"Electron in-container build failed ({proc.returncode}):\n"

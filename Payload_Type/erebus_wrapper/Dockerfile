@@ -63,9 +63,51 @@ ENV ELECTRON_CACHE=/root/.cache/electron
 ENV ELECTRON_BUILDER_CACHE=/root/.cache/electron-builder
 RUN mkdir -p "$ELECTRON_CACHE" "$ELECTRON_BUILDER_CACHE"
 
+# ----------------------------------------------------------------------------
+# Prewarm Erebus.Electron node_modules + electron-builder caches.
+# ----------------------------------------------------------------------------
+# In-Container (Wine) builds previously ran `npm ci` per build (downloading
+# electron + electron-builder + ~400 transitive deps), then electron-builder
+# would fetch winCodeSign + nsis-resources, then wine cold-started. Combined
+# this routinely pushed past Mythic's payload build timeout. We do all of
+# that exactly once here at image build time and persist the artefacts so
+# every subsequent build is offline + cache-warm.
+COPY erebus_wrapper/agent_code/Erebus.Loaders/Erebus.Electron /tmp/electron-prewarm
+RUN set -eux; \
+    cd /tmp/electron-prewarm; \
+    npm ci --no-audit --no-fund --loglevel=error; \
+    # Force electron-builder to download winCodeSign + nsis + electron binaries
+    # into ELECTRON_CACHE / ELECTRON_BUILDER_CACHE without performing a real
+    # build (no payload to sign yet). A throwaway pack against an empty
+    # extraResources stub is enough to populate every cache directory it
+    # touches in the wine path.
+    mkdir -p build/resources/payload; \
+    : > build/resources/payload/.keep; \
+    npx --no-install electron-builder --win nsis --x64 --publish never \
+        --config.compression=store \
+        --config.nsis.oneClick=true \
+        || true; \
+    rm -rf dist build/resources
+
+# Wineprefix cold-start adds ~10-20s on the first wine invocation per
+# container. Initialise it now so the first real build skips it.
+RUN wineboot --init >/dev/null 2>&1 || true; \
+    wineserver -w || true
+
 WORKDIR /Mythic/
-    
+
 COPY [".", "."]
+
+# Move the prewarmed node_modules into the source-of-truth agent_code path
+# so that builder.py's per-build copytree picks it up (it copies the whole
+# agent_code tree into a fresh tempdir each build).
+RUN set -eux; \
+    SRC=/Mythic/erebus_wrapper/agent_code/Erebus.Loaders/Erebus.Electron; \
+    if [ -d /tmp/electron-prewarm/node_modules ]; then \
+        rm -rf "$SRC/node_modules"; \
+        mv /tmp/electron-prewarm/node_modules "$SRC/node_modules"; \
+    fi; \
+    rm -rf /tmp/electron-prewarm
 
 RUN pip3 install -r requirements.txt --break-system-packages
 
