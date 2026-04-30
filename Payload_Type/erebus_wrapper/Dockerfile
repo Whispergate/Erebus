@@ -72,22 +72,28 @@ RUN mkdir -p "$ELECTRON_CACHE" "$ELECTRON_BUILDER_CACHE"
 # this routinely pushed past Mythic's payload build timeout. We do all of
 # that exactly once here at image build time and persist the artefacts so
 # every subsequent build is offline + cache-warm.
+# Whole prewarm step is best-effort: the build host may have no network
+# (corporate proxy, offline buildkit, registry rate-limit) in which case
+# `npm ci` fails with ETIMEDOUT. We do NOT want that to fail image build
+# - the per-build Makefile path already handles a cold node_modules
+# correctly, the image just won't be cache-warm. Wrap the whole block in
+# `|| echo` so any failure prints a notice and yields exit 0. Also bump
+# npm fetch timeouts so flaky-but-present networks succeed.
 COPY erebus_wrapper/agent_code/Erebus.Loaders/Erebus.Electron /tmp/electron-prewarm
-RUN set -eux; \
+RUN set -eu; \
     cd /tmp/electron-prewarm; \
-    npm ci --no-audit --no-fund --loglevel=error; \
-    # Force electron-builder to download winCodeSign + nsis + electron binaries
-    # into ELECTRON_CACHE / ELECTRON_BUILDER_CACHE without performing a real
-    # build (no payload to sign yet). A throwaway pack against an empty
-    # extraResources stub is enough to populate every cache directory it
-    # touches in the wine path.
-    mkdir -p build/resources/payload; \
-    : > build/resources/payload/.keep; \
-    npx --no-install electron-builder --win nsis --x64 --publish never \
-        --config.compression=store \
-        --config.nsis.oneClick=true \
-        || true; \
-    rm -rf dist build/resources
+    ( npm ci --no-audit --no-fund --prefer-offline \
+            --fetch-retries=5 --fetch-retry-mintimeout=20000 \
+            --fetch-retry-maxtimeout=120000 --fetch-timeout=300000 \
+            --loglevel=error \
+      && mkdir -p build/resources/payload \
+      && : > build/resources/payload/.keep \
+      && npx --no-install electron-builder --win nsis --x64 --publish never \
+            --config.compression=store \
+            --config.nsis.oneClick=true \
+      || true; \
+      rm -rf dist build/resources \
+    ) || echo "[prewarm] electron prewarm failed (no network?) - per-build path will populate caches on first real build"
 
 # Wineprefix cold-start adds ~10-20s on the first wine invocation per
 # container. Initialise it now so the first real build skips it.
