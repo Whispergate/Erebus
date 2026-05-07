@@ -1959,12 +1959,6 @@ generated if none have been entered.""",
             inspection but is not actually chained to a trusted CA.
           - Provide Certificate: operator uploads a .pfx via Mythic; we
             fetch its bytes and call osslsigncode with the supplied pass.
-
-        R3b: this method replaces a 75-line inline block at the previous
-        code-signing section. A duplicate `elif signing_type == "Provide
-        Certificate"` that raised NotImplementedError was dead code
-        (unreachable because the first branch already matched) and has
-        been removed.
         """
         if not self.get_parameter("6.0 Codesign Loader"):
             return True
