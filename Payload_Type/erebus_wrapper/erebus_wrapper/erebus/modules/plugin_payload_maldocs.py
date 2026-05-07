@@ -998,9 +998,14 @@ End Sub
         """
         import re
 
+        # Normalize VBA line-continuation markers (_\n) before parsing.
+        # shellcrypt inserts "...,_\n" to stay under the 1024-char VBA line
+        # limit.  Strip them so the regex sees one logical line per array.
+        vba_flat = vba_shellcode.replace('_\n', '')
+
         # Extract key and shellcode arrays
-        key_match = re.search(r'key = Array\(([^)]+)\)', vba_shellcode)
-        shellcode_match = re.search(r'shellcode = Array\(([^)]+)\)', vba_shellcode)
+        key_match = re.search(r'key = Array\(([^)]+)\)', vba_flat)
+        shellcode_match = re.search(r'shellcode = Array\(([^)]+)\)', vba_flat)
 
         if not key_match or not shellcode_match:
             return vba_shellcode
@@ -1010,8 +1015,8 @@ End Sub
 
         # Parse shellcode values
         try:
-            shellcode_values = [int(x.strip()) for x in shellcode_data.split(',')]
-        except:
+            shellcode_values = [int(x.strip()) for x in shellcode_data.split(',') if x.strip()]
+        except (ValueError, TypeError):
             return vba_shellcode
 
         # Intelligently chunk based on line length constraints
