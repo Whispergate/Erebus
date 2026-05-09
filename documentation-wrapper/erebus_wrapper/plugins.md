@@ -15,11 +15,11 @@ This page is the **operator-facing catalog**: what ships, what each plugin does,
 
 | Category | Purpose |
 |---|---|
-| `TRIGGER` | Victim-clickable artefacts that launch the compiled loader (`.lnk`, `.bat`, `.msi`, `.msc`, `.html`, ClickOnce) |
-| `CONTAINER` | Distribution wrappers (`ISO`, `7z`, `Zip`, `MSI`, `Electron`) |
-| `PAYLOAD` | Loader-adjacent transforms (DLL proxy generation, MalDoc generation, XLL add-ins) |
+| `TRIGGER` | Victim-clickable artefacts that launch the compiled loader (`.lnk`, `.bat`, `.msi`, `.msc`, `.html`, `.hta`, `.url`, `.js`/`.wsf`, `.chm`, `.svg`, ClickOnce) |
+| `CONTAINER` | Distribution wrappers (`ISO`, `VHD`, `7z`, `Zip`, `MSI`, `Electron`, `AppInstaller`/`MSIX`). Supports two-layer chaining via `3.0T Outer Transport`. |
+| `PAYLOAD` | Loader-adjacent transforms (DLL proxy generation, MalDoc generation, XLL add-ins, PE/DLL/\.NET → shellcode via Donut, Word/PowerPoint documents, decoy document lures) |
 | `CODESIGNER` | AuthentiCode signing of produced artefacts (self-signed, URL-spoofed, provided cert) |
-| `OTHER` | Utility functions that don't fit the above |
+| `OTHER` | Utility functions: PE metadata sanitiser, self-hunt IOC scanner, C2 redirector config generator, phishing page generator |
 
 ## Trigger plugins
 
@@ -103,6 +103,72 @@ This page is the **operator-facing catalog**: what ships, what each plugin does,
   - Works on all modern browsers without plugins or permission prompts
 - **Output:** `payload/<trigger>.html`
 
+### HTA
+
+*HTML Application (`.hta`) file executed by `mshta.exe`. Supports VBScript (default) or JScript; window is immediately minimised and self-closes after launch.*
+
+- **Module:** [plugin_trigger_hta.py](Payload_Type/erebus_wrapper/erebus_wrapper/erebus/modules/plugin_trigger_hta.py)
+- **Consumes:** `0.9 Trigger Type = HTA`, `0.9a Trigger Binary`, `0.9b Trigger Command`
+- **Key features:**
+  - Process lineage: `explorer.exe → mshta.exe` (signed Windows binary)
+  - VBScript or JScript scripting engine (configurable)
+  - Configurable `HTA:APPLICATION` name shown briefly in taskbar
+  - Optional decoy document opened in parallel
+  - No SmartScreen warning when opened from a mounted ISO/VHD
+- **Output:** `payload/<trigger>.hta`
+
+### URL / Internet Shortcut
+
+*Windows internet shortcut (`.url`) that triggers SMB authentication or WebDAV auto-mount when double-clicked. Best combined with an ISO or VHD outer container for MOTW bypass.*
+
+- **Module:** [plugin_trigger_url.py](Payload_Type/erebus_wrapper/erebus_wrapper/erebus/modules/plugin_trigger_url.py)
+- **Consumes:** `0.9 Trigger Type = URL`, `0.9a Trigger URL`
+- **Key features:**
+  - SMB/UNC mode (`file://ATTACKER/share/payload.exe`) - captures NTLM credentials; combine with Responder/ntlmrelayx
+  - WebDAV mode (`http://ATTACKER/payload.exe`) - auto-mounts share, avoids local disk write
+  - Configurable icon (shell32.dll index) shown in Explorer
+  - Files inside ISO/VHD do not inherit MOTW from the outer container
+- **Output:** `payload/<trigger>.url`
+
+### JScript / WSF
+
+*JScript (`.js`) or Windows Script File (`.wsf`) trigger executed by `wscript.exe` / `cscript.exe`.*
+
+- **Module:** [plugin_trigger_jscript.py](Payload_Type/erebus_wrapper/erebus_wrapper/erebus/modules/plugin_trigger_jscript.py)
+- **Consumes:** `0.9 Trigger Type = JScript`
+- **Key features:**
+  - `.js`: plain JScript via `ActiveXObject("WScript.Shell").Run()`
+  - `.wsf`: wraps JScript in XML `<job><script>` envelope - breaks many single-string AV signature patterns
+  - Supports mixed VBScript + JScript in a single `.wsf` file for additional evasion
+  - Randomised variable and function identifiers per build
+- **Output:** `payload/<trigger>.{js,wsf}`
+
+### CHM
+
+*Compiled HTML Help (`.chm`) file that auto-executes a command via the `hhctrl.ocx` ShortCut ActiveX object when double-clicked. Executed by `hh.exe` (signed Windows binary). Compilation is deferred to a Windows host.*
+
+- **Module:** [plugin_trigger_chm.py](Payload_Type/erebus_wrapper/erebus_wrapper/erebus/modules/plugin_trigger_chm.py)
+- **Consumes:** `0.9 Trigger Type = CHM`, `0.9a Trigger Binary`, `0.9b Trigger Command`
+- **Key features:**
+  - Process lineage: `explorer.exe → hh.exe` (Microsoft HTML Help, a signed binary)
+  - ShortCut Item1 ActiveX fires on `body onload` - no user click required inside the CHM
+  - Configurable window title and lure body text
+  - Emits a `build_chm.bat` runbook for Windows-side compilation via `hhc.exe`; alternatively compile via `erebus_helper.py chm`
+- **Output:** `payload/chm_project/` (source tree + `build_chm.bat`); `.chm` produced after Windows-side compilation
+
+### SVG Smuggling
+
+*SVG image file with an embedded JavaScript payload blob that reconstructs and auto-downloads the loader binary when opened in any modern browser. Targets mail gateways that strip `.html`/`.htm` attachments but pass `.svg` as an image.*
+
+- **Module:** [plugin_trigger_svg_smuggling.py](Payload_Type/erebus_wrapper/erebus_wrapper/erebus/modules/plugin_trigger_svg_smuggling.py)
+- **Consumes:** `0.9 Trigger Type = SVG`
+- **Key features:**
+  - SVG rendered natively by Chrome, Edge, Firefox - `<script>` executes without a download prompt
+  - Per-build random XOR key + randomised variable identifiers (same technique as HTML Smuggling)
+  - Base64 payload split across multiple `<text>` elements to break single-string regex signatures
+  - Configurable download filename
+- **Output:** `payload/<trigger>.svg`
+
 ## Container plugins
 
 ### Archive (7z / Zip)
@@ -152,21 +218,86 @@ This page is the **operator-facing catalog**: what ships, what each plugin does,
 - **Key features:** Full ClickOnce manifest generation, SHA-256 file hashing, trusted-publisher execution model.
 - **Output:** `payload/<name>/` (deployment tree)
 
+### VHD
+
+*Fixed Virtual Hard Disk (`.vhd`) container. Windows mounts it on double-click; files inside do not inherit Mark-of-the-Web from the outer download. Bypasses ISO-blocking policies that specifically target `.iso` extension.*
+
+- **Module:** [plugin_container_vhd.py](Payload_Type/erebus_wrapper/erebus_wrapper/erebus/modules/plugin_container_vhd.py)
+- **Consumes:** `3.0 Container Type = VHD`, `4.0 ISO Volume ID` (volume label reused)
+- **Key features:**
+  - Fixed VHD with FAT16 filesystem - no external tools required (pure-Python fallback; mtools `mformat`/`mcopy` used when available)
+  - Files inside the VHD do not inherit MOTW - full MOTW bypass without MotW-stripping tools
+  - Different extension from ISO bypasses per-extension gateway/proxy blocks on `.iso`
+  - Drop-in replacement for the ISO container in any delivery chain
+- **Output:** `payload/payload.vhd`
+
+### AppInstaller / MSIX
+
+*MSIX application package or `.appinstaller` manifest that fetches and installs an MSIX from an attacker-controlled HTTPS host. Delivery is through the signed Windows `appinstaller.exe` binary with no elevation prompt on sideload-enabled targets.*
+
+- **Module:** [plugin_container_msix.py](Payload_Type/erebus_wrapper/erebus_wrapper/erebus/modules/plugin_container_msix.py)
+- **Consumes:** `3.0 Container Type = AppInstaller`, `3.AI0 MSIX Hosting URL`, `3.AI1 MSIX Package Name`, `3.AI2 MSIX Display Name`
+- **Key features:**
+  - **AppInstaller mode (default)** - generates a `.appinstaller` XML manifest; victim opens it, Windows fetches and installs the MSIX at the configured URL automatically
+  - **MSIX mode** - produces the full MSIX package source tree + `build_msix.bat` for Windows-side signing via `makeappx.exe` + `signtool.exe`
+  - Self-signed MSIX installs on Developer Mode targets and sideloading-enabled enterprise workstations without elevation
+  - Threat actor precedent: used by Magniber ransomware and TA505/FIN7 delivery chains
+- **Output:** `payload/setup.appinstaller` + `payload/msix_src/` (package source for deferred Windows build)
+
 ### Electron Fake-Installer
 
 *Single portable Windows `.exe` built with `electron-builder`. Wraps the compiled loader as an `extraResources` tree and presents a Next / Install / Finish wizard. The wizard stages the embedded loader to `%TEMP%\inst-<uuid>` and spawns it detached + hidden - but only after passing a two-gate guardrail system.*
 
 - **Module:** [plugin_container_electron.py](Payload_Type/erebus_wrapper/erebus_wrapper/erebus/modules/plugin_container_electron.py)
-- **Consumes:** `3.0 Container Type = Electron`, `3.E0` – `3.E9p` Electron Options
+- **Consumes:** `3.0 Container Type = Electron`, `3.E0` – `3.E9p` Electron Options, `3.P0` – `3.P3` Persistence Options
 - **Key features:**
   - **Two build modes** - `In-Container (Wine)` (one-step Linux build via wine for rcedit/winCodeSign) or `Deferred (Erebus.Helper)` (stage source + `build_electron.bat` for a Windows host)
   - **PE resource rewriting** - all six Windows Properties → Details fields (FileDescription, ProductName, ProductVersion, FileVersion, Copyright, CompanyName) are operator-controlled via `3.E0`/`3.E1`/`3.E2`/`3.E7`/`3.E8`
   - **Custom icon upload** (`3.E6a`) accepting PNG/JPEG/GIF/BMP/WEBP/TIFF/SVG; SVG is rasterised to 512×512 via `cairosvg`, then Pillow produces a multi-size ICO (16/24/32/48/64/128/256) embedded via rcedit
   - **Three entry formats** - `exe` (direct `CreateProcess`), `dll` (`rundll32.exe <dll>,<entry>`), `xll` (`excel.exe /e <xll>`)
   - **Two-gate guardrail system** - interaction token (dwell time + real mousemove required before the token is issued) + 15 environment checks (debugger, sandbox env vars, default bad usernames/hostnames, operator-supplied white/blocklists, min screen size, min CPU count, min RAM, max idle time, pre-spawn delay). Guardrail failures are silent: the wizard still shows fake progress → Finish even when the loader never ran.
+  - **Persistence** (`3.P0` – `3.P3`) - optionally copy the loader to a permanent location before spawn and register one of four persistence mechanisms: Registry Run Key, Registry RunOnce, Startup Folder, or Scheduled Task. Copy is made to `%APPDATA%` or `%LOCALAPPDATA%` (operator-controlled). DLL/XLL formats write a `.bat` wrapper into the startup folder when the Startup Folder method is selected.
 - **Output:** `payload/erebus.exe` (portable fake-installer)
 
+### Container Chaining (`3.0T Outer Transport`)
+
+*Any inner container (Electron, MSI, VHD, ISO, ZIP, 7z, AppInstaller) can be wrapped in an outer transport layer (ISO, VHD, ZIP, 7z) by setting `3.0T Outer Transport`. The inner artefact is copied into a fresh staging directory and packaged into the outer format.*
+
+**Useful chains:**
+
+| Inner | Outer | Effect |
+|---|---|---|
+| `Electron` | `ISO` | ISO disc containing setup.exe - MOTW bypass, Explorer mounts and shows the exe |
+| `Electron` | `VHD` | Same as above but bypasses ISO-specific gateway/policy blocks |
+| `MSI` | `ISO` | ISO containing an installer - common enterprise delivery chain |
+| `MSI` | `VHD` | VHD disc containing installer.msi |
+| `Zip` | `ISO` | ISO wrapping a password-protected archive |
+
+Set `3.0T Outer Transport = None` (default) for no outer wrapping.
+
 ## Payload plugins
+
+### Donut (PE / DLL / .NET → Shellcode)
+
+*Converts a PE executable, DLL, or .NET assembly into raw position-independent shellcode via the `donut-shellcode` Python package, then feeds the output directly into the Shellcrypt obfuscation pipeline. Allows Erebus to accept PE/DLL inputs instead of raw shellcode.*
+
+- **Module:** [plugin_payload_donut.py](Payload_Type/erebus_wrapper/erebus_wrapper/erebus/modules/plugin_payload_donut.py)
+- **Key features:**
+  - Supports `x86`, `x64`, and `x86+x64` dual-arch output
+  - Output is treated as raw shellcode and passes through the full Shellcrypt compression → encryption → encoding chain
+  - `donut_available()` check at build time; graceful error if `donut-shellcode` package is not installed
+- **Requires:** `pip install donut-shellcode` on the Mythic Docker container (or host running the builder)
+
+### OfficeDocs (Word / PowerPoint)
+
+*Generates macro-enabled Office documents beyond the Excel-centric MalDoc plugin. All formats are pure-Python OOXML construction - no python-pptx, no LibreOffice required.*
+
+- **Module:** [plugin_payload_officedoc.py](Payload_Type/erebus_wrapper/erebus_wrapper/erebus/modules/plugin_payload_officedoc.py)
+- **Key features:**
+  - **DOTM Remote Template Injection** - clean DOCX with an `<Relationship>` pointing to an attacker-hosted `.dotm`. Macros live on the remote template, not in the delivered attachment; survives email gateway scanning. WINWORD.EXE fetches the template on `Document_Open`.
+  - **PPTM** - PowerPoint macro-enabled presentation with `Presentation_Open` / `Document_Open` VBA trigger.
+  - **PPAM** - PowerPoint Add-In marked `IsAddIn=true`. Installs to `%APPDATA%\Microsoft\AddIns\` and re-executes on every PowerPoint launch after first open (implicit persistence).
+- **Output:** `payload/<name>.{docx,pptm,ppam}` + optional `build_dotm.bat` for the hosted template
 
 ### DLL Proxy Generation
 
@@ -195,6 +326,44 @@ This page is the **operator-facing catalog**: what ships, what each plugin does,
   - **Execution triggers**: AutoOpen, OnClose, OnSave
   - **VBA obfuscation** toggle (variable renaming, string splitting, dead-code insertion)
 - **Output:** `payload/<name>.{xlsm,xlsx,xlam}`, or `payload/<name>.bas` + optional `build_maldoc.bat`, or staged XLL source + `build_xll.bat`
+
+### Decoy Document Generator
+
+*Generates convincing lure documents (DOCX stub, XLSX stub) shown to the victim while the loader executes in the background. Templates cover invoice, HR policy, job offer, IT security notice, and NDA lure types.*
+
+- **Module:** [plugin_trigger_decoy_doc.py](Payload_Type/erebus_wrapper/erebus_wrapper/erebus/modules/plugin_trigger_decoy_doc.py)
+- **Key features:**
+  - Five built-in lure templates: `invoice`, `hr_policy`, `job_offer`, `it_notice`, `nda`
+  - Operator-supplied company name, recipient name, and optional letterhead logo (PNG/JPG embedded)
+  - Document written to `%TEMP%` and deleted after display; separate from the `0.13 Decoy File` static upload path
+- **Output:** `payload/<lure>.{docx,xlsx}`
+
+## Infra / Utility plugins
+
+### Redirector Config Generator
+
+*Generates C2 redirector configurations (Apache mod_rewrite `.htaccess`, Nginx `location` block, Caddy `Caddyfile`) from operator-supplied C2 profile parameters. All non-matching traffic is forwarded to a configurable decoy redirect.*
+
+- **Module:** [plugin_infra_redirector.py](Payload_Type/erebus_wrapper/erebus_wrapper/erebus/modules/plugin_infra_redirector.py)
+- **Key features:**
+  - Apache, Nginx, and Caddy output formats (one per build or all three)
+  - URI pattern + User-Agent filter - only requests matching the C2 profile are proxied to the team server
+  - Catch-all 302 redirect to a configurable decoy site so sandbox re-fetches see a normal response
+  - Operator supplies team server IP, C2 URI regex, UA regex, and decoy URL
+- **Output:** `payload/redirector/` containing `.htaccess`, `nginx.conf`, and `Caddyfile`
+
+### Phishing Page Generator
+
+*Generates static HTML credential-capture phishing pages that mimic enterprise login portals, plus a lightweight credential-capture backend stub (PHP or Python/Flask).*
+
+- **Module:** [plugin_infra_phishing.py](Payload_Type/erebus_wrapper/erebus_wrapper/erebus/modules/plugin_infra_phishing.py)
+- **Supported templates:** `o365` (Outlook Web App), `sharepoint` (file-sharing gate), `docusign` (signing prompt), `adfs` (AD Federation Services), `okta` (SSO login)
+- **Key features:**
+  - Pure static HTML - no python-pptx / Flask dependency at generation time
+  - JS `POST /capture` submits credentials; PHP stub or Python/Flask backend logs and optional GoPhish webhook forwards them
+  - After POST, victim receives a 302 to the real site (transparent to victim)
+  - All branding fields (org name, colour, logo URL) are operator-configurable
+- **Output:** `payload/phishing/<template>/` (HTML + capture backend stub)
 
 ## CodeSigner plugin
 

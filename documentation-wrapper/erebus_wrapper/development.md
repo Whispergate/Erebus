@@ -11,15 +11,16 @@ Erebus is a Mythic C2 wrapper payload type that takes raw shellcode and produces
 
 ### Key capabilities
 
-- **Multiple loaders** - Shellcode Loader (C++, 4 injection methods), ClickOnce (.NET 7, 6 injection methods), and DLL Hijacking proxy generation.
+- **Multiple loaders** - Shellcode Loader (C++, 8 injection methods), ClickOnce (.NET 7, 6 injection methods), and DLL Hijacking proxy generation.
 - **Obfuscation pipeline** - compression / encryption / encoding chain via Shellcrypt, with RC4, XOR, AES-ECB, and AES-CBC all supported by the C++ loader via BCrypt.
-- **Custom shellcode** - upload raw bytes from any external C2 (Cobalt Strike, Havoc, Sliver, msfvenom) to replace Mythic's payload.
-- **Triggers** - LNK, BAT, MSI, MSC, ClickOnce, HTML smuggling, and ClickFix clipboard lure.
-- **Containers** - ISO, 7z, Zip, MSI, and a fake-installer Electron portable exe with a two-gate guardrail system.
-- **MalDocs** - Linux-native Excel document generation (XLSM/XLSX/XLAM) with a built-in MS-OVBA-compliant `vbaProject.bin` compiler, four VBA loader techniques, runtime payload discovery, XLL add-in generation, and an optional Windows-side COM re-injection path.
+- **Custom shellcode** - upload raw bytes from any external C2 (Cobalt Strike, Havoc, Sliver, msfvenom) to replace Mythic's payload. PE/DLL/.NET assemblies can be converted to shellcode via the Donut plugin.
+- **Triggers** - LNK, BAT, MSI, MSC, ClickOnce, HTML Smuggling, ClickFix, HTA, URL shortcut, JScript/WSF, CHM, and SVG Smuggling.
+- **Containers** - ISO, VHD, 7z, Zip, MSI, Electron fake-installer, and AppInstaller/MSIX. Any inner container can be wrapped in an outer ISO/VHD/ZIP/7z transport via `3.0T Outer Transport`.
+- **MalDocs** - Linux-native Excel document generation (XLSM/XLSX/XLAM) with a built-in MS-OVBA-compliant `vbaProject.bin` compiler, four VBA loader techniques, runtime payload discovery, XLL add-in generation, and an optional Windows-side COM re-injection path. Word (DOTM remote template injection) and PowerPoint (PPTM/PPAM) formats via the OfficeDocs plugin.
 - **Code signing** - self-signed, URL-spoofed, or operator-supplied PFX/P12 certificates via `osslsigncode`.
 - **Loader guardrails** - compile-time anti-analysis checks (debugger, hardware breakpoints, timing, sandbox env, host/user/IP whitelists) baked into both loader code paths.
 - **Runtime guardrails** - the Electron container ships a renderer-side interaction gate (dwell time + real mouse movement) and a main-process environment gate (debugger / sandbox env / username / hostname / screen / CPU / RAM / idle / pre-spawn delay).
+- **Infra tooling** - C2 redirector config generator (Apache/Nginx/Caddy) and phishing page generator (O365/SharePoint/DocuSign/ADFS/Okta).
 
 ## Build pipeline
 
@@ -89,8 +90,10 @@ Erebus is a Mythic C2 wrapper payload type that takes raw shellcode and produces
       └───────────┬──────────┘
                   │
      ┌────────────▼────────────┐
-     │ Package Container?      │
-     │ ISO/7z/Zip/MSI/Electron │
+     │ Package Container?          │
+     │ ISO/VHD/7z/Zip/MSI/Electron│
+     │ AppInstaller               │
+     │ + optional Outer Transport │
      └───────────┬─────────────┘
                  │
       ┌──────────▼─────────┐
@@ -130,7 +133,7 @@ Every BuildParameter defined in [builder.py](Payload_Type/erebus_wrapper/erebus_
 ### 0.1 – 0.2a · Loader selection
 
 - **0.1 Loader Type** - `Shellcode Loader` or `ClickOnce`. Only visible when `Main Payload Type = Loader`.
-- **0.2 Loader Format** - output format for the Shellcode Loader: `exe`, `dll`, `cpl`, or `xll`. Each maps to a different compile target in the loader Makefile.
+- **0.2 Loader Format** - output format for the Shellcode Loader: `exe`, `dll`, or `xll`. Each maps to a different compile target in the loader Makefile.
 - **0.2a Loader Architecture** - `x64` or `x86`.
 
 ### 0.3 – 0.3a · Loader build configuration
@@ -144,8 +147,12 @@ Every BuildParameter defined in [builder.py](Payload_Type/erebus_wrapper/erebus_
 - **0.4 Shellcode Loader - Injection Type** - the C++ loader's injection technique:
   - `1` - `NtMapViewOfSection` (section-mapping injection, remote)
   - `2` - `CreateFiber` (fiber-based, self)
-  - `3` - `EarlyCascade` / `NtQueueApcThread` (APC, remote, pre-main-thread)
+  - `3` - `EarlyCascade` (remote APC, pre-main-thread — via `NtQueueApcThread`)
   - `4` - `PoolParty` (worker factory thread pool, remote)
+  - `5` - `NtQueueApcThread` (APC injection into existing thread, remote)
+  - `6` - `ModuleStomp` (self — map a legitimate DLL, overwrite `.text`; VAD shows file-backed memory)
+  - `7` - `KernelCallbackTable` (self — overwrite `PEB.KernelCallbackTable` entry, trigger via `SendMessage(WM_COPYDATA)`; no new thread)
+  - `8` - `TxfHollow` (remote — transacted NTFS ghost section via `NtCreateTransaction`; rolls back NTFS transaction after mapping, leaving a phantom VAD path)
 - **0.5 Shellcode Loader - Target Process** - target process for remote injection methods (ignored for `CreateFiber`).
 - **0.6 ClickOnce - Injection Method** - the .NET loader's injection technique: `createfiber`, `earlycascade`, `poolparty`, `classic` (CreateRemoteThread), `enumdesktops` (self-callback), or `appdomain`.
 - **0.7 ClickOnce - Target Process** - target process for ClickOnce remote injection methods.
@@ -186,9 +193,9 @@ Shared between the Shellcode Loader and DLL-hijack paths (both render into `conf
 
 Only visible when `0.8 = Trigger`.
 
-- **0.9 Trigger Type** - `LNK`, `BAT`, `MSI`, `MSC`, `HTML`, `ClickFix`, or `ClickOnce`.
-- **0.9a Trigger Binary** - binary invoked by the trigger (hidden for MSI, MSC, HTML, ClickFix, ClickOnce).
-- **0.9b Trigger Command** - command-line arguments passed to the trigger binary.
+- **0.9 Trigger Type** - `LNK`, `BAT`, `MSI`, `MSC`, `HTML`, `ClickFix`, `ClickOnce`, `HTA`, `URL`, `JScript`, `CHM`, or `SVG`.
+- **0.9a Trigger Binary** - binary invoked by the trigger (hidden for MSI, MSC, HTML, ClickFix, ClickOnce, SVG, URL).
+- **0.9b Trigger Command** - command-line arguments passed to the trigger binary (also used as the target URL for `URL` type).
 - **0.9c ClickFix Command** - PowerShell or cmd command copied to the victim's clipboard when they click the fake CAPTCHA "verify" button. Only visible when `0.9 = ClickFix`.
 
 ### 0.9 – 0.9p · MalDoc configuration
@@ -239,9 +246,18 @@ See [OPSEC]({{% relref "opsec.md" %}}) for the tradecraft considerations on each
 
 ### 3.0 – 3.2 · Container selection
 
-- **3.0 Container Type** - `ISO`, `7z`, `Zip`, `MSI`, or `Electron`.
+- **3.0 Container Type** - `ISO`, `VHD`, `7z`, `Zip`, `MSI`, `Electron`, or `AppInstaller`. See [Plugins → Container plugins]({{% relref "plugins.md" %}}) for the full per-container description.
+- **3.0T Outer Transport** - `None` (default), `ISO`, `VHD`, `ZIP`, or `7z`. When set to anything other than `None`, the inner container produced by `3.0` is wrapped inside this outer transport layer. Useful for MOTW bypass (Electron inside ISO/VHD) or policy bypass (Electron inside VHD when ISO is blocked). Volume label for ISO/VHD outer transport is taken from `4.0 ISO Volume ID`.
 - **3.1 Compression Level** - `0` – `9`; only visible for `7z` and `Zip`.
 - **3.2 Archive Password** - optional password for `7z` and `Zip` archives.
+
+### 3.AI0 – 3.AI2 · AppInstaller / MSIX container
+
+Only visible when `3.0 Container Type = AppInstaller`.
+
+- **3.AI0 MSIX Hosting URL** - HTTPS URL where the MSIX package will be served (e.g. `https://cdn.example.com/update/app.msix`). Embedded verbatim in the `.appinstaller` manifest. The operator must build the MSIX via `build_msix.bat` on Windows and upload it to this URL before delivering the manifest to the victim.
+- **3.AI1 MSIX Package Name** - MSIX identity package name (no spaces). Shown in **Settings → Apps**. Default `"Microsoft.WindowsUpdate"`.
+- **3.AI2 MSIX Display Name** - Friendly display name shown in the App Installer UI and **Settings → Apps**. Default `"Windows Update Assistant"`.
 
 ### 3.E0 – 3.E8 · Electron container
 
@@ -257,6 +273,19 @@ All hidden unless `3.0 Container Type = Electron`. These map to PE resource fiel
 - **3.E6a Electron Custom Icon** - optional PNG/JPEG/GIF/BMP/WEBP/TIFF/SVG upload. SVG is rasterised to 512×512 via `cairosvg`; Pillow then produces a multi-size ICO (16/24/32/48/64/128/256) embedded in the exe's PE resources.
 - **3.E7 Electron File Description** - `package.json.description` → PE `FileDescription`. Default `"Setup"`.
 - **3.E8 Electron Copyright** - `electron-builder.yml.copyright` → PE `LegalCopyright`. Default empty.
+
+### 3.P0 – 3.P3 · Electron persistence
+
+All hidden unless `3.0 Container Type = Electron` AND `3.P0 = True`. When enabled, the loader is copied to a permanent location and a persistence mechanism is registered **before** the loader is spawned for the first time.
+
+- **3.P0 Enable Persistence** - master switch. Default `False`.
+- **3.P1 Persistence Method** - one of:
+  - `Registry Run Key` - `HKCU\Software\Microsoft\Windows\CurrentVersion\Run` (executes on every login)
+  - `Registry RunOnce` - `HKCU\Software\Microsoft\Windows\CurrentVersion\RunOnce` (executes on next login only, then removes itself)
+  - `Startup Folder` - copies the exe to `%APPDATA%\Microsoft\Windows\Start Menu\Programs\Startup\`; DLL/XLL formats write a `.bat` launcher wrapper instead
+  - `Scheduled Task` - `schtasks /sc onlogon /rl limited` (runs at login without UAC prompt)
+- **3.P2 Persistence Name** - display name / registry value name / task name. Defaults to `3.E0 Electron Product Name` if left empty.
+- **3.P3 Persistence Install Dir** - `%APPDATA%` (default) or `%LOCALAPPDATA%`. Controls where the loader copy is written before the persistence pointer is registered.
 
 ### 3.E9 – 3.E9p · Electron runtime guardrails
 
@@ -325,18 +354,18 @@ Each build stage is reported to Mythic via `SendMythicRPCPayloadUpdatebuildStep`
 | 3 | `[T1027] - Shellcode Obfuscation` | Always | Run Shellcrypt (compression → encryption → encoding) |
 | 4 | `[T1518] - Gathering DLL Exports for Hijacking` | `Main Payload Type = Hijack` | Extract DLL exports via `pefile` for proxy generation |
 | 5 | `[T1027.011] - Compiling DLL Payload` | `Main Payload Type = Hijack` or Shellcode Loader w/ `0.2 = dll` | Compile hijacking DLL or loader DLL via MinGW |
-| 6 | `[T1218.002] - Compiling CPL Payload` | Shellcode Loader w/ `0.2 = cpl` | Compile Control Panel applet |
-| 7 | `[T1559.002] - Compiling XLL Add-In` | `0.9h XLL Payload Type` set | Emit XLL C/C++ source + `build_xll.bat` for deferred Windows build |
-| 8 | `[T1027] - Compiling Shellcode Loader` | Shellcode Loader w/ `0.2 = exe` | Compile C++ loader exe |
-| 9 | `[T1027] - Compiling ClickOnce Loader` | ClickOnce | `dotnet publish` the ClickOnce project |
-| 10 | `[T1027] - Compiling Test Payloads` | `0.3 Loader Build Configuration = test` | Build one loader per injection method for testing |
-| 11 | `[T1553.006] - Sign Shellcode Loader` | `6.0 Codesign Loader = True` | AuthentiCode sign the produced binary |
-| 12 | `[T1566.001] - Creating MalDoc` | `0.8 = MalDoc` | Generate XLSM/XLSX/XLAM document + VBA payload |
-| 13 | `[T1218.007] - Staging MSI` | `5.3 Enable MSI Backdoor = True` | Backdoor an uploaded MSI with the compiled loader |
-| 14 | `[T1137.006] - Adding Trigger` | `0.8 = Trigger` | Generate the configured trigger artefact |
-| 15 | `[T1036.008] - Creating Decoy` | `0.13 Decoy File Inclusion = True` | Stage the decoy file into `payload/` |
-| 16 | `[T1027] - Containerising` | Always (non-Electron containers) | Package `payload/` into ISO / 7z / Zip / MSI |
-| 17 | `[T1608.001] - Wrapping Payload in Electron Installer` | `3.0 Container Type = Electron` | Build the Electron portable exe via wine (or stage source for deferred build) |
+| 6 | `[T1559.002] - Compiling XLL Add-In` | `0.9h XLL Payload Type` set | Emit XLL C/C++ source + `build_xll.bat` for deferred Windows build |
+| 7 | `[T1027] - Compiling Shellcode Loader` | Shellcode Loader w/ `0.2 = exe` | Compile C++ loader exe |
+| 8 | `[T1027] - Compiling ClickOnce Loader` | ClickOnce | `dotnet publish` the ClickOnce project |
+| 9 | `[T1027] - Compiling Test Payloads` | `0.3 Loader Build Configuration = test` | Build one loader per injection method for testing |
+| 10 | `[T1553.006] - Sign Shellcode Loader` | `6.0 Codesign Loader = True` | AuthentiCode sign the produced binary |
+| 11 | `[T1566.001] - Creating MalDoc` | `0.8 = MalDoc` | Generate XLSM/XLSX/XLAM document + VBA payload |
+| 12 | `[T1218.007] - Staging MSI` | `5.3 Enable MSI Backdoor = True` | Backdoor an uploaded MSI with the compiled loader |
+| 13 | `[T1137.006] - Adding Trigger` | `0.8 = Trigger` | Generate the configured trigger artefact |
+| 14 | `[T1036.008] - Creating Decoy` | `0.13 Decoy File Inclusion = True` | Stage the decoy file into `payload/` |
+| 15 | `[T1027] - Containerising` | Always (non-Electron/AppInstaller containers) | Package `payload/` into ISO / VHD / 7z / Zip / MSI; apply outer transport if `3.0T ≠ None` |
+| 16 | `[T1608.001] - Wrapping Payload in Electron Installer` | `3.0 Container Type = Electron` | Build the Electron portable exe via wine (or stage source for deferred build) |
+| 17 | `[T1608.001] - Building AppInstaller Manifest` | `3.0 Container Type = AppInstaller` | Generate `.appinstaller` XML manifest + MSIX source tree; emit `build_msix.bat` |
 
 Each step reports `StepStdout`, `StepSuccess`, and optional diagnostic output to Mythic. Build failures terminate the pipeline immediately and the operator sees the failed step in the Mythic UI.
 
@@ -346,7 +375,7 @@ After a successful build the `payload/` directory contains (depending on selecte
 
 ```
 payload/
-├── erebus.{exe,dll,cpl,xll}     # compiled loader
+├── erebus.{exe,dll,xll}          # compiled loader
 ├── <trigger>.{lnk,bat,msi,msc,html,application}  # if trigger selected
 ├── <maldoc>.{xlsm,xlsx,xlam}    # if MalDoc selected
 ├── <decoy>.{pdf,docx,xlsx}      # if decoy included
@@ -367,6 +396,8 @@ Windows-only build steps that can't run inside the Linux Docker container emit a
 | `build_xll.bat` | XLL payload type set | `erebus_helper.py xll` - compiles the staged XLL source tree with MSVC or MinGW |
 | `build_maldoc.bat` | MalDoc + optional Windows COM re-injection | `erebus_helper.py xlsm|xlam|xlsx` - re-injects VBA via Excel COM for higher-fidelity output |
 | `build_electron.bat` | `3.E6 Electron Build Mode = Deferred (Erebus.Helper)` | `erebus_helper.py electron` - runs `npm install` + `electron-builder --win` on the Windows host |
+| `build_chm.bat` | `0.9 Trigger Type = CHM` | Compiles the CHM project tree with `hhc.exe` (HTML Help Workshop) |
+| `build_msix.bat` | `3.0 Container Type = AppInstaller` | Signs and packages the MSIX source tree with `makeappx.exe` + `signtool.exe` (Windows SDK required) |
 
 `erebus_helper.py` is auto-exported as a single-file bundle of the `Erebus.Helper/` suite and shipped alongside the runbooks in `payload/`. Operators should strip these artefacts from the final archive before delivery if they don't intend to use them - see [OPSEC → Erebus.Helper Deferred Builds]({{% relref "opsec.md" %}}).
 
@@ -382,7 +413,7 @@ Windows-only build steps that can't run inside the Linux Docker container emit a
 | `InjectionConfig.cs` | ClickOnce (.NET) | Same as `config.hpp` but in C# form, plus ClickOnce-specific injection method |
 | `guardrail.hpp` | Shellcode Loader (C++) | Compile-time guardrails with host/user/IP whitelists |
 | `proxy.def` | DLL Hijack | DLL export forwarding definition |
-| `electron_config.js.j2` | Electron container | Wizard runtime config: product metadata, entry format, GUARDRAILS block |
+| `electron_config.js.j2` | Electron container | Wizard runtime config: product metadata, entry format, GUARDRAILS block, PERSISTENCE block |
 | `template.xlsm` / `template.xlsx` | MalDocs | Base Excel workbook documents |
 
 ### Agent code layout
