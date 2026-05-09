@@ -216,16 +216,7 @@ class PESanitizePlugin(ErebusPlugin):
         return report
 
 
-# Testing harness
 if __name__ == "__main__":
-    import sys
     p = PESanitizePlugin()
-    meta = p.get_metadata()
-    print(f"[*] {meta.name} v{meta.version}")
-    print(f"[*] {meta.description}")
-    if len(sys.argv) > 1:
-        report = p.sanitize_pe(sys.argv[1])
-        for k, v in report.items():
-            print(f"    {k}: {v}")
-    else:
-        print("[*] Usage: python3 plugin_pe_sanitize.py <path-to-pe>")
+    valid, err = p.validate()
+    print("[+] Validation passed" if valid else f"[-] Validation failed: {err}")

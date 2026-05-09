@@ -37,5 +37,5 @@ class LoaderConfigPlugin(ErebusPlugin):
 
 if __name__ == "__main__":
     p = LoaderConfigPlugin()
-    print(p.get_metadata())
-    print(list(p.register().keys()))
+    valid, err = p.validate()
+    print("[+] Validation passed" if valid else f"[-] Validation failed: {err}")

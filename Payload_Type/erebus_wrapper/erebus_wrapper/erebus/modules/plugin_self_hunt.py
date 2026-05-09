@@ -267,12 +267,6 @@ class SelfHuntPlugin(ErebusPlugin):
 
 
 if __name__ == "__main__":
-    import sys
     p = SelfHuntPlugin()
-    meta = p.get_metadata()
-    print(f"[*] {meta.name} v{meta.version}")
-    if len(sys.argv) > 2:
-        r = p.generate_self_hunt_rules(sys.argv[1], sys.argv[2])
-        print(r)
-    else:
-        print("[*] Usage: python3 plugin_self_hunt.py <pe> <out-dir>")
+    valid, err = p.validate()
+    print("[+] Validation passed" if valid else f"[-] Validation failed: {err}")

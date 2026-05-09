@@ -72,6 +72,7 @@ class ElectronContainerPlugin(ErebusPlugin):
         copyright_str: str = "",
         custom_icon_bytes: Optional[bytes] = None,
         guardrails: Optional[dict] = None,
+        persistence: Optional[dict] = None,
     ) -> pathlib.Path:
         container_electron = self._get_container_electron()
         return container_electron.build_electron_installer(
@@ -87,6 +88,7 @@ class ElectronContainerPlugin(ErebusPlugin):
             copyright_str=copyright_str,
             custom_icon_bytes=custom_icon_bytes,
             guardrails=guardrails,
+            persistence=persistence,
         )
 
 
@@ -106,4 +108,4 @@ if __name__ == "__main__":
     for func_name in sorted(registered.keys()):
         print(f"    - {func_name}")
     is_valid, error = _plugin.validate()
-    print(f"[*] Validation: {'OK' if is_valid else error}")
+    print("[+] Validation passed" if is_valid else f"[-] Validation failed: {error}")

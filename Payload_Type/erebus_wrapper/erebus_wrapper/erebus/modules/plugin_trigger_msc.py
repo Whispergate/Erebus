@@ -210,5 +210,11 @@ SUwBAQEAAgAEAIAAIAD/////IQD//////////0JNNgAAAAAAAAA2AAAAKAAAAAACAAAgAAAAAQAgAAAA
 """
         with open(output_path, 'w', encoding='utf-8') as f:
             f.write(msc_content)
-            
+
         return output_path
+
+
+if __name__ == "__main__":
+    p = MscExplorerTriggerPlugin()
+    valid, err = p.validate()
+    print("[+] Validation passed" if valid else f"[-] Validation failed: {err}")

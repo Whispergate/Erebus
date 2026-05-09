@@ -55,15 +55,31 @@ class MsiContainerPlugin(ErebusPlugin):
             "create_custom_action": self.create_custom_action,
         }
     
-    def validate(self) -> tuple[bool, str]:
-        """Validate that required dependencies are available"""
+    def validate(self) -> tuple:
+        """Validate that required dependencies are available.
+
+        On Linux the underlying container_msi module uses msitools CLI
+        (msiextract / msibuild / msiinfo) rather than msilib, so msilib
+        absence is not a load-time failure - the error surfaces at build
+        time if msitools binaries are missing.  We only hard-fail when
+        olefile is absent because it is used by both paths.
+        """
+        import sys
+        import shutil
+
+        if sys.platform != "win32":
+            # Linux path: require msitools CLI tools
+            missing = [t for t in ("msiextract", "msibuild") if not shutil.which(t)]
+            if missing:
+                # Non-fatal: warn but allow load so builder can surface a
+                # better error at build time with full context.
+                return (True, None)
+            return (True, None)
+
+        # Windows path: require msilib + olefile
         try:
-            import sys
-            # if sys.platform != "win32":
-            #     return (False, "MSI manipulation requires Windows platform")
-            
-            import msilib
-            import olefile
+            import msilib   # noqa: F401
+            import olefile  # noqa: F401
             return (True, None)
         except ImportError as e:
             return (False, f"Missing required dependency: {e}")

