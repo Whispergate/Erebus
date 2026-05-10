@@ -384,8 +384,7 @@ NOTE: Loaders are written in C++ - Supplied shellcode format must be raw for `Lo
             parameter_type = BuildParameterType.Boolean,
             description = (
                 "Convert a PE (.exe/.dll) or .NET assembly to raw shellcode via Donut "
-                "before the obfuscation pipeline. Upload the PE via '0.0d Donut Input File'. "
-                "Requires donut-shellcode Python package (pip install donut-shellcode)."
+                "before the obfuscation pipeline."
             ),
             default_value = False,
             required = False,
