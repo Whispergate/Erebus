@@ -1113,11 +1113,7 @@ class PayloadMalDocsPlugin(ErebusPlugin):
     def get_metadata(self) -> PluginMetadata:
         return self.metadata
 
-    def validate(self):
-        try:
-            _load_vba_compiler()
-        except Exception as e:
-            return False, f"vba_compiler unavailable: {e}"
+    def validate(self) -> tuple[bool, Optional[str]]:
         return True, None
 
     def on_load(self):
@@ -1514,10 +1510,6 @@ class PayloadMalDocsPlugin(ErebusPlugin):
             vba_payload=vba_code,
             output_path=str(output_path),
         )
-
-# Module-level alias for any code that references PayloadOfficeDocPlugin by name.
-# Not a subclass — avoids the plugin loader's "multiple ErebusPlugin subclasses" error.
-PayloadOfficeDocPlugin = PayloadMalDocsPlugin
 
 
 if __name__ == "__main__":
