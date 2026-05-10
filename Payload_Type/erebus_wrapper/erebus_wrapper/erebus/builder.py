@@ -791,11 +791,12 @@ NOTE: Loaders are written in C++ - Supplied shellcode format must be raw for `Lo
             parameter_type = BuildParameterType.ChooseOne,
             description = (
                 "AMSI bypass depth:\n"
+                "0 = Disabled (no patch)\n"
                 "1 = Patch AmsiScanBuffer only (default)\n"
                 "2 = + Patch AmsiOpenSession\n"
                 "3 = + InvalidateAmsiContext (heap-walk, aggressive)"
             ),
-            choices = ["1", "2", "3"],
+            choices = ["0", "1", "2", "3"],
             default_value = "1",
             required = False,
             hide_conditions = [
@@ -809,11 +810,12 @@ NOTE: Loaders are written in C++ - Supplied shellcode format must be raw for `Lo
             parameter_type = BuildParameterType.ChooseOne,
             description = (
                 "ETW bypass depth:\n"
+                "0 = Disabled (no patch)\n"
                 "1 = Patch EtwEventWrite only (default)\n"
                 "2 = + Patch EtwEventWriteFull\n"
                 "3 = + UnregisterEtwProviders (TEB walk, aggressive)"
             ),
-            choices = ["1", "2", "3"],
+            choices = ["0", "1", "2", "3"],
             default_value = "1",
             required = False,
             hide_conditions = [
