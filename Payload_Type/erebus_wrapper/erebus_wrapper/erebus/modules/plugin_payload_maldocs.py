@@ -1515,25 +1515,9 @@ class PayloadMalDocsPlugin(ErebusPlugin):
             output_path=str(output_path),
         )
 
-
-# ---------------------------------------------------------------------------
-# Backward-compat alias: keep old plugin_payload_officedoc registration working
-# by exposing the three functions builder.py might import from that module.
-# ---------------------------------------------------------------------------
-
-class PayloadOfficeDocPlugin(PayloadMalDocsPlugin):
-    """
-    Thin alias retained so any code that instantiates PayloadOfficeDocPlugin
-    directly (e.g. builder.py lines that do PayloadOfficeDocPlugin().create_pptm_payload)
-    continues to work without modification.
-    """
-    metadata = PluginMetadata(
-        name="Payload OfficeDoc",
-        version="2.0.0",
-        category=PluginCategory.PAYLOAD,
-        description="DOTM remote template injection, PowerPoint PPTM and PPAM (alias of PayloadMalDocs)",
-        author="Whispergate",
-    )
+# Module-level alias for any code that references PayloadOfficeDocPlugin by name.
+# Not a subclass — avoids the plugin loader's "multiple ErebusPlugin subclasses" error.
+PayloadOfficeDocPlugin = PayloadMalDocsPlugin
 
 
 if __name__ == "__main__":
