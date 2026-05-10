@@ -318,7 +318,7 @@ DEFAULT_BLOCKED_PROCESSES = [
 class ErebusWrapper(PayloadType):
     name = "erebus_wrapper"
     author = "@Lavender-exe, @hunterino-sec"
-    semver = "v0.1.0"
+    semver = "0.1.0"
     
     note = f"An Initial Access Toolkit built to speed up payload development & delivery.\nVersion: {semver}"
 
@@ -522,9 +522,9 @@ NOTE: Loaders are written in C++ - Supplied shellcode format must be raw for `Lo
 3 = EarlyCascade (Remote)
 4 = PoolParty (Remote)
 5 = NtQueueApcThread (Remote)
-6 = ModuleStomp (Self) - map legitimate DLL .text; VAD shows file-backed
-7 = KernelCallbackTable (Self) - overwrite PEB KCT entry, trigger via SendMessage
-8 = TxfHollow (Remote) - transacted NTFS ghost section; phantom VAD path""",
+6 = ModuleStomp (Self)
+7 = KernelCallbackTable (Self)
+8 = TxfHollow (Remote)""",
             choices = ["1", "2", "3", "4", "5", "6", "7", "8"],
             default_value = "3",
             hide_conditions = [
