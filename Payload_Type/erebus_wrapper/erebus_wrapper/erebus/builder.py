@@ -5291,6 +5291,7 @@ generated if none have been entered.""",
                                 loader_type=loader_type,
                                 target_process=target_process or "C:\\Windows\\System32\\notepad.exe",
                                 is_word=_word_fmt in ("docm", "doc"),
+                                obfuscate_url=bool(obfuscate),
                             )
 
                         else:

