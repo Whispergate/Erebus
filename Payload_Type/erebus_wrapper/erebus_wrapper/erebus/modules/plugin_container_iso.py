@@ -49,12 +49,7 @@ class IsoContainerPlugin(ErebusPlugin):
         }
     
     def validate(self) -> tuple[bool, str]:
-        """Validate that required dependencies are available"""
-        try:
-            from pycdlib import PyCdlib
-            return (True, None)
-        except ImportError as e:
-            return (False, f"Missing required dependency: {e}")
+        return (True, None)
     
     def on_load(self):
         """Called when plugin is loaded"""

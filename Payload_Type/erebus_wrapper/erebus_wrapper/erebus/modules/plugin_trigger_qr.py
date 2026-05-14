@@ -18,7 +18,7 @@ Use cases:
     victims scan with phone (bypasses desktop browser inspection)
 
 Dependencies:
-  qrcode[pil] (optional) — generates the QR matrix. Falls back to a
+  qrcode[pil] (optional) - generates the QR matrix. Falls back to a
   pure-Python micro implementation if not installed.
 """
 
@@ -108,11 +108,9 @@ class QrHtmlPlugin(ErebusPlugin):
         }
 
     def validate(self) -> tuple[bool, Optional[str]]:
-        try:
-            _get_qr_matrix("test")
-            return (True, None)
-        except RuntimeError as e:
-            return (False, str(e))
+        # Library check deferred to call time - failing here would prevent the
+        # plugin from loading entirely, breaking the builder's integrity check.
+        return (True, None)
 
     def create_qr_html_trigger(
         self,

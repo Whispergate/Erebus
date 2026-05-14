@@ -15,13 +15,15 @@ This page is the **operator-facing catalog**: what ships, what each plugin does,
 
 | Category | Purpose |
 |---|---|
-| `TRIGGER` | Victim-clickable artefacts that launch the compiled loader (`.lnk`, `.bat`, `.msi`, `.msc`, `.html`, `.hta`, `.url`, `.js`/`.wsf`, `.chm`, `.svg`, ClickOnce) |
+| `TRIGGER` | Victim-clickable artefacts that launch the compiled loader - **Windows:** `.lnk`, `.bat`, `.msi`, `.msc`, `.html`, `.hta`, `.url`, `.js`/`.wsf`, `.chm`, `.svg`, ClickOnce · **Linux:** `.sh`, `.desktop` · **macOS:** `.command`, `.scpt`, `.pkg` · **Cross-platform:** HTML Smuggling, QR |
 | `CONTAINER` | Distribution wrappers (`ISO`, `VHD`, `7z`, `Zip`, `MSI`, `Electron`, `AppInstaller`/`MSIX`). Supports two-layer chaining via `3.0T Outer Transport`. |
 | `PAYLOAD` | Loader-adjacent transforms (DLL proxy generation, MalDoc generation, XLL add-ins, PE/DLL/\.NET → shellcode via Donut, Word/PowerPoint documents, decoy document lures) |
 | `CODESIGNER` | AuthentiCode signing of produced artefacts (self-signed, URL-spoofed, provided cert) |
 | `OTHER` | Utility functions: PE metadata sanitiser, self-hunt IOC scanner, C2 redirector config generator, phishing page generator |
 
 ## Trigger plugins
+
+> **0.0 Target OS selection** - The `0.0 Target OS` BuildParameter (top of the parameter list) gates which trigger set is visible. Setting it to `Windows` shows the Windows triggers below and hides the Linux/macOS ones. `Linux` shows Bash and Desktop (plus HTML/QR). `macOS` shows Command, AppleScript, and PKG (plus HTML/QR). Windows-specific sub-parameters (`0.9a Trigger Binary`, `0.9b Trigger Command`, etc.) are also hidden when a non-Windows OS is selected.
 
 ### LNK
 
@@ -168,6 +170,76 @@ This page is the **operator-facing catalog**: what ships, what each plugin does,
   - Base64 payload split across multiple `<text>` elements to break single-string regex signatures
   - Configurable download filename
 - **Output:** `payload/<trigger>.svg`
+
+---
+
+### Bash (Linux / macOS)
+
+*Bash script (`.sh`) trigger that backgrounds the payload via `nohup` and optionally opens a decoy file. Available when `0.0 Target OS = Linux` or `0.0 Target OS = macOS`.*
+
+- **Module:** [plugin_trigger_bash.py](Payload_Type/erebus_wrapper/erebus_wrapper/erebus/modules/plugin_trigger_bash.py)
+- **Consumes:** `0.9-L Linux Trigger Type = Bash` (Linux) or `0.9-M macOS Trigger Type = Bash` (macOS), `0.9a Trigger Binary`, `0.9b Trigger Command`, `0.13 Decoy File`
+- **Key features:**
+  - `nohup bash -c '...' >/dev/null 2>&1 &` - process detaches immediately; parent shell exits clean
+  - Base64 eval obfuscation wraps the command in `eval "$(echo <b64> | base64 -d)"` to break static string scanning
+  - Decoy opener adapts to platform: `xdg-open` on Linux, `open` on macOS
+- **Output:** `payload/update.sh`
+
+### Desktop (Linux)
+
+*XDG `.desktop` application launcher that executes the payload when double-clicked in a graphical file manager (Nautilus, Dolphin, Thunar, etc.). Available when `0.0 Target OS = Linux`.*
+
+- **Module:** [plugin_trigger_desktop.py](Payload_Type/erebus_wrapper/erebus_wrapper/erebus/modules/plugin_trigger_desktop.py)
+- **Consumes:** `0.9-L Linux Trigger Type = Desktop`, `0.9a Trigger Binary`, `0.9b Trigger Command`
+- **Key features:**
+  - Standard `[Desktop Entry]` format - `Type=Application`, `Terminal=false`, `StartupNotify=false`
+  - `Exec=bash -c "... >/dev/null 2>&1 &"` runs payload silently without a terminal window
+  - `Name=` and `Icon=` masquerade as a PDF document (`Icon=application-pdf`)
+  - Files delivered inside a ZIP archive bypass GNOME 42+ download quarantine marking
+- **Output:** `payload/document.desktop`
+
+### Command (macOS)
+
+*macOS `.command` file that Terminal.app executes when double-clicked in Finder. Backgrounds the payload via `nohup` then closes the Terminal window via `osascript`. Available when `0.0 Target OS = macOS`.*
+
+- **Module:** [plugin_trigger_command.py](Payload_Type/erebus_wrapper/erebus_wrapper/erebus/modules/plugin_trigger_command.py)
+- **Consumes:** `0.9-M macOS Trigger Type = Command`, `0.9a Trigger Binary`, `0.9b Trigger Command`, `0.13 Decoy File`
+- **Key features:**
+  - `cd "$(dirname "$0")"` resolves payload path relative to the script - works from inside a ZIP extract
+  - `nohup bash -c '...' >/dev/null 2>&1 &` detaches the payload from Terminal.app's process group
+  - `osascript` closes the Terminal window after execution so no window lingers
+  - Optional decoy via `open <file> &`
+  - Deliver inside a ZIP to avoid Gatekeeper quarantine on the `.command` file (macOS ≤ 12 does not propagate xattr into ZIP contents)
+- **Output:** `payload/setup.command`
+
+### AppleScript (macOS)
+
+*AppleScript (`.scpt`) trigger executed via `osascript`. Uses `do shell script` to run the payload hidden with no Terminal window. Available when `0.0 Target OS = macOS`.*
+
+- **Module:** [plugin_trigger_applescript.py](Payload_Type/erebus_wrapper/erebus_wrapper/erebus/modules/plugin_trigger_applescript.py)
+- **Consumes:** `0.9-M macOS Trigger Type = AppleScript`, `0.9a Trigger Binary`, `0.9b Trigger Command`, `0.13 Decoy File`
+- **Key features:**
+  - `do shell script "<cmd> >/dev/null 2>&1 &"` - no Terminal window, process detaches immediately
+  - Command string reassembled from ASCII character codes (`character id N`) at runtime to break static string signatures
+  - Optional `open "<decoy>"` after execution
+  - Combine with a `.command` wrapper that calls `osascript update.scpt` in the background for Finder double-click delivery
+- **Output:** `payload/update.scpt`
+
+### PKG (macOS)
+
+*macOS PKG installer that executes the payload via a `postinstall` bash script running as root inside Installer.app. Available when `0.0 Target OS = macOS`.*
+
+- **Module:** [plugin_trigger_pkg.py](Payload_Type/erebus_wrapper/erebus_wrapper/erebus/modules/plugin_trigger_pkg.py)
+- **Consumes:** `0.9-M macOS Trigger Type = PKG`
+- **Key features:**
+  - `scripts/postinstall` - `chmod +x`, `nohup "$payload" >/dev/null 2>&1 &`, `exit 0`. Installer.app shows "Installation was successful" regardless of whether the loader fires.
+  - `PackageInfo` XML stub generated alongside the scripts for manual assembly
+  - If `pkgbuild` is present on the build host, assembles a real `.pkg` via `pkgbuild --root ... --scripts ...`
+  - If `pkgbuild` is unavailable (Linux Docker build host), emits the raw `pkg_project/` directory with instructions to assemble on a macOS host via `pkgbuild`
+  - Sign with `productsign` + an Apple Developer ID Installer cert to pass Gatekeeper on macOS 12+
+- **Output:** `payload/SystemUpdate.pkg` (if `pkgbuild` available) or `payload/pkg_project/` (raw scripts + PackageInfo for deferred assembly)
+
+---
 
 ## Container plugins
 
@@ -316,10 +388,12 @@ Set `3.0T Outer Transport = None` (default) for no outer wrapping.
 *Creates Excel documents (XLSM/XLSX/XLAM) with VBA payloads or compiles XLL Add-In DLLs. VBA is compiled to a valid `vbaProject.bin` directly on Linux via `agent_code/vba_compiler/`.*
 
 - **Module:** [plugin_payload_maldocs.py](Payload_Type/erebus_wrapper/erebus_wrapper/erebus/modules/plugin_payload_maldocs.py)
-- **Consumes:** `0.9 Create MalDoc`, `0.9a` – `0.9p` MalDoc Options
+- **Consumes:** `0.9 Create MalDoc`, `0.9a` – `0.9v` MalDoc Options
 - **Key features:**
-  - **Three output modes**: `VBA Module Only` (`.bas` for manual import), `Create/Backdoor Excel` (full workbook), `XLL Add-In DLL` (native Excel add-in)
-  - **Four VBA loader techniques**: `VirtualAlloc+CreateThread` (classic), `EnumSystemLocalesA` (callback-based), `QueueUserAPC` (no new thread), `Process Hollowing` (notepad.exe host)
+  - **Three output modes**: `VBA Module Only` (`.bas` for manual import), `Create/Backdoor Document` (full workbook), `XLL Add-In DLL` (native Excel add-in)
+  - **Four VBA loader techniques**: `VirtualAlloc+CreateThread` (classic), `EnumSystemLocalesA` (callback-based), `QueueUserAPC` (self-APC via SleepEx alertable wait), `AddressOfEntryPoint Injection` (overwrite child process entry point; no RWX allocation, no VirtualAllocEx)
+  - **HTTP shellcode staging** (`0.9v`) - when a Mythic base URL is supplied, the builder RC4-encrypts the shellcode at build time, uploads it to the Mythic file store via `SendMythicRPCFileCreate`, and embeds a compact `GetBuf()` VBA downloader (~80 lines) instead of any inline shellcode bytes. Eliminates VBA module-size limits (previously caused OOM errors with >1 MB payloads). Accepts self-signed TLS certificates (`WinHttp Option(4) = &H3300`, `MSXML2.ServerXMLHTTP` fallback).
+  - **Dual-layer obfuscation at rest** - in HTTP staging mode both the shellcode RC4 key and the staging URL are stored as RC4-encrypted `Array()` byte sequences in VBA source; neither appears in plaintext anywhere in the compiled document. URL is decrypted at runtime via `StrConv(Rc4D(urlEnc, urlKey), vbUnicode)`.
   - **Dynamic payload discovery** - `FindPayload` VBA function searches `ThisWorkbook.Path`, `%TEMP%`, `%APPDATA%`, `%USERPROFILE%\Desktop|Downloads|Documents`, OneDrive-synced shell folders at runtime. Path quoting via `Chr(34)` handles spaces. Macro exits silently if the payload is not found.
   - **Linux-native build** - VBA is compiled on the Mythic Docker container via the built-in MS-OVBA-compliant compiler; optional Windows-side COM re-injection via `erebus_helper.py` is available for higher-fidelity output via `build_maldoc.bat`
   - **XLL support** - generates C/C++ XLL source with configurable injection method, compiler (MSVC/MinGW), guardrail injection, and extra linker flags; XLL compilation is deferred to a Windows host via `erebus_helper.py xll`

@@ -52,8 +52,9 @@ def _compress_fallback(data: bytes) -> bytes:
         body = _compress_chunk(chunk_raw)
 
         if len(body) < len(chunk_raw):
-            # Compressed chunk
-            header = 0xB000 | (len(body) - 1)
+            # Compressed chunk: IsCompressed=1 (bit 15), bits 11-0 = (size - 3)
+            # per [MS-OVBA] 2.4.1.3.6 - decompressor reads (field + 3) bytes
+            header = 0xB000 | (len(body) - 3)
         else:
             # Raw chunk (compression didn't help) - store uncompressed
             body = chunk_raw

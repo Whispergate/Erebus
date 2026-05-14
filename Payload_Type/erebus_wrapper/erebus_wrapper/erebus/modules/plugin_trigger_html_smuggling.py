@@ -588,7 +588,7 @@ function {v_fn_geo}() {{
         return out_path
 
     # ================================================================
-    # Text Salting — zero-width Unicode injection
+    # Text Salting - zero-width Unicode injection
     # ================================================================
 
     @staticmethod

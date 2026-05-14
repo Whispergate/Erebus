@@ -209,7 +209,7 @@ class AppDomainPlugin(ErebusPlugin):
 
         The CLR downloads the assembly to
         %LOCALAPPDATA%\\assembly\\dl3\\<RANDOM>\\<HASH>\\evil.dll
-        and executes it WITHOUT MOTW — bypassing SmartScreen on the DLL.
+        and executes it WITHOUT MOTW - bypassing SmartScreen on the DLL.
 
         Requires the DLL to be strong-name signed.  The token from
         `sn.exe -T evil.dll` must be provided as `public_key_token`.

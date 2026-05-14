@@ -49,12 +49,7 @@ class DllProxyPlugin(ErebusPlugin):
         }
     
     def validate(self) -> tuple[bool, Optional[str]]:
-        """Validate that pefile library is available"""
-        try:
-            import pefile
-            return (True, None)
-        except ImportError:
-            return (False, "pefile library not found. Please install with: pip install pefile")
+        return (True, None)
     
     def on_load(self):
         """Called when plugin is loaded"""

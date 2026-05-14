@@ -18,3 +18,4 @@ python-docx
 xlsxwriter
 Pillow
 cairosvg
+qrcode[pil]

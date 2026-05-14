@@ -13,6 +13,7 @@ Erebus is an initial access wrapper payload type for [Mythic C2](https://github.
 ### Loaders
 - **Shellcode Loader** - native C++ executable or DLL with eight injection techniques (`NtMapViewOfSection`, `CreateFiber`, `EarlyCascade`, `PoolParty`, `NtQueueApcThread`, `ModuleStomp`, `KernelCallbackTable`, `TxfHollow`), full BCrypt decryption support, and configurable compile-time guardrails.
 - **ClickOnce** - .NET 7 single-file publish with six injection methods (`createfiber`, `earlycascade`, `poolparty`, `classic`, `enumdesktops`, `appdomain`).
+- **VM Loader** - C++ loader driven by an embedded vmkit RISC VM. A native `vmloader_builder` tool encodes an 8-op IR program and XOR-encrypts both the IR and the raw shellcode at build time; the VM decrypts and dispatches them at runtime. Supports three self-injection types: `CreateFiber` (type 2), `ModuleStomp` (type 6), `KernelCallbackTable` (type 7). Shellcrypt obfuscation is bypassed - the vmloader_builder applies its own key derivation (`derive_key(VM_IR_SEED)`).
 - **DLL Hijacking** - proxy-DLL generation from any upload-target DLL for sideloading chains.
 
 ### Shellcode sources
@@ -23,13 +24,22 @@ Erebus is an initial access wrapper payload type for [Mythic C2](https://github.
 Shellcrypt chain of compression (`LZNT1`/`RLE`) → encryption (`RC4`/`XOR`/`AES-ECB`/`AES-CBC`) → encoding (`BASE64`/`ASCII85`/`ALPHA32`/`WORDS256`) with operator-supplied or auto-generated keys, rendered into `C`, `CSharp`, or `Raw` output formats.
 
 ### Containers
-`ISO` · `VHD` · `7z` · `Zip` · `MSI` · **`Electron`** · **`AppInstaller`**/**`MSIX`** — the Electron container wraps the compiled loader inside a portable fake-installer `.exe` with a two-gate guardrail system (interaction token + environment checks) that defers the `%TEMP%` loader copy until after real user interaction and configurable anti-sandbox checks pass. Optional persistence (Registry Run Key/RunOnce, Startup Folder, Scheduled Task) via `3.P0`–`3.P3`. Any inner container can be wrapped in an outer ISO/VHD/ZIP/7z transport via `3.0T Outer Transport`.
+`ISO` · `VHD` · `7z` · `Zip` · `MSI` · **`Electron`** · **`AppInstaller`**/**`MSIX`** - the Electron container wraps the compiled loader inside a portable fake-installer `.exe` with a two-gate guardrail system (interaction token + environment checks) that defers the `%TEMP%` loader copy until after real user interaction and configurable anti-sandbox checks pass. Optional persistence (Registry Run Key/RunOnce, Startup Folder, Scheduled Task) via `3.P0`–`3.P3`. Any inner container can be wrapped in an outer ISO/VHD/ZIP/7z transport via `3.0T Outer Transport`.
 
 ### Triggers
-`LNK` · `BAT` · `MSI` · `MSC` · `ClickOnce` · **`HTML Smuggling`** (XOR+base64 Blob reconstruction) · **`ClickFix`** (clipboard-lure CAPTCHA page) · **`HTA`** (`mshta.exe`) · **`URL`** (internet shortcut, SMB/WebDAV) · **`JScript`**/**`WSF`** (`wscript.exe`) · **`CHM`** (`hh.exe` ShortCut ActiveX, deferred build) · **`SVG Smuggling`** (browser-rendered SVG with JS blob).
+
+**Windows:** `LNK` · `BAT` · `MSI` · `MSC` · `ClickOnce` · **`HTML Smuggling`** (XOR+base64 Blob reconstruction) · **`ClickFix`** (clipboard-lure CAPTCHA page) · **`HTA`** (`mshta.exe`) · **`URL`** (internet shortcut, SMB/WebDAV) · **`JScript`**/**`WSF`** (`wscript.exe`) · **`CHM`** (`hh.exe` ShortCut ActiveX, deferred build) · **`SVG Smuggling`** (browser-rendered SVG with JS blob).
+
+**Linux:** **`Bash`** (`.sh` nohup background execution, base64 eval obfuscation) · **`Desktop`** (XDG `.desktop` application launcher, file-manager double-click).
+
+**macOS:** **`Command`** (`.command` Finder double-click → Terminal, self-closing) · **`AppleScript`** (`.scpt` via `osascript do shell script`, char-code obfuscation) · **`PKG`** (macOS installer with postinstall script, optional `pkgbuild` assembly).
+
+**Cross-platform:** `HTML Smuggling` · `QR` - available for all three OS targets.
+
+Select the 0.0 Target OS via `0.0 Target OS` (top of the build parameters). Windows-specific triggers are hidden when Linux or macOS is selected, and vice versa.
 
 ### MalDocs
-XLSM / XLSX / XLAM + XLL Add-In DLL support. VBA is compiled directly on Linux via a built-in MS-OVBA-compliant `vbaProject.bin` compiler; an optional Windows-side COM re-injection path via `erebus_helper.py` is available for higher-fidelity output. Four VBA loader techniques (`VirtualAlloc+CreateThread`, `EnumSystemLocalesA`, `QueueUserAPC`, `Process Hollowing`), runtime payload discovery, and configurable AutoOpen / OnClose / OnSave execution triggers. Word and PowerPoint documents (DOTM remote template injection, PPTM, PPAM add-in) via the OfficeDocs plugin.
+XLSM / XLSX / XLAM + XLL Add-In DLL support. VBA is compiled directly on Linux via a built-in MS-OVBA-compliant `vbaProject.bin` compiler; an optional Windows-side COM re-injection path via `erebus_helper.py` is available for higher-fidelity output. Four VBA loader techniques (`VirtualAlloc+CreateThread`, `EnumSystemLocalesA`, `QueueUserAPC`, `Process Hollowing`), runtime payload discovery, and configurable AutoOpen / OnClose / OnSave execution triggers. **HTTP shellcode staging** (`0.9v`): when a Mythic base URL is supplied the shellcode is RC4-encrypted and uploaded to the Mythic file store at build time; VBA fetches and decrypts it at runtime via a compact `GetBuf()` downloader - no shellcode bytes or plaintext URL appear in the document (both are stored as RC4-encrypted byte arrays). Accepts self-signed TLS certificates. Word and PowerPoint documents (DOTM remote template injection, PPTM, PPAM add-in) via the OfficeDocs plugin.
 
 ### Code signing
 Self-signed, URL-spoofed (clone a legitimate website's cert details), or operator-provided PFX/P12 certificates, applied via `osslsigncode` to any loader or container output.

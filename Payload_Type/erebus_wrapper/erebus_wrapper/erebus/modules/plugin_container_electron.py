@@ -40,11 +40,7 @@ class ElectronContainerPlugin(ErebusPlugin):
         }
 
     def validate(self) -> tuple[bool, str]:
-        try:
-            from jinja2 import Environment  # noqa: F401
-            return (True, None)
-        except ImportError as e:
-            return (False, f"Missing required dependency: {e}")
+        return (True, None)
 
     def on_load(self):
         print("[Plugin] Electron Container plugin loaded")

@@ -41,7 +41,7 @@ View the rendered documentation by clicking on **Docs -> Agent Documentation** i
 ## Features
 
 - **Payload Generation**: Shellcode loader, VBA macros, XLL Add-Ins, DLL hijacking, and maldocs
-- **Execution Methods**: CreateThread, Process Hollowing, QueueUserAPC, EnumLocales, and more
+- **Execution Methods**: CreateThread, AddressOfEntryPoint Injection, QueueUserAPC, EnumLocales, and more
 - **VBA Payloads**: Command execution, PowerShell, Schtasks, WMI, Rundll32, Regsvr32, and shellcode injection
 - **Maldoc Creation**: Template-based XLSM generation with VBA injection
 - **MSI Backdooring**: Multiple attack vectors for MSI installer injection

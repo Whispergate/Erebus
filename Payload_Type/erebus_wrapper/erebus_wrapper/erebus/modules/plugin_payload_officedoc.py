@@ -1,4 +1,4 @@
-# Re-export shim — all implementation has moved to plugin_payload_maldocs.py.
+# Re-export shim - all implementation has moved to plugin_payload_maldocs.py.
 # Kept to avoid breaking the test suite and any external tooling that imports by name.
 # The imported class's __module__ remains plugin_payload_maldocs, so the plugin
 # loader's single-class-per-module check will not register this file as a plugin.

@@ -11,10 +11,10 @@ Erebus is a Mythic C2 wrapper payload type that takes raw shellcode and produces
 
 ### Key capabilities
 
-- **Multiple loaders** - Shellcode Loader (C++, 8 injection methods), ClickOnce (.NET 7, 6 injection methods), and DLL Hijacking proxy generation.
+- **Multiple loaders** - Shellcode Loader (C++, 8 injection methods), ClickOnce (.NET 7, 6 injection methods), VM Loader (vmkit RISC-VM-based, 3 self-injection methods), and DLL Hijacking proxy generation.
 - **Obfuscation pipeline** - compression / encryption / encoding chain via Shellcrypt, with RC4, XOR, AES-ECB, and AES-CBC all supported by the C++ loader via BCrypt.
 - **Custom shellcode** - upload raw bytes from any external C2 (Cobalt Strike, Havoc, Sliver, msfvenom) to replace Mythic's payload. PE/DLL/.NET assemblies can be converted to shellcode via the Donut plugin.
-- **Triggers** - LNK, BAT, MSI, MSC, ClickOnce, HTML Smuggling, ClickFix, HTA, URL shortcut, JScript/WSF, CHM, and SVG Smuggling.
+- **Triggers** - Windows: LNK, BAT, MSI, MSC, ClickOnce, HTML Smuggling, ClickFix, HTA, URL shortcut, JScript/WSF, CHM, SVG Smuggling. Linux: Bash (.sh), Desktop (XDG .desktop). macOS: Command (.command), AppleScript (.scpt), PKG installer. Cross-platform: HTML Smuggling, QR. 0.0 Target OS is selected via the `0.0 Target OS` BuildParameter.
 - **Containers** - ISO, VHD, 7z, Zip, MSI, Electron fake-installer, and AppInstaller/MSIX. Any inner container can be wrapped in an outer ISO/VHD/ZIP/7z transport via `3.0T Outer Transport`.
 - **MalDocs** - Linux-native Excel document generation (XLSM/XLSX/XLAM) with a built-in MS-OVBA-compliant `vbaProject.bin` compiler, four VBA loader techniques, runtime payload discovery, XLL add-in generation, and an optional Windows-side COM re-injection path. Word (DOTM remote template injection) and PowerPoint (PPTM/PPAM) formats via the OfficeDocs plugin.
 - **Code signing** - self-signed, URL-spoofed, or operator-supplied PFX/P12 certificates via `osslsigncode`.
@@ -39,33 +39,44 @@ Erebus is a Mythic C2 wrapper payload type that takes raw shellcode and produces
          │  Main Payload Type?        │
          │  Loader / Hijack           │
          └──┬──────────────────────┬──┘
-    ┌───────┘                      └────────┐
-    │                                       │
-┌───▼──────────────────┐   ┌──────────────▼───────────┐
-│  Loader Type?        │   │  DLL Hijacking Config    │
-│  Shellcode / Click   │   │  - Upload target DLL     │
-│  Once                │   │  - Generate proxy.def    │
-└──┬──────────────┬────┘   └──────────────┬───────────┘
-   │              │                       │
-┌──▼────┐  ┌──────▼─────┐                 │
-│Shcode │  │ClickOnce   │                 │
-│Loader │  │Config      │                 │
-│Config │  │- Method    │                 │
-│- Inj  │  │- Target    │                 │
-│- Tgt  │  │- AppDomain │                 │
-└──┬────┘  └──────┬─────┘                 │
-   │              │                       │
-   └──────────────┼───────────────────────┘
-                  │
- ┌────────────────▼─────────────────┐
- │  Shellcode Obfuscation           │
- │  (Shellcrypt)                    │
- │  ┌─────────────────────────────┐ │
- │  │ Compression: LZNT1/RLE/NONE │ │
- │  │ Encryption: RC4/XOR/AES     │ │
- │  │ Encoding: BASE64/ALPHA32/…  │ │
- │  └─────────────────────────────┘ │
- └────────────────┬─────────────────┘
+    ┌───────┘                      └──────────────┐
+    │                                             │
+┌───▼──────────────────────────┐   ┌──────────────▼───────────┐
+│  Loader Type?                │   │  DLL Hijacking Config    │
+│  Shellcode / ClickOnce / VM  │   │  - Upload target DLL     │
+└──┬──────────┬─────────────┬──┘   │  - Generate proxy.def    │
+   │          │             │      └──────────────┬───────────┘
+┌──▼────┐ ┌───▼────┐ ┌──────▼──────┐              │
+│Shcode │ │Click   │ │VM Loader    │              │
+│Loader │ │Once    │ │Config       │              │
+│Config │ │Config  │ │- Inj Type   │              │
+│- Inj  │ │- Method│ │  (2/6/7)    │              │
+│- Tgt  │ │- Target│ │- Format     │              │
+│- Guard│ │- AppDom│ │- Arch/Build │              │
+└──┬────┘ └───┬────┘ └──────┬──────┘              │
+   │          │             │                     │
+   │          │    ┌────────▼───────────────┐     │
+   │          │    │  vmloader_builder      │     │
+   │          │    │  (native host binary)  │     │
+   │          │    │  - XOR-encrypt IR blob │     │
+   │          │    │  - XOR-encrypt payload │     │
+   │          │    │  → embedded.h          │     │
+   │          │    └────────┬───────────────┘     │
+   │          │             │                     │
+   └──────────┼─────────────┘                     │
+              │                                   │
+ ┌────────────▼─────────────────────────┐         │
+ │  Shellcode Obfuscation (Shellcrypt)  │         │
+ │  (Shellcode Loader + ClickOnce only) │         │
+ │  ┌───────────────────────────────┐   │         │
+ │  │ Compression: LZNT1/RLE/NONE   │   │         │
+ │  │ Encryption: RC4/XOR/AES       │   │         │
+ │  │ Encoding: BASE64/ALPHA32/…    │   │         │
+ │  └───────────────────────────────┘   │         │
+ │  VM Loader: bypassed - raw bytes     │         │
+ │  written directly to shellcode.hpp   │         │
+ └────────────┬─────────────────────────┘         │
+              └──────────────────────────────────┘
                   │
        ┌──────────▼───────────┐
        │  Compile Loader      │
@@ -86,15 +97,15 @@ Erebus is a Mythic C2 wrapper payload type that takes raw shellcode and produces
       │ Add Trigger?         │
       │ LNK/BAT/MSI/MSC/     │
       │ HTML/ClickFix/       │
-      │ ClickOnce            │
+      │ ClickOnce/...        │
       └───────────┬──────────┘
                   │
-     ┌────────────▼────────────┐
+     ┌────────────▼────────────────┐
      │ Package Container?          │
-     │ ISO/VHD/7z/Zip/MSI/Electron│
-     │ AppInstaller               │
-     │ + optional Outer Transport │
-     └───────────┬─────────────┘
+     │ ISO/VHD/7z/Zip/MSI/Electron │
+     │ AppInstaller                │
+     │ + optional Outer Transport  │
+     └───────────┬─────────────────┘
                  │
       ┌──────────▼─────────┐
       │ Final Payload Out  │
@@ -109,9 +120,9 @@ Erebus is a Mythic C2 wrapper payload type that takes raw shellcode and produces
 ### Pipeline stages
 
 1. **Input & header check** - Mythic passes raw shellcode (or the operator supplies custom shellcode via `0.0a Enable Custom Shellcode`). The builder rejects PE files via an MZ-header check and fails the build cleanly.
-2. **Shellcode obfuscation** - Shellcrypt applies compression → encryption → encoding → output formatting in sequence; the key and IV are rendered into the loader config template.
-3. **Loader configuration** - Jinja2 templates in [agent_code/templates/](Payload_Type/erebus_wrapper/erebus_wrapper/agent_code/templates/) (`config.hpp`, `InjectionConfig.cs`, `guardrail.hpp`, `proxy.def`) are rendered with user parameters + obfuscation metadata.
-4. **Loader compilation** - the Shellcode Loader is built via MinGW-w64 from [Erebus.Loaders/Erebus.Loader/](Payload_Type/erebus_wrapper/erebus_wrapper/agent_code/Erebus.Loaders/Erebus.Loader/); ClickOnce uses `dotnet publish` from [Erebus.Loaders/Erebus.ClickOnce/](Payload_Type/erebus_wrapper/erebus_wrapper/agent_code/Erebus.Loaders/Erebus.ClickOnce/).
+2. **Shellcode obfuscation** - For Shellcode Loader and ClickOnce, Shellcrypt applies compression → encryption → encoding → output formatting in sequence; the key and IV are rendered into the loader config template. For VM Loader this stage is bypassed - raw shellcode bytes are written directly to `shellcode.hpp`; the `vmloader_builder` native tool then XOR-encrypts them with `derive_key(VM_IR_SEED)` and emits `embedded.h`.
+3. **Loader configuration** - Jinja2 templates in [agent_code/templates/](Payload_Type/erebus_wrapper/erebus_wrapper/agent_code/templates/) (`config.hpp`, `InjectionConfig.cs`, `guardrail.hpp`, `proxy.def`) are rendered with user parameters + obfuscation metadata. VM Loader has no Jinja2 config template - all configuration is encoded in the IR program emitted by `vmloader_builder`.
+4. **Loader compilation** - the Shellcode Loader is built via MinGW-w64 from [Erebus.Loaders/Erebus.Loader/](Payload_Type/erebus_wrapper/erebus_wrapper/agent_code/Erebus.Loaders/Erebus.Loader/); ClickOnce uses `dotnet publish` from [Erebus.Loaders/Erebus.ClickOnce/](Payload_Type/erebus_wrapper/erebus_wrapper/agent_code/Erebus.Loaders/Erebus.ClickOnce/); VM Loader is a two-step build - `make embedded` compiles and runs the native `vmloader_builder` to produce `include/embedded.h`, then `make all` cross-compiles the Windows PE from [Erebus.Loaders/Erebus.VMLoader/](Payload_Type/erebus_wrapper/erebus_wrapper/agent_code/Erebus.Loaders/Erebus.VMLoader/).
 5. **Code signing** - if `6.0 Codesign Loader = True`, the compiled artefact is signed via `osslsigncode` with a self-signed, URL-spoofed, or operator-provided certificate.
 6. **MalDoc generation** (optional) - when `0.8 Output Extension Source = MalDoc`, the builder produces an XLSM/XLSX/XLAM document with VBA or an XLL add-in source tree.
 7. **Trigger generation** (optional) - when `0.8 Output Extension Source = Trigger`, a delivery trigger (LNK/BAT/MSI/MSC/HTML/ClickFix/ClickOnce) is created that executes the compiled loader.
@@ -132,28 +143,32 @@ Every BuildParameter defined in [builder.py](Payload_Type/erebus_wrapper/erebus_
 
 ### 0.1 – 0.2a · Loader selection
 
-- **0.1 Loader Type** - `Shellcode Loader` or `ClickOnce`. Only visible when `Main Payload Type = Loader`.
-- **0.2 Loader Format** - output format for the Shellcode Loader: `exe`, `dll`, or `xll`. Each maps to a different compile target in the loader Makefile.
-- **0.2a Loader Architecture** - `x64` or `x86`.
+- **0.1 Loader Type** - `Shellcode Loader`, `ClickOnce`, or `VM Loader`. Only visible when `Main Payload Type = Loader`.
+- **0.2 Loader Format** - output format for the Shellcode Loader and VM Loader: `exe`, `dll`, or `xll`. Each maps to a different compile target in the respective loader Makefile. Hidden for ClickOnce.
+- **0.2a Loader Architecture** - `x64` or `x86`. Applies to Shellcode Loader and VM Loader. Hidden for ClickOnce.
 
 ### 0.3 – 0.3a · Loader build configuration
 
-- **0.3 Loader Build Configuration** - `Debug` or `Release` for the Shellcode Loader (also supports `test` for per-injection-type test builds).
+- **0.3 Loader Build Configuration** - `Debug` or `Release` for the Shellcode Loader and VM Loader (Shellcode Loader also supports `test` for per-injection-type test builds).
 - **0.3 ClickOnce Build Configuration** - `Debug` or `Release` for the ClickOnce loader.
 - **0.3a ClickOnce Architecture** - `x64` or `x86` target for the .NET publish.
 
 ### 0.4 – 0.7 · Injection configuration
 
-- **0.4 Shellcode Loader - Injection Type** - the C++ loader's injection technique:
+- **0.4 Shellcode Loader - Injection Type** - the C++ loader's injection technique. Hidden when `0.1 = VM Loader`:
   - `1` - `NtMapViewOfSection` (section-mapping injection, remote)
   - `2` - `CreateFiber` (fiber-based, self)
-  - `3` - `EarlyCascade` (remote APC, pre-main-thread — via `NtQueueApcThread`)
+  - `3` - `EarlyCascade` (remote APC, pre-main-thread - via `NtQueueApcThread`)
   - `4` - `PoolParty` (worker factory thread pool, remote)
   - `5` - `NtQueueApcThread` (APC injection into existing thread, remote)
-  - `6` - `ModuleStomp` (self — map a legitimate DLL, overwrite `.text`; VAD shows file-backed memory)
-  - `7` - `KernelCallbackTable` (self — overwrite `PEB.KernelCallbackTable` entry, trigger via `SendMessage(WM_COPYDATA)`; no new thread)
-  - `8` - `TxfHollow` (remote — transacted NTFS ghost section via `NtCreateTransaction`; rolls back NTFS transaction after mapping, leaving a phantom VAD path)
-- **0.5 Shellcode Loader - Target Process** - target process for remote injection methods (ignored for `CreateFiber`).
+  - `6` - `ModuleStomp` (self - map a legitimate DLL, overwrite `.text`; VAD shows file-backed memory)
+  - `7` - `KernelCallbackTable` (self - overwrite `PEB.KernelCallbackTable` entry, trigger via `SendMessage(WM_COPYDATA)`; no new thread)
+  - `8` - `TxfHollow` (remote - transacted NTFS ghost section via `NtCreateTransaction`; rolls back NTFS transaction after mapping, leaving a phantom VAD path)
+- **0.4a VM Loader - Injection Type** - the VM Loader's self-injection method. Visible only when `0.1 = VM Loader`. Selects which injection function the `ExecPayload` VM opcode dispatches to at compile time (`CONFIG_INJECTION_TYPE` define):
+  - `2` - `CreateFiber` (default; inline fiber self-injection, no extra source file)
+  - `6` - `ModuleStomp` (calls `InjectionModuleStomp`; compiles `injection_module_stomp.cpp`)
+  - `7` - `KernelCallbackTable` (calls `InjectionKernelCallback`; compiles `injection_kernelcallback.cpp`)
+- **0.5 Shellcode Loader - Target Process** - target process for remote injection methods (ignored for `CreateFiber`). Hidden when `0.1 = VM Loader` (all VM Loader injection types are self-injection only).
 - **0.6 ClickOnce - Injection Method** - the .NET loader's injection technique: `createfiber`, `earlycascade`, `poolparty`, `classic` (CreateRemoteThread), `enumdesktops` (self-callback), or `appdomain`.
 - **0.7 ClickOnce - Target Process** - target process for ClickOnce remote injection methods.
 
@@ -179,7 +194,7 @@ The DLL-hijack path has an equivalent set under `1.1` – `1.1k` (see below).
 
 ### 0.5m – 0.5o · Evasion backends
 
-Shared between the Shellcode Loader and DLL-hijack paths (both render into `config.hpp`). ClickOnce path is unaffected.
+Shared between the Shellcode Loader, VM Loader, and DLL-hijack paths. ClickOnce path is unaffected.
 
 - **0.5m Syscall Backend** - `TartarusGate` (built-in indirect-syscall shim page, default) or `SysWhispers3` (generated `Sw3Nt*` stubs). Hidden when `0.1 Loader Type = ClickOnce`.
 - **0.5n Callstack Spoofing** - enable `SpoofCall()` dispatch for Nt* calls. `InitCallstackSpoof()` runs in `RunEvasionPatches()` and locates an `add rsp, 0x68; ret` gadget inside the configured module list (see `0.5o`). Call sites fill `SpoofContext` and jump through the gadget, leaving a fake return frame pointing at the host module. Hidden for ClickOnce and x86.
@@ -202,7 +217,7 @@ Only visible when `0.8 = Trigger`.
 
 Only visible when `0.8 = MalDoc`. Note that `0.9` is multiplexed: the same parameter name appears in both trigger and MalDoc modes with different semantics.
 
-- **0.9 Create MalDoc** - `None`, `Create/Backdoor Excel`, or `VBA Module Only` (just export the `.bas`).
+- **0.9 Create MalDoc** - `None`, `Create/Backdoor Document`, `VBA Module Only` (just export the `.bas`), or `Build Matrix` (generate all loader × trigger × format combinations in one shot).
 - **0.9a MalDoc Type** - `Create New` or `Backdoor Existing`.
 - **0.9b Excel Source File** - upload an existing `.xlsm` / `.xlam` / `.xls` to backdoor.
 - **0.9c VBA Execution Trigger** - `AutoOpen`, `OnClose`, or `OnSave`.
@@ -211,7 +226,7 @@ Only visible when `0.8 = MalDoc`. Note that `0.9` is multiplexed: the same param
 - **0.9f MalDoc Injection Type** - `Command Execution` (WinAPI shell call) or `Shellcode Injection` (direct VBA shellcode loader).
 - **0.9f1 MalDoc Trigger Binary** - binary invoked in Command Execution mode (parallel to `0.9a`).
 - **0.9f2 MalDoc Trigger Command** - arguments passed to `0.9f1` (parallel to `0.9b`).
-- **0.9g VBA Loader Technique** - `VirtualAlloc + CreateThread`, `EnumSystemLocalesA Callback`, `QueueUserAPC Injection`, or `Process Hollowing`. Only visible when `0.9f = Shellcode Injection`.
+- **0.9g VBA Loader Technique** - `VirtualAlloc + CreateThread`, `EnumSystemLocalesA Callback`, `QueueUserAPC Injection`, or `AddressOfEntryPoint Injection`. Only visible when `0.9f = Shellcode Injection`.
 - **0.9h XLL Payload Type** - toggles XLL add-in generation. When set, the builder emits an XLL C/C++ source tree + `build_xll.bat` runbook for deferred Windows-side compilation via `erebus_helper.py xll`.
 - **0.9i XLL Injection Method** - injection technique inside the XLL (`CreateThread` in-process or `ProcessInject` remote).
 - **0.9j XLL Target Process** - target for remote XLL injection.
@@ -219,6 +234,11 @@ Only visible when `0.8 = MalDoc`. Note that `0.9` is multiplexed: the same param
 - **0.9l XLL Guardrail Includes** / **0.9m XLL Guardrail Code** / **0.9n XLL Guardrail Extra Libs** - custom guardrail injection into the XLL source template.
 - **0.9o XLL Decoy XLSX** - optional decoy XLSX file shipped alongside the XLL.
 - **0.9p MalDoc Output Format** - `XLSM`, `XLSX`, or `XLAM`.
+- **0.9r Matrix Loaders** *(Build Matrix only)* - comma-separated subset of loader keys to include in the matrix run: `createthread`, `enumsystemlocales`, `queueuserapc`, `hollowing` (AoEP). Defaults to all four when left blank.
+- **0.9s Matrix Triggers** *(Build Matrix only)* - comma-separated subset of trigger keys: `autoopen`, `onclose`, `onsave`. Defaults to all three when left blank.
+- **0.9t Matrix Formats** *(Build Matrix only)* - comma-separated subset of output formats: `xlsm`, `xlsx`, `xlam`. Defaults to all three when left blank.
+- **0.9u Matrix Zip Output** *(Build Matrix only)* - when enabled, all generated documents are collected into a single `.zip` archive before delivery. Hidden unless `0.9 Create MalDoc = Build Matrix`.
+- **0.9v HTTP Stager URL** - Base URL of the Mythic server (or any HTTPS host) reachable from the target, e.g. `https://192.168.1.1:7443`. When set and `0.9f = Shellcode Injection`, the builder RC4-encrypts the shellcode at build time, uploads it to the Mythic file store via `SendMythicRPCFileCreate`, constructs the staging URL as `<base>/direct/download/<agentFileId>`, and generates a compact (~80-line) VBA `GetBuf()` downloader instead of embedding shellcode bytes inline. Both the staging URL and shellcode RC4 key are stored as encrypted byte arrays in VBA source - no plaintext URL or shellcode appears anywhere in the document. The downloader uses `WinHttp.WinHttpRequest.5.1` (with `Option(4) = &H3300` to accept self-signed certificates) and falls back to `MSXML2.ServerXMLHTTP`. Leave blank to use the default inline-shellcode path (required for small payloads or air-gapped targets). Requires container restart when first configured.
 
 ### 0.13 · Decoy file
 
@@ -236,6 +256,8 @@ Only visible when `0.0 Main Payload Type = Hijack`.
 - **1.1a – 1.1k** - same set as `0.5a` – `0.5l` but rendered into the hijack loader config (debugger / remote debugger / debugger processes / hardware breakpoints / timing / host, user, IP, domain whitelists + blocklists).
 
 ### 2.0 – 2.3 · Shellcrypt options
+
+Applies to Shellcode Loader and ClickOnce. When `0.1 Loader Type = VM Loader` these parameters are still visible but the obfuscation they control is **not applied** - the builder writes raw shellcode bytes directly to `shellcode.hpp` and the `vmloader_builder` native tool applies its own XOR encryption via `derive_key(VM_IR_SEED)` when generating `include/embedded.h`. Setting any Shellcrypt option while using VM Loader has no effect.
 
 - **2.0 Compression Type** - `NONE`, `LZNT1`, or `RLE`.
 - **2.1 Encryption Type** - `NONE`, `XOR`, `RC4`, `AES-ECB`, or `AES-CBC`. All four non-null options are supported by the Shellcode Loader via BCrypt.
@@ -358,6 +380,8 @@ Each build stage is reported to Mythic via `SendMythicRPCPayloadUpdatebuildStep`
 | 7 | `[T1027] - Compiling Shellcode Loader` | Shellcode Loader w/ `0.2 = exe` | Compile C++ loader exe |
 | 8 | `[T1027] - Compiling ClickOnce Loader` | ClickOnce | `dotnet publish` the ClickOnce project |
 | 9 | `[T1027] - Compiling Test Payloads` | `0.3 Loader Build Configuration = test` | Build one loader per injection method for testing |
+| 9a | `[T1027] - VM Loader embedded.h` | VM Loader | Run `make embedded`: compile `vmloader_builder` natively and emit `include/embedded.h` with XOR-encrypted IR + payload |
+| 9b | `[T1027] - Compiling VM Loader` / `[T1027.011] - Compiling VM Loader DLL` / `[T1559.002] - Compiling VM Loader XLL` | VM Loader | Cross-compile `erebus_vm.{exe,dll,xll}` via MinGW-w64 with selected `INJECTION_TYPE`, `ARCH`, `BUILD` |
 | 10 | `[T1553.006] - Sign Shellcode Loader` | `6.0 Codesign Loader = True` | AuthentiCode sign the produced binary |
 | 11 | `[T1566.001] - Creating MalDoc` | `0.8 = MalDoc` | Generate XLSM/XLSX/XLAM document + VBA payload |
 | 12 | `[T1218.007] - Staging MSI` | `5.3 Enable MSI Backdoor = True` | Backdoor an uploaded MSI with the compiled loader |
@@ -375,7 +399,8 @@ After a successful build the `payload/` directory contains (depending on selecte
 
 ```
 payload/
-├── erebus.{exe,dll,xll}          # compiled loader
+├── erebus.{exe,dll,xll}          # compiled Shellcode Loader or ClickOnce output
+├── erebus_vm.{exe,dll,xll}       # compiled VM Loader (when 0.1 = VM Loader)
 ├── <trigger>.{lnk,bat,msi,msc,html,application}  # if trigger selected
 ├── <maldoc>.{xlsm,xlsx,xlam}    # if MalDoc selected
 ├── <decoy>.{pdf,docx,xlsx}      # if decoy included
@@ -426,7 +451,11 @@ agent_code/
 ├── Erebus.Loaders/
 │   ├── Erebus.Loader/      # C++ Shellcode Loader source (submodule)
 │   ├── Erebus.ClickOnce/   # .NET 7 ClickOnce loader source
-│   └── Erebus.Electron/    # Electron fake-installer project
+│   ├── Erebus.Electron/    # Electron fake-installer project
+│   └── Erebus.VMLoader/    # vmkit RISC-VM-based loader
+│       ├── include/        # vm_loader.hpp (vmkit), vmloader.hpp (ErebusVM), embedded.h (generated)
+│       ├── src/main.cpp    # target-side entry point - copies blob to stack, runs ErebusVM
+│       └── builder/        # vmloader_builder.cpp - native host tool that emits embedded.h
 ├── Erebus.Helper/          # Windows-side build helper (submodule)
 ├── hijack/                 # DLL hijack proxy C++ source
 ├── shellcode/              # Per-build shellcode staging
@@ -477,8 +506,9 @@ Injection methods are not plugins - they live inside the loader source code:
 
 - **C++ (Shellcode Loader)** - add the implementation under [Erebus.Loader/](Payload_Type/erebus_wrapper/erebus_wrapper/agent_code/Erebus.Loaders/Erebus.Loader/), update the switch statement in `injection_factory.cpp`, and add the new ID to `0.4 Shellcode Loader - Injection Type`.
 - **.NET (ClickOnce)** - add a new class under [Erebus.ClickOnce/Injections/](Payload_Type/erebus_wrapper/erebus_wrapper/agent_code/Erebus.Loaders/Erebus.ClickOnce/Injections/) implementing `InjectionMethod`, register it in `InjectionFactory.cs`, and add the method name to `0.6 ClickOnce - Injection Method`.
+- **VM Loader** - add the injection implementation under [Erebus.Loader/src/injection/](Payload_Type/erebus_wrapper/erebus_wrapper/agent_code/Erebus.Loaders/Erebus.Loader/src/injection/) (the VM Loader shares Erebus.Loader injection sources). Add a new `#elif CONFIG_INJECTION_TYPE == N` branch to the `ExecPayload` handler in [Erebus.VMLoader/include/vmloader.hpp](Payload_Type/erebus_wrapper/erebus_wrapper/agent_code/Erebus.Loaders/Erebus.VMLoader/include/vmloader.hpp) with a matching forward declaration. Add the new source file to the conditional `LOADER_SHARED_SRCS` block in [Erebus.VMLoader/Makefile](Payload_Type/erebus_wrapper/erebus_wrapper/agent_code/Erebus.Loaders/Erebus.VMLoader/Makefile). Finally, add the new type ID to `0.4a VM Loader - Injection Type` choices in `builder.py`. VM Loader injection types are **self-injection only** - the VM has no remote-process context.
 
-Both loaders ship as git submodules; changes to them are committed in the respective submodule repositories.
+Both Shellcode Loader and VM Loader share injection sources from Erebus.Loader, which ships as a git submodule.
 
 ### Adding a new obfuscation method
 
