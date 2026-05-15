@@ -66,6 +66,10 @@ View the rendered documentation by clicking on **Docs -> Agent Documentation** i
 - [x] Hidden MSI/ISO container files
 - [x] Maldocs VBA generator
 
+### Known Issues
+- VBA: Address of Entry Point Injection is not functional as of v0.1.0
+- Container goes offline during compilation of some payloads, just wait for ~>5 minutes for it to finish working
+
 ### Bug Fixes
 
 #### [v0.0.2]
