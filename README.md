@@ -65,12 +65,17 @@ View the rendered documentation by clicking on **Docs -> Agent Documentation** i
 - [x] MSC Snap-In and GrimReaper triggers
 - [x] Hidden MSI/ISO container files
 - [x] Maldocs VBA generator
+  - [x] Staged VBA Loader (For larger shellcode, e.g. Apollo)
+  - [x] Stageless VBA Loader
 
 ### Known Issues
 - VBA: Address of Entry Point Injection is not functional as of v0.1.0
 - Container goes offline during compilation of some payloads, just wait for ~>5 minutes for it to finish working
 
 ### Bug Fixes
+
+#### [v0.1.0]
+- Fixed VBA Loader and added a staged loader via Mythic Direct Files Download 
 
 #### [v0.0.2]
 - Fixed issues with XLL source code saving
