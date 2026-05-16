@@ -4,76 +4,73 @@ chapter = true
 weight = 100
 +++
 
-## Summary
 ![Erebus Banner](/wrappers/erebus_wrapper/ErebusBannerText.png?width=700px)
-Erebus is a modern initial access wrapper aimed at decreasing the development to deployment time, when preparing for intrusion operations. Erebus comes with multiple techniques out of the box to craft complex chains, and assist in bypassing the toughest security measures.
 
-### Highlighted Wrapper Features
-**Loader Types:**
-  - Shellcode Loader (C++ with 5 injection methods)
-  - ClickOnce (.NET with 5 injection methods)
-  - DLL Hijacking (Proxy-based execution)
+Erebus is an initial access wrapper payload type for [Mythic C2](https://github.com/its-a-feature/Mythic). It takes raw shellcode (Mythic-generated *or* supplied from any external C2) and produces a ready-to-deliver artefact chained through the operator's choice of loader, obfuscation pipeline, code-signing flow, container format, and execution trigger.
 
-**Shellcode Source:**
-  - Mythic-wrapped C2 agent (default)
-  - Custom external shellcode upload (Cobalt Strike, Havoc, Sliver, etc.) via `Enable Custom Shellcode`
+## What's in the box
 
-**Shellcode Obfuscation Pipeline:**
-  - Compression: LZNT1, RLE, or None
-  - Encryption: RC4, XOR
-  - Encoding: BASE64, ALPHA32, ASCII85, WORDS256
-  - Output formats: C, C#, Raw
+### Loaders
+- **Shellcode Loader** - native C++ executable or DLL with eight injection techniques (`NtMapViewOfSection`, `CreateFiber`, `EarlyCascade`, `PoolParty`, `NtQueueApcThread`, `ModuleStomp`, `KernelCallbackTable`, `TxfHollow`), full BCrypt decryption support, and configurable compile-time guardrails.
+- **ClickOnce** - .NET 7 single-file publish with six injection methods (`createfiber`, `earlycascade`, `poolparty`, `classic`, `enumdesktops`, `appdomain`).
+- **VM Loader** - C++ loader driven by an embedded vmkit RISC VM. A native `vmloader_builder` tool encodes an 8-op IR program and XOR-encrypts both the IR and the raw shellcode at build time; the VM decrypts and dispatches them at runtime. Supports three self-injection types: `CreateFiber` (type 2), `ModuleStomp` (type 6), `KernelCallbackTable` (type 7). Shellcrypt obfuscation is bypassed - the vmloader_builder applies its own key derivation (`derive_key(VM_IR_SEED)`).
+- **DLL Hijacking** - proxy-DLL generation from any upload-target DLL for sideloading chains.
 
-**Injection Methods (Shellcode Loader):**
-  - NtMapViewOfSection (Type 1)
-  - CreateFiber (Type 2)
-  - EarlyCascade / NtQueueApcThread (Type 3)
-  - PoolParty (Type 4)
+### Shellcode sources
+- Mythic-wrapped C2 agent (default).
+- Any external C2 output - Cobalt Strike, Havoc, Sliver, msfvenom - via `0.0a Enable Custom Shellcode` + `0.0b Custom Shellcode File`.
 
-**Injection Methods (ClickOnce):**
-  - CreateFiber
-  - EarlyCascade
-  - PoolParty
-  - Classic CreateRemoteThread
-  - EnumDesktops callback injection
-  - AppDomain Injection
+### Obfuscation pipeline
+Shellcrypt chain of compression (`LZNT1`/`RLE`) → encryption (`RC4`/`XOR`/`AES-ECB`/`AES-CBC`) → encoding (`BASE64`/`ASCII85`/`ALPHA32`/`WORDS256`) with operator-supplied or auto-generated keys, rendered into `C`, `CSharp`, or `Raw` output formats.
 
-**Container Formats:**
-  - ISO (Bootable media with optional autorun)
-  - MSI (Windows Installer packages)
-  - 7z (High compression archives)
-  - ZIP (Standard archives with optional encryption)
+### Containers
+`ISO` · `VHD` · `7z` · `Zip` · `MSI` · **`Electron`** · **`AppInstaller`**/**`MSIX`** - the Electron container wraps the compiled loader inside a portable fake-installer `.exe` with a two-gate guardrail system (interaction token + environment checks) that defers the `%TEMP%` loader copy until after real user interaction and configurable anti-sandbox checks pass. Optional persistence (Registry Run Key/RunOnce, Startup Folder, Scheduled Task) via `3.P0`–`3.P3`. Any inner container can be wrapped in an outer ISO/VHD/ZIP/7z transport via `3.0T Outer Transport`.
 
-**Delivery & Evasion:**
-  - Code Signing (Self-signed, spoofed, or legitimate certificates)
-  - LNK Trigger Mechanisms (Shortcut-based execution chains)
-  - MalDocs (Excel) Support:
-    - VBA Module Export (.bas files for direct import into Excel)
-    - 4 VBA Loader Techniques (VirtualAlloc, EnumLocales, QueueUserAPC, ProcessHollowing)
-    - XLL Add-In DLL payloads (native Excel add-in execution)
-    - Dynamic payload discovery - VBA enumerates the filesystem to locate the payload by name at runtime rather than relying on a hardcoded path
-    - Output formats: XLSM, XLSX, XLAM
-    - Windows-side COM injection via `erebus_helper` (deferred build)
-  - Decoy File Support (Social engineering with fake content)
-  - Configurable Injection Parameters (Target process, injection type)
+### Triggers
 
-**Obfuscated Shellcode Generation**
-  - Dynamic configuration of obfuscation chains
-  - Multiple encryption key options (custom or auto-generated)
-  - Output format customization per loader type
+**Windows:** `LNK` · `BAT` · `MSI` · `MSC` · `ClickOnce` · **`HTML Smuggling`** (XOR+base64 Blob reconstruction) · **`ClickFix`** (clipboard-lure CAPTCHA page) · **`HTA`** (`mshta.exe`) · **`URL`** (internet shortcut, SMB/WebDAV) · **`JScript`**/**`WSF`** (`wscript.exe`) · **`CHM`** (`hh.exe` ShortCut ActiveX, deferred build) · **`SVG Smuggling`** (browser-rendered SVG with JS blob).
+
+**Linux:** **`Bash`** (`.sh` nohup background execution, base64 eval obfuscation) · **`Desktop`** (XDG `.desktop` application launcher, file-manager double-click).
+
+**macOS:** **`Command`** (`.command` Finder double-click → Terminal, self-closing) · **`AppleScript`** (`.scpt` via `osascript do shell script`, char-code obfuscation) · **`PKG`** (macOS installer with postinstall script, optional `pkgbuild` assembly).
+
+**Cross-platform:** `HTML Smuggling` · `QR` - available for all three OS targets.
+
+Select the 0.0 Target OS via `0.0 Target OS` (top of the build parameters). Windows-specific triggers are hidden when Linux or macOS is selected, and vice versa.
+
+### MalDocs
+XLSM / XLSX / XLAM + XLL Add-In DLL support. VBA is compiled directly on Linux via a built-in MS-OVBA-compliant `vbaProject.bin` compiler; an optional Windows-side COM re-injection path via `erebus_helper.py` is available for higher-fidelity output. Four VBA loader techniques (`VirtualAlloc+CreateThread`, `EnumSystemLocalesA`, `QueueUserAPC`, `Process Hollowing`), runtime payload discovery, and configurable AutoOpen / OnClose / OnSave execution triggers. **HTTP shellcode staging** (`0.9v`): when a Mythic base URL is supplied the shellcode is RC4-encrypted and uploaded to the Mythic file store at build time; VBA fetches and decrypts it at runtime via a compact `GetBuf()` downloader - no shellcode bytes or plaintext URL appear in the document (both are stored as RC4-encrypted byte arrays). Accepts self-signed TLS certificates. Word and PowerPoint documents (DOTM remote template injection, PPTM, PPAM add-in) via the OfficeDocs plugin.
+
+### Code signing
+Self-signed, URL-spoofed (clone a legitimate website's cert details), or operator-provided PFX/P12 certificates, applied via `osslsigncode` to any loader or container output.
+
+### Evasion
+Compile-time guardrails on both the C++ and C# loaders (`IsDebuggerPresent`, remote debugger, debugger processes, hardware breakpoints, timing anomalies, sandbox env, host/user/IP whitelists), runtime guardrails on the Electron fake-installer container, and decoy file support for social-engineering chains. Indirect syscalls via `TartarusGate` or `SysWhispers3`, ntdll unhook, AMSI/ETW runtime patching, and operator-configurable callstack spoofing (any gadget-host module list, defaults to `ntdll`/`kernel32`/`kernelbase`). VAD-evasion injection methods include `ModuleStomp` (file-backed VAD) and `KernelCallbackTable` (PEB KCT hijack, no new thread). `TxfHollow` maps a phantom section via a rolled-back NTFS transaction for a clean VAD path.
+
+## Getting started
+
+```bash
+sudo ./mythic-cli install github https://github.com/Whispergate/Erebus.git
+```
+
+Then create an Erebus payload from the Mythic UI and tune parameters from the sections below.
+
+## Documentation
+
+- **[Development]({{% relref "development.md" %}})** - build pipeline, full BuildParameter reference, build-step reference, and how to extend the builder.
+- **[Plugins]({{% relref "plugins.md" %}})** - catalog of the plugins shipped with Erebus, their parameters, and what each one produces.
+- **[Plugin Development]({{% relref "plugin-development.md" %}})** - writing your own plugins against the `ErebusPlugin` base class.
+- **[OPSEC]({{% relref "opsec.md" %}})** - per-component tradecraft considerations and hardening improvements for both operators and developers.
 
 ## Authors
 
-- @[Lavender-exe](https://github.com/Lavender-exe) - Project Author
-- @[Hunter](https://github.com/hunterino-sec) - Project Author
+- [@Lavender-exe](https://github.com/Lavender-exe) - Project Author
+- [@Hunter](https://github.com/hunterino-sec) - Project Author
 
-### Contributors
+## Contributors
 
-- @[iilegacyyii](https://github.com/iilegacyyii) - Project Support & [Shellcrypt](https://github.com/iilegacyyii/Shellcrypt) Author
-- @[mgeeky](https://github.com/mgeeky) - Project Support & Inspiration
-- @[its-a-feature](https://github.com/its-a-feature) - Project Support & [Mythic C2 Server](https://github.com/its-a-feature/Mythic) Author
-- All the open-source devs that made this possible, thank you for your continued maintenance & contributions!
-
-## Table of Contents
+- [@iilegacyyii](https://github.com/iilegacyyii) - Project Support and [Shellcrypt](https://github.com/iilegacyyii/Shellcrypt) Author
+- [@mgeeky](https://github.com/mgeeky) - Project Support and Inspiration
+- [@its-a-feature](https://github.com/its-a-feature) - Project Support and [Mythic C2 Server](https://github.com/its-a-feature/Mythic) Author
 
 {{% children %}}

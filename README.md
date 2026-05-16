@@ -41,7 +41,7 @@ View the rendered documentation by clicking on **Docs -> Agent Documentation** i
 ## Features
 
 - **Payload Generation**: Shellcode loader, VBA macros, XLL Add-Ins, DLL hijacking, and maldocs
-- **Execution Methods**: CreateThread, Process Hollowing, QueueUserAPC, EnumLocales, and more
+- **Execution Methods**: CreateThread, AddressOfEntryPoint Injection, QueueUserAPC, EnumLocales, and more
 - **VBA Payloads**: Command execution, PowerShell, Schtasks, WMI, Rundll32, Regsvr32, and shellcode injection
 - **Maldoc Creation**: Template-based XLSM generation with VBA injection
 - **MSI Backdooring**: Multiple attack vectors for MSI installer injection
@@ -60,13 +60,22 @@ View the rendered documentation by clicking on **Docs -> Agent Documentation** i
   - [x] Decoding
   - [x] Decryption
   - [x] Decompression
-- [ ] Complete XLSM/XLAM phishing payloads
+- [x] Complete XLSM/XLAM phishing payloads
 - [x] LNK Triggers
 - [x] MSC Snap-In and GrimReaper triggers
 - [x] Hidden MSI/ISO container files
-- [ ] Maldocs VBA generator
+- [x] Maldocs VBA generator
+  - [x] Staged VBA Loader (For larger shellcode, e.g. Apollo)
+  - [x] Stageless VBA Loader
+
+### Known Issues
+- VBA: Address of Entry Point Injection is not functional as of v0.1.0
+- Container goes offline during compilation of some payloads, just wait for ~>5 minutes for it to finish working
 
 ### Bug Fixes
+
+#### [v0.1.0]
+- Fixed VBA Loader and added a staged loader via Mythic Direct Files Download 
 
 #### [v0.0.2]
 - Fixed issues with XLL source code saving

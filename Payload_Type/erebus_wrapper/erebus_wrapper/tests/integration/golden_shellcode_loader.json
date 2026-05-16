@@ -1,0 +1,67 @@
+{
+  "artifacts": {
+    "config_hpp_size": 6554,
+    "config_hpp_stable_sha256": "a3446a1a6e8076a714e4998a7e558ff2456d4fb073f29b43c62126261f25de3a"
+  },
+  "response_build_message": "Success! Containerized (Zip)",
+  "response_build_stderr_head": "",
+  "response_status": "success",
+  "rpc_step_names": [
+    "[T1005] - Gathering Files",
+    "[T1027] - Header Check",
+    "[T1027] - Shellcode Obfuscation",
+    "[T1036] - Configuring Shellcode Loader",
+    "[T1027] - Compiling Shellcode Loader",
+    "[T1137.006] - Adding Trigger",
+    "[T1036] - Exporting Helper",
+    "[T1005] - Gathering Files",
+    "[T1027] - Containerising"
+  ],
+  "subprocess": [
+    {
+      "cmd": [
+        "python",
+        "/tmp/<TMP>/shellcrypt/shellcrypt.py",
+        "-i",
+        "/tmp/<TMP>/shellcode/payload.bin",
+        "-e",
+        "xor",
+        "-f",
+        "c",
+        "-a",
+        "shellcode",
+        "-o",
+        "/tmp/<TMP>/shellcode/obfuscated.bin"
+      ],
+      "kind": "async_exec"
+    },
+    {
+      "cmd": [
+        "python",
+        "/tmp/<TMP>/shellcrypt/shellcrypt.py",
+        "-i",
+        "/tmp/<TMP>/shellcode/payload.bin",
+        "-e",
+        "xor",
+        "-f",
+        "c",
+        "-a",
+        "shellcode"
+      ],
+      "kind": "sync_check_output"
+    },
+    {
+      "cmd": [
+        "make",
+        "-C",
+        "/tmp/<TMP>/Erebus.Loaders/Erebus.Loader",
+        "ARCH=x64",
+        "TARGET=exe",
+        "BUILD=release",
+        "EREBUS_HASH_SEED=<RAND>",
+        "all"
+      ],
+      "kind": "async_exec"
+    }
+  ]
+}

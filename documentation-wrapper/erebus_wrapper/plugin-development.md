@@ -5,329 +5,324 @@ weight = 3
 pre = "<b>3. </b>"
 +++
 
-## Plugin Development Guide
+## Overview
 
-### Creating a New Plugin
+Plugins extend Erebus without touching the core `builder.py`. The plugin loader scans `erebus/modules/plugin_*.py` at startup, imports each file, instantiates its `ErebusPlugin` subclass, runs `validate()`, and registers the callables returned by `register()` into the builder's global namespace.
 
-#### Step 1: Copy the Template
+**When to write a plugin** - you want to add a new trigger, container, payload transform, or signer, and the implementation is self-contained (doesn't require changes to shellcrypt, the C++ loader source, or the core build pipeline ordering). Anything else is a `builder.py` edit.
+
+**When NOT to write a plugin** - you need to change how shellcode is obfuscated (that's shellcrypt), add a new loader injection method (that's C++ source in `agent_code/Erebus.Loaders/`), or reorder build steps (that's `builder.py`).
+
+This page is the developer-facing guide. For the catalog of shipped plugins and their parameters, see [Plugins]({{% relref "plugins.md" %}}). For the full BuildParameter reference, see [Development]({{% relref "development.md" %}}).
+
+## The plugin contract
+
+### ErebusPlugin base class
+
+Every plugin inherits from `ErebusPlugin` in [plugin_base.py](Payload_Type/erebus_wrapper/erebus_wrapper/erebus/modules/plugin_base.py). The abstract contract is:
+
+| Method | Required? | Purpose |
+|---|---|---|
+| `get_metadata() → PluginMetadata` | **Yes** | Plugin name, version, author, description, category, enabled flag |
+| `register() → Dict[str, Callable]` | **Yes** | Map of function names → callables exposed to the builder |
+| `validate() → tuple[bool, Optional[str]]` | No (default `True`) | Dependency / configuration check run at load time |
+| `on_load()` | No | Initialization hook called after successful validation |
+| `on_unload()` | No | Cleanup hook |
+| `get_dependencies() → List[str]` | No (default `[]`) | List of other plugin names this plugin requires |
+| `get_config_schema() → Optional[Dict]` | No (default `None`) | JSON schema for plugin configuration |
+
+### Plugin categories
+
+`PluginCategory` is an `Enum` defining where each plugin fits in the build pipeline:
+
+| Value | Usage |
+|---|---|
+| `TRIGGER` | Victim-clickable artefacts (LNK, BAT, MSC, HTML, …) |
+| `CONTAINER` | Distribution wrappers (ISO, 7z, Zip, MSI, Electron, …) |
+| `PAYLOAD` | Loader-adjacent transforms (DLL proxy, MalDoc, …) |
+| `CODESIGNER` | AuthentiCode signing |
+| `OTHER` | Utility plugins that don't fit the above |
+
+### Metadata
+
+`PluginMetadata` is a plain data class:
+
+```python
+PluginMetadata(
+    name="my_feature",            # short identifier (snake_case)
+    version="1.0.0",              # semver
+    author="Your Name",           # or an alias / org
+    description="One-line summary shown in validation reports",
+    category=PluginCategory.CONTAINER,
+    enabled=True,                 # set False to disable the plugin without deleting it
+)
+```
+
+## Writing a plugin - step by step
+
+### Step 1 - Scaffold from the template
 
 ```bash
-cd erebus_wrapper/Payload_Type/erebus_wrapper/erebus_wrapper/erebus/modules
-cp plugin_example.py.template plugin_your_feature.py
+cd Payload_Type/erebus_wrapper/erebus_wrapper/erebus/modules
+cp plugin_example.py.template plugin_my_feature.py
 ```
 
-#### Step 2: Update Plugin Metadata
+Rename the class and update the metadata:
 
 ```python
-class YourFeaturePlugin(ErebusPlugin):
-    """Your plugin description"""
-    
-    metadata = PluginMetadata(
-        name="your_feature",
-        version="1.0.0",
-        category=PluginCategory.PAYLOAD,  # or CONTAINER, TRIGGER, CODESIGNER
-        description="What your plugin does",
-        author="Your Name",
-        enabled=True
-    )
+try:
+    from erebus_wrapper.erebus.modules.plugin_base import ErebusPlugin, PluginMetadata, PluginCategory
+except ImportError:
+    from plugin_base import ErebusPlugin, PluginMetadata, PluginCategory
+
+
+class MyFeaturePlugin(ErebusPlugin):
+    def get_metadata(self) -> PluginMetadata:
+        return PluginMetadata(
+            name="my_feature",
+            version="1.0.0",
+            author="Your Name",
+            description="What this plugin does in one line",
+            category=PluginCategory.CONTAINER,
+            enabled=True,
+        )
 ```
 
-#### Step 3: Implement Required Methods
+The dual-import pattern lets the file run both as a package member (`erebus_wrapper.erebus.modules...`) and as a standalone script (`python plugin_my_feature.py`) - every shipped plugin uses it.
+
+### Step 2 - Implement `register()`
+
+Return a dict mapping the function name the builder will see to the plugin's method:
 
 ```python
-def get_metadata(self) -> PluginMetadata:
-    """Return plugin metadata"""
-    return self.metadata
-
 def register(self) -> Dict[str, Callable]:
-    """Register all public functions"""
     return {
-        "function_1": self.function_1,
-        "function_2": self.function_2,
+        "build_my_container": self.build_my_container,
     }
-
-def validate(self) -> Tuple[bool, str]:
-    """Validate plugin dependencies"""
-    try:
-        import required_library
-        return (True, None)
-    except ImportError:
-        return (False, "required_library not found")
 ```
 
-#### Step 4: Implement Plugin Functions
+Function names must be unique across *all* plugins - the loader injects them directly into `builder.py`'s global namespace, so collisions silently shadow each other.
+
+### Step 3 - Implement `validate()`
+
+Return `(True, None)` if the plugin can run; return `(False, "<reason>")` otherwise. Runs once at loader startup, so it must be cheap.
 
 ```python
-def function_1(self, param1: str, param2: int) -> str:
-    """Your implementation here"""
-    return result
-```
-
-#### Step 5: Test Your Plugin
-
-```bash
-# Test individual plugin
-python plugin_your_feature.py
-
-# Expected output:
-# [*] your_feature v1.0.0
-# [*] Category: payload
-# [*] Description: What your plugin does
-# 
-# [*] Registered functions (2):
-#     - function_1
-#     - function_2
-# 
-# [+] Validation passed
-```
-
-## Plugin Validation System
-
-The Erebus plugin system automatically validates all plugins during initialization. Each plugin must implement three core methods:
-
-### Validation Output Example
-
-```
-[*] Initializing Erebus Plugin System...
-[*] Plugin Validation: 10/11 passed
-    [+] plugin_container_clickonce
-    [+] plugin_payload_dll_proxy
-    [-] plugin_payload_maldocs: openpyxl not found
-```
-
-### View Validation Report
-
-```bash
-cd erebus_wrapper/Payload_Type/erebus_wrapper/erebus_wrapper/erebus/modules
-python __init__.py
-```
-
-## Plugin Testing Best Practices
-
-### Implement Robust Validation
-
-```python
-def validate(self) -> Tuple[bool, str]:
-    """Validate all dependencies gracefully"""
+def validate(self) -> tuple[bool, Optional[str]]:
     try:
-        import optional_dependency
-        if not hasattr(optional_dependency, 'required_function'):
-            return (False, "optional_dependency missing required_function")
+        import required_package  # noqa: F401
     except ImportError as e:
-        return (False, f"optional_dependency not found: {e}")
-    
-    # Check external tools
-    try:
-        result = subprocess.run(['tool', '--version'], capture_output=True)
-        if result.returncode != 0:
-            return (False, "External tool 'tool' not found or not working")
-    except FileNotFoundError:
-        return (False, "External tool 'tool' not found in PATH")
-    
+        return (False, f"Missing dependency: {e}")
+
+    if not (self.AGENT_CODE / "templates" / "my_template.j2").exists():
+        return (False, "my_template.j2 missing")
+
     return (True, None)
 ```
 
-### Use Lazy Imports for Optional Dependencies
+Keep expensive checks (compiler availability, network reachability) out of `validate()` - move those to the function that actually needs them so `builder.py` load time stays fast.
+
+### Step 4 - Implement the actual feature
+
+Put the real work inside the methods you registered. Use standard path anchoring (all shipped plugins do this) so the plugin works whether it's imported as a package or run standalone:
 
 ```python
-def get_optional_libs(self):
-    """Lazy load optional libraries to avoid import errors"""
+import pathlib
+
+class MyFeaturePlugin(ErebusPlugin):
+    def __init__(self):
+        super().__init__()
+        self.REPO_ROOT = pathlib.Path(__file__).resolve().parents[2]
+        self.AGENT_CODE = self.REPO_ROOT / "agent_code"
+
+    def build_my_container(
+        self,
+        build_path: pathlib.Path,
+        param1: str = "default",
+    ) -> pathlib.Path:
+        """
+        Build an example container.
+
+        Args:
+            build_path: active Mythic build temp dir (contains ``payload/``)
+            param1: operator-supplied option (from a BuildParameter)
+
+        Returns:
+            pathlib.Path: path to the produced file in ``payload/``
+        """
+        payload_dir = build_path / "payload"
+        output = payload_dir / "my_output.bin"
+        output.write_bytes(b"...")
+        return output
+```
+
+Use **lazy imports** for optional heavy dependencies - defer them to the call site rather than the top of the file so a missing package only breaks the one plugin that needs it:
+
+```python
+def build_my_container(self, build_path, ...):
     try:
-        import numpy
-        import scipy
-        return {'numpy': numpy, 'scipy': scipy}
+        import pycdlib  # only needed by this plugin
     except ImportError as e:
-        raise ImportError(f"Optional dependencies not available: {e}")
+        raise RuntimeError(f"pycdlib required for this feature: {e}") from e
+    ...
 ```
 
-## Mythic RPC Integration
+### Step 5 - Register the function in `_PLUGIN_FUNCTIONS`
 
-Plugin validation can be automatically reported to Mythic's operation event log.
-
-### Python RPC Call Example
-
-Equivalent to the Go example from Mythic documentation:
-
-```go
-// Go version
-mythicrpc.SendMythicRPCOperationEventLogCreate(mythicrpc.MythicRPCOperationEventLogCreateMessage{
-    OperationId:  &input.OperationID,
-    Message:      "Your message here",
-    MessageLevel: mythicrpc.MESSAGE_LEVEL_WARNING,
-})
-```
-
-Python equivalent:
+`builder.py` has an explicit list at the top of the file naming every plugin-provided function that will be imported into its global namespace:
 
 ```python
-from erebus_wrapper.erebus.modules import report_validation_results
-
-# In an async context within builder:
-await report_validation_results(operation_id=input.OperationID)
+# builder.py
+_PLUGIN_FUNCTIONS = [
+    "generate_proxies",
+    "build_clickonce",
+    "build_msi",
+    ...
+    "build_my_container",   # <-- add yours here
+]
 ```
 
-### Using the Plugin Validation API
+**Without this step, your plugin loads and validates but `builder.py` can't call it.** This is the single most common "my plugin isn't working" failure.
+
+### Step 6 - Add the standalone test block
+
+Every shipped plugin carries this block so `python plugin_my_feature.py` exercises metadata, registration, and validation in isolation:
+
+```python
+if __name__ == "__main__":
+    _plugin = MyFeaturePlugin()
+    _metadata = _plugin.get_metadata()
+    print(f"[*] {_metadata.name} v{_metadata.version}")
+    print(f"[*] Category: {_metadata.category.value}")
+    print(f"[*] Description: {_metadata.description}")
+
+    registered = _plugin.register()
+    print(f"[*] Registered functions ({len(registered)}):")
+    for func_name in sorted(registered):
+        print(f"    - {func_name}")
+
+    is_valid, error = _plugin.validate()
+    print(f"[+] Validation passed" if is_valid else f"[-] Validation failed: {error}")
+```
+
+### Step 7 - Test standalone + at system level
+
+```bash
+# Standalone: just this plugin
+python plugin_my_feature.py
+
+# System-level: every plugin at once, with the full validation report
+python __init__.py
+```
+
+System-level output looks like:
+
+```
+[*] Initializing Erebus Plugin System...
+[*] Plugin Validation: 15/16 passed
+    [+] plugin_archive_container
+    [+] plugin_container_clickonce
+    [+] plugin_container_electron
+    ...
+    [-] plugin_payload_maldocs: openpyxl not found - required for advanced Excel manipulation
+[!] Warning: 1 plugin(s) failed validation
+```
+
+## Plugin lifecycle
+
+The loader performs each step in order at Erebus startup:
+
+1. **Discovery** - scan `erebus/modules/` for files matching `plugin_*.py`.
+2. **Import** - `importlib.import_module` each candidate; import failures are logged and the plugin is skipped.
+3. **Instantiate** - look for a subclass of `ErebusPlugin` in the module and call its constructor.
+4. **Validate** - run `validate()`; on `(False, msg)` the plugin is marked failed and its functions are not registered.
+5. **Resolve dependencies** - read `get_dependencies()` and ensure listed plugins are themselves loaded + valid.
+6. **Register** - pull the dict from `register()` and stash callables for `builder.py` to inject.
+7. **on_load** - call the `on_load()` hook for any initialization that should happen once per startup.
+
+## Validation framework
+
+### What `validate()` should check
+
+- **Imports** of optional dependencies - wrap the import in `try/except ImportError` and return `(False, str(e))` on failure.
+- **Filesystem assets** that the plugin needs at runtime (templates, binaries, icons). Use `self.AGENT_CODE` or a path relative to `__file__`.
+- **Configuration invariants** - e.g. a BuildParameter that must exist in the builder's parameter list.
+
+### What `validate()` should NOT check
+
+- Network reachability or external services - defer to call time.
+- Compiler / toolchain availability unless your plugin's very existence depends on it - again, defer.
+- Expensive filesystem scans - the loader runs `validate()` synchronously at Erebus startup and blocks on it.
+
+### Reporting validation results to Mythic
+
+The plugin system exposes a handful of helpers in [erebus/modules/\_\_init\_\_.py](Payload_Type/erebus_wrapper/erebus_wrapper/erebus/modules/__init__.py) that the builder uses to surface plugin health in Mythic's operation event log:
 
 ```python
 from erebus_wrapper.erebus.modules import (
-    get_initialization_results,
-    get_validated_plugins,
-    get_failed_plugins,
-    report_validation_results
+    get_initialization_results,   # dict: {passed, passed_count, failed, failed_count, total}
+    get_validated_plugins,        # list of plugins that passed
+    get_failed_plugins,           # list of plugins that failed + their error messages
+    report_validation_results,    # async: post the above to Mythic as an event log
 )
-
-# Get validation results
-results = get_initialization_results()
-passed_plugins = get_validated_plugins()
-failed_plugins = get_failed_plugins()
-
-# Report to Mythic
-await report_validation_results(operation_id=1234)
 ```
 
-### Integration Example in builder.py
+`builder.py` calls `report_validation_results(operation_id=self.operation_id)` once per build so the operator sees every plugin's status in the operation log without opening the Mythic container console. Mirror this pattern if you're adding plugin-system integration to another entry point.
 
-```python
-import asyncio
-from mythic_container.PayloadBuilder import *
-from erebus_wrapper.erebus.modules import report_validation_results
+## Testing and debugging
 
-class ErebusBuilder(PayloadBuilder):
-    async def build(self) -> PayloadBuildStatus:
-        try:
-            # ... build logic ...
-            
-            # Report plugin health to Mythic
-            await report_validation_results(operation_id=self.operation_id)
-            
-            return PayloadBuildStatus(success=True, payload=output)
-        except Exception as e:
-            return PayloadBuildStatus(success=False, error=str(e))
-```
+### Manual standalone test
 
-### Mythic Event Log Output
-
-This creates operation event log entries showing:
-- ✅ **INFO Level**: All plugins validated successfully
-- ⚠️ **WARNING Level**: Plugin validation failed
-  - Lists each failed plugin with error reason
-
-## Plugin Categories
-
-Choose the appropriate category when creating your plugin:
-
-| Category | Purpose | Examples |
-|----------|---------|----------|
-| **PAYLOAD** | Manipulate or transform payloads | DLL Proxy, MalDocs, Obfuscation |
-| **CONTAINER** | Package payloads in delivery formats | ISO, 7z, ZIP, MSI |
-| **TRIGGER** | Create execution triggers | LNK, BAT, MSI, ClickOnce |
-| **CODESIGNER** | Code signing functionality | Certificate generation/spoofing |
-| **OTHER** | Utility plugins | Helper functions |
-
-## Documentation Standards
-
-Document your plugin thoroughly:
-
-1. **Docstrings** - Use Google-style docstrings with clear descriptions
-2. **Examples** - Include usage examples in docstrings
-3. **Update plugins.md** - Add your plugin to the documentation
-4. **Error messages** - Use clear, actionable error messages
-
-### Example Documented Function
-
-```python
-def your_function(self, param1: str, param2: int) -> str:
-    """
-    Brief description of what this function does.
-    
-    Longer description explaining functionality, use cases,
-    and any important notes about behavior or compatibility.
-    
-    Args:
-        param1 (str): Description of param1
-        param2 (int): Description of param2
-        
-    Returns:
-        str: Description of return value
-        
-    Raises:
-        ValueError: When input validation fails
-        RuntimeError: When execution fails
-        
-    Example:
-        >>> result = plugin.your_function("test", 42)
-        >>> print(result)
-        "processed result"
-    """
-    if param2 < 0:
-        raise ValueError("param2 must be positive")
-    # Implementation...
-```
-
-## Testing Your Plugin
-
-### Manual Testing
+Every plugin ships the standardised test block from Step 6 above. Run it whenever you change the plugin:
 
 ```bash
-# Test individual plugin
-python plugin_your_feature.py
+cd Payload_Type/erebus_wrapper/erebus_wrapper/erebus/modules
+python plugin_my_feature.py
+```
 
-# Test entire plugin system
+### Integration test
+
+Full-system test runs every plugin in discovery order and prints a consolidated report:
+
+```bash
+cd Payload_Type/erebus_wrapper/erebus_wrapper/erebus/modules
 python __init__.py
-
-# Test with validation script
-python test_validation.py
 ```
 
-### Integration Testing
+### Common failures
 
-To test your plugin within the build system:
+**"Plugin doesn't appear in loaded plugins list"**
+- Filename must match `plugin_*.py`.
+- The module must contain a subclass of `ErebusPlugin` with `enabled=True` in metadata.
+- `validate()` must return `(True, None)`.
+- Check for an import error at module load time - run `python plugin_my_feature.py` directly; exceptions will surface immediately.
 
-1. Create a test build in Mythic
-2. Select your plugin's functionality in the options
-3. Monitor the build output for validation messages
-4. Check the operation event log for validation status
+**"AttributeError when calling plugin function from `builder.py`"**
+- The function name must be listed in `_PLUGIN_FUNCTIONS` at the top of `builder.py`.
+- The name in `register()` must match exactly (case-sensitive).
+- The plugin must have validated successfully; a failed plugin's functions are never registered.
 
-## Common Issues and Solutions
+**"ImportError / ModuleNotFoundError at plugin load time"**
+- Use the dual-import pattern for the base class (`erebus_wrapper.erebus.modules.plugin_base` with `plugin_base` fallback).
+- Wrap optional dependencies in `validate()` and lazy-load them in the methods that actually need them.
 
-### Plugin Fails to Load
+**"validate() returns (False, ...) but I can't see why"**
+- The validation message is displayed verbatim in both the standalone test output and the system-level report - run `python __init__.py` and look at the failed-plugin list.
 
-**Error**: `Plugin module does not have _plugin instance`
+## Best practices
 
-**Solution**: Ensure your module has:
-```python
-_plugin = YourPluginClass()
-
-def validate():
-    return _plugin.validate()
-```
-
-### Validation Returns False
-
-**Error**: `[-] Validation failed: missing_dependency not found`
-
-**Solution**: Check that all required dependencies are installed:
-```bash
-pip install missing_dependency
-```
-
-### Function Not Registered
-
-**Error**: Function shows in test but not available in builder
-
-**Solution**: Ensure function is registered in `register()` method:
-```python
-def register(self) -> Dict[str, Callable]:
-    return {
-        "your_function": self.your_function,  # Must be here!
-    }
-```
+- **Keep naming predictable.** `plugin_trigger_<name>.py` → `<Name>TriggerPlugin` → `create_<name>_trigger()`. Follow the convention every shipped plugin uses; it makes the plugin's category + intent obvious from the filename alone.
+- **Document every public function** with a docstring covering args, return value, and exceptions. The plugin code is the source of truth for the builder, so docstrings carry operational weight.
+- **Use absolute pathing** via `pathlib.Path(__file__).resolve().parents[N]` rather than relative paths - the builder invokes plugins from arbitrary working directories.
+- **Raise descriptive `RuntimeError`s** when a plugin function fails mid-build; the builder catches these and surfaces them as Mythic build-step errors.
+- **Treat `validate()` as a contract with the loader** - never perform side effects in it.
 
 ## References
 
-- **Plugin Base Classes**: `modules/plugin_base.py`
-- **Plugin Loader**: `modules/plugin_loader.py`
-- **Example Plugin**: `modules/plugin_example.py.template`
-- **Mythic Documentation**: https://docs.mythic-c2.net/
-- **Mythic RPC Docs**: https://docs.mythic-c2.net/customizing/hooking-features/alerts
-- **Event Feed**: https://docs.mythic-c2.net/operational-pieces/event-feed
+- **Base class:** [plugin_base.py](Payload_Type/erebus_wrapper/erebus_wrapper/erebus/modules/plugin_base.py)
+- **Loader:** [plugin_loader.py](Payload_Type/erebus_wrapper/erebus_wrapper/erebus/modules/plugin_loader.py)
+- **Template:** `erebus/modules/plugin_example.py.template`
+- **Example plugin** (short): [plugin_trigger_bat.py](Payload_Type/erebus_wrapper/erebus_wrapper/erebus/modules/plugin_trigger_bat.py)
+- **Example plugin** (long): [plugin_container_electron.py](Payload_Type/erebus_wrapper/erebus_wrapper/erebus/modules/plugin_container_electron.py)
+- **Catalog of shipped plugins:** [Plugins]({{% relref "plugins.md" %}})
+- **Build pipeline that invokes your plugin:** [Development]({{% relref "development.md" %}})

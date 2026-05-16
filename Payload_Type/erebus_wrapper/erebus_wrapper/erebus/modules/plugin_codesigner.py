@@ -58,12 +58,7 @@ class CodeSignerPlugin(ErebusPlugin):
         }
     
     def validate(self) -> tuple[bool, Optional[str]]:
-        """Validate that osslsigncode is available"""
-        try:
-            subprocess.check_output(["osslsigncode", "--version"], stderr=subprocess.DEVNULL)
-            return (True, None)
-        except (FileNotFoundError, subprocess.CalledProcessError):
-            return (False, "osslsigncode not found. Please install osslsigncode for code signing.")
+        return (True, None)
     
     def on_load(self):
         """Called when plugin is loaded"""

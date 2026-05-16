@@ -1,5 +1,5 @@
 """
-VBA Project Compiler — builds a valid vbaProject.bin from VBA source code.
+VBA Project Compiler - builds a valid vbaProject.bin from VBA source code.
 
 Produces a CFB (Compound File Binary / OLE2) container with the directory
 structure that Excel expects:
@@ -79,7 +79,7 @@ def _make_dir_entry(
 # ---------------------------------------------------------------------------
 
 def _build_vba_project_stream() -> bytes:
-    """_VBA_PROJECT stream — fixed 7-byte header."""
+    """_VBA_PROJECT stream - fixed 7-byte header."""
     return struct.pack('<HHbH', 0x61CC, 0xFFFF, 0x00, 0x0003)
 
 
@@ -181,9 +181,9 @@ def _assemble_cfb(streams: list) -> bytes:
     Returns:
         Complete CFB file as bytes.
     """
-    # Lay out stream data in sectors
-    sector_pool = []     # list of 512-byte sectors
-    stream_meta = []     # (name, start_sector, byte_size, is_vba_child)
+    # ── 1. Lay out stream data ────────────────────────────────────────────────
+    sector_pool = []   # list of 512-byte sectors
+    stream_meta = []   # (name, start_sector, byte_size, is_vba_child)
 
     for name, data, is_vba in streams:
         start = len(sector_pool)
@@ -193,71 +193,116 @@ def _assemble_cfb(streams: list) -> bytes:
         stream_meta.append((name, start, len(data), is_vba))
 
     n_data = len(sector_pool)
-    dir_sector = n_data
-    fat_sector = n_data + 1
 
-    # -- FAT --
-    fat = bytearray(SECTOR_SIZE)
-    for i in range(SECTOR_SIZE // 4):
+    # ── 2. Build directory entries ────────────────────────────────────────────
+    #  0: Root Entry   (child=1 VBA)
+    #  1: VBA storage  (child=2 first VBA stream, right=PROJECT entry)
+    #  2..N: VBA child streams (_VBA_PROJECT, dir, module)
+    #  N+1..: root-level streams (PROJECT, PROJECTwm)
+
+    entries = []
+    vba_items  = [m for m in stream_meta if     m[3]]
+    root_items = [m for m in stream_meta if not m[3]]
+
+    proj_entry_idx = 2 + len(vba_items)   # first root-level entry index
+
+    entries.append(_make_dir_entry('Root Entry', 5, child=1,
+                                   start=ENDOFCHAIN, size=0))
+    # Build balanced BST for VBA storage children.
+    # CFB name ordering: compare by (len, name.upper()) - shorter names sort first.
+    def _bst(pairs):
+        if not pairs:
+            return FREESECT, {}
+        mid = len(pairs) // 2
+        root_e = pairs[mid][0]
+        l_root, l_map = _bst(pairs[:mid])
+        r_root, r_map = _bst(pairs[mid + 1:])
+        return root_e, {**l_map, **r_map, root_e: (l_root, r_root)}
+
+    vba_sorted = sorted(
+        [(2 + i, nm) for i, (nm, _, _, _) in enumerate(vba_items)],
+        key=lambda x: (len(x[1]), x[1].upper()),
+    )
+    vba_child, vba_bst = _bst(vba_sorted)
+
+    entries.append(_make_dir_entry('VBA', 1, child=vba_child,
+                                   right=proj_entry_idx if root_items else 0xFFFFFFFF))
+
+    for idx, (name, start, size, _) in enumerate(vba_items):
+        left, right = vba_bst[2 + idx]
+        entries.append(_make_dir_entry(name, 2, start=start, size=size,
+                                       left=left, right=right))
+
+    for idx, (name, start, size, _) in enumerate(root_items):
+        right = proj_entry_idx + idx + 1 if idx + 1 < len(root_items) else 0xFFFFFFFF
+        entries.append(_make_dir_entry(name, 2, start=start, size=size, right=right))
+
+    # Pad directory to a whole number of sectors (4 entries × 128 bytes = 512)
+    dir_raw    = b''.join(entries)
+    dir_padded = _pad(dir_raw, SECTOR_SIZE)
+    n_dir      = len(dir_padded) // SECTOR_SIZE   # always ≥ 2 for 7 entries
+
+    dir_start = n_data                            # directory sector(s) start here
+
+    # ── 3. Calculate FAT size ─────────────────────────────────────────────────
+    # FAT needs one entry (DWORD) per sector including FAT sectors themselves.
+    # Entries per FAT sector = SECTOR_SIZE / 4 = 128.
+    # Solve iteratively: n_fat = ceil((n_data + n_dir + n_fat) / 128)
+    n_fat = 1
+    while n_fat * (SECTOR_SIZE // 4) < n_data + n_dir + n_fat:
+        n_fat += 1
+
+    fat_starts = list(range(n_data + n_dir, n_data + n_dir + n_fat))
+
+    # ── 4. Build FAT ──────────────────────────────────────────────────────────
+    fat = bytearray(n_fat * SECTOR_SIZE)
+    for i in range(n_fat * (SECTOR_SIZE // 4)):
         struct.pack_into('<I', fat, i * 4, FREESECT)
 
-    for name, start, size, _ in stream_meta:
-        n = max(1, (len(_pad(b'\x00' * size, SECTOR_SIZE)) if size else SECTOR_SIZE) // SECTOR_SIZE)
+    # Chain each data stream
+    for _, start, size, _ in stream_meta:
+        n = max(1, len(_pad(b'\x00' * size, SECTOR_SIZE)) // SECTOR_SIZE) if size else 1
         for j in range(n):
             nxt = start + j + 1 if j < n - 1 else ENDOFCHAIN
             struct.pack_into('<I', fat, (start + j) * 4, nxt)
 
-    struct.pack_into('<I', fat, dir_sector * 4, ENDOFCHAIN)
-    struct.pack_into('<I', fat, fat_sector * 4, FATSECT)
+    # Chain directory sectors
+    for j in range(n_dir):
+        nxt = dir_start + j + 1 if j < n_dir - 1 else ENDOFCHAIN
+        struct.pack_into('<I', fat, (dir_start + j) * 4, nxt)
 
-    # -- Directory entries --
-    #  0: Root Entry   (child → 1 VBA)
-    #  1: VBA storage  (child → 2 first VBA stream, right → 5 PROJECT)
-    #  2..4: VBA child streams (_VBA_PROJECT, dir, module)
-    #  5: PROJECT       (right → 6)
-    #  6: PROJECTwm
+    # Mark FAT sectors
+    for fs in fat_starts:
+        struct.pack_into('<I', fat, fs * 4, FATSECT)
 
-    entries = []
-    entries.append(_make_dir_entry('Root Entry', 5, child=1, start=ENDOFCHAIN, size=0))
-    entries.append(_make_dir_entry('VBA', 1, child=2, right=5))
-
-    vba_items = [(i, m) for i, m in enumerate(stream_meta) if m[3]]
-    for idx, (_, (name, start, size, _)) in enumerate(vba_items):
-        left = 0xFFFFFFFF
-        right = 2 + idx + 1 if idx + 1 < len(vba_items) else 0xFFFFFFFF
-        if idx == 1:
-            left = 2 + idx - 1
-        entries.append(_make_dir_entry(name, 2, start=start, size=size, left=left, right=right))
-
-    root_items = [(i, m) for i, m in enumerate(stream_meta) if not m[3]]
-    for idx, (_, (name, start, size, _)) in enumerate(root_items):
-        right = len(entries) + 1 if idx + 1 < len(root_items) else 0xFFFFFFFF
-        entries.append(_make_dir_entry(name, 2, start=start, size=size, right=right))
-
-    dir_data = _pad(b''.join(entries), SECTOR_SIZE)
-
-    # -- Header --
+    # ── 5. Build header ───────────────────────────────────────────────────────
     header = bytearray(SECTOR_SIZE)
     header[0:8] = b'\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1'
-    struct.pack_into('<HH', header, 24, 0x003E, 0x0003)   # v3
-    struct.pack_into('<H', header, 28, 0xFFFE)             # little-endian
-    struct.pack_into('<H', header, 30, 0x0009)             # sector shift
-    struct.pack_into('<H', header, 32, 0x0006)             # mini sector shift
-    struct.pack_into('<I', header, 44, 1)                  # FAT sectors
-    struct.pack_into('<I', header, 48, dir_sector)         # first dir sector
-    struct.pack_into('<I', header, 56, 0x00001000)         # mini cutoff
-    struct.pack_into('<I', header, 60, ENDOFCHAIN)         # no mini FAT
-    struct.pack_into('<I', header, 68, ENDOFCHAIN)         # no DIFAT
-    struct.pack_into('<I', header, 76, fat_sector)         # DIFAT[0]
-    for i in range(1, 109):
+    struct.pack_into('<HH', header, 24, 0x003E, 0x0003)   # minor/major version
+    struct.pack_into('<H',  header, 28, 0xFFFE)            # little-endian
+    struct.pack_into('<H',  header, 30, 0x0009)            # sector shift (512 B)
+    struct.pack_into('<H',  header, 32, 0x0006)            # mini sector shift
+    struct.pack_into('<I',  header, 44, n_fat)             # FAT sector count
+    struct.pack_into('<I',  header, 48, dir_start)         # first dir sector
+    struct.pack_into('<I',  header, 56, 0x00001000)        # mini stream cutoff
+    struct.pack_into('<I',  header, 60, ENDOFCHAIN)        # no mini FAT
+    struct.pack_into('<I',  header, 64, 0)                 # 0 mini FAT sectors
+    struct.pack_into('<I',  header, 68, ENDOFCHAIN)        # no DIFAT overflow
+    struct.pack_into('<I',  header, 72, 0)                 # 0 DIFAT sectors
+    # DIFAT[0..108] in header (supports up to 109 FAT sectors = ~7 MB)
+    for i, fs in enumerate(fat_starts[:109]):
+        struct.pack_into('<I', header, 76 + i * 4, fs)
+    for i in range(len(fat_starts), 109):
         struct.pack_into('<I', header, 76 + i * 4, FREESECT)
 
-    # -- Final file --
+    # ── 6. Assemble file ──────────────────────────────────────────────────────
     out = bytes(header)
     for s in sector_pool:
         out += s
-    out += dir_data
-    out += bytes(fat)
+    for i in range(n_dir):
+        out += dir_padded[i * SECTOR_SIZE:(i + 1) * SECTOR_SIZE]
+    for i in range(n_fat):
+        out += fat[i * SECTOR_SIZE:(i + 1) * SECTOR_SIZE]
     return out
 
 
