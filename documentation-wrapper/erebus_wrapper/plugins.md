@@ -9,7 +9,7 @@ pre = "<b>2. </b>"
 
 Erebus ships most of its build functionality as plugins auto-discovered at startup. The plugin loader scans `erebus/modules/plugin_*.py` for files that inherit from `ErebusPlugin`, instantiates each one, runs its `validate()` hook, and registers every function returned by `register()` into the builder's global namespace so `builder.py` can call them directly. See the `_PLUGIN_FUNCTIONS` list at the top of [builder.py](Payload_Type/erebus_wrapper/erebus_wrapper/erebus/builder.py) for the exact set of plugin-provided functions the builder consumes.
 
-This page is the **operator-facing catalog**: what ships, what each plugin does, which BuildParameters it consumes, and what it drops into `payload/`. For authoring your own plugins, see [Plugin Development]({{% relref "plugin-development.md" %}}). For per-plugin tradecraft and hardening notes, see [OPSEC]({{% relref "opsec.md" %}}).
+This page is the **operator-facing catalog**: what ships, what each plugin does, which BuildParameters it consumes, and what it drops into `payload/`. For authoring your own plugins, see [Plugin Development]({{% relref "plugin-development.md" %}}). For per-plugin tradecraft and hardening notes, see [OPSEC]({{% relref "/Wrappers/erebus_wrapper/opsec.md" %}}).
 
 ## Plugin categories
 
@@ -469,4 +469,4 @@ See the `match` statement in `containerise_payload` and the per-trigger-type dis
 
 - **[Plugin Development]({{% relref "plugin-development.md" %}})** - writing, validating, and testing new plugins.
 - **[Development]({{% relref "development.md" %}})** - full BuildParameter reference and build-step pipeline.
-- **[OPSEC]({{% relref "opsec.md" %}})** - per-plugin tradecraft considerations and improvement suggestions.
+- **[OPSEC]({{% relref "/Wrappers/erebus_wrapper/opsec.md" %}})** - per-plugin tradecraft considerations and improvement suggestions.

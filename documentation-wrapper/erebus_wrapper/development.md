@@ -129,7 +129,7 @@ Erebus is a Mythic C2 wrapper payload type that takes raw shellcode and produces
 8. **Containerisation** - the `payload/` directory (loader + trigger + decoy) is packaged into the final delivery format: ISO, 7z, Zip, MSI, or Electron portable exe.
 9. **Delivery** - the final container + `IOCs.txt` + optional `build_*.bat` runbooks for deferred Windows-side steps are returned to Mythic.
 
-Each stage reports its progress to Mythic via the Build Step Reference section below. For per-stage tradecraft considerations and hardening suggestions, see [OPSEC]({{% relref "opsec.md" %}}).
+Each stage reports its progress to Mythic via the Build Step Reference section below. For per-stage tradecraft considerations and hardening suggestions, see [OPSEC]({{% relref "/Wrappers/erebus_wrapper/opsec.md" %}}).
 
 ## Build parameter reference
 
@@ -264,7 +264,7 @@ Applies to Shellcode Loader and ClickOnce. When `0.1 Loader Type = VM Loader` th
 - **2.2 Encryption Key** - operator-supplied key, or `NONE` to auto-generate. AES keys must match their required length (16/24/32 bytes).
 - **2.3 Encoding Type** - `NONE`, `BASE64`, `ASCII85`, `ALPHA32`, or `WORDS256`.
 
-See [OPSEC]({{% relref "opsec.md" %}}) for the tradecraft considerations on each obfuscation stage.
+See [OPSEC]({{% relref "/Wrappers/erebus_wrapper/opsec.md" %}}) for the tradecraft considerations on each obfuscation stage.
 
 ### 3.0 – 3.2 · Container selection
 
@@ -363,7 +363,7 @@ Only visible when `6.0 Codesign Loader = True`.
 - **6.5 Codesign Cert** - upload a PFX/P12 file. Only visible when `6.1 = Provide Certificate`.
 - **6.6 Codesign Cert Password** - password for the uploaded cert. Leave empty if the cert has no password.
 
-See [OPSEC → Code Signing]({{% relref "opsec.md" %}}) for what each signing mode actually buys the operator.
+See [OPSEC → Code Signing]({{% relref "/Wrappers/erebus_wrapper/opsec.md" %}}) for what each signing mode actually buys the operator.
 
 ## Build step reference
 
@@ -424,7 +424,7 @@ Windows-only build steps that can't run inside the Linux Docker container emit a
 | `build_chm.bat` | `0.9 Trigger Type = CHM` | Compiles the CHM project tree with `hhc.exe` (HTML Help Workshop) |
 | `build_msix.bat` | `3.0 Container Type = AppInstaller` | Signs and packages the MSIX source tree with `makeappx.exe` + `signtool.exe` (Windows SDK required) |
 
-`erebus_helper.py` is auto-exported as a single-file bundle of the `Erebus.Helper/` suite and shipped alongside the runbooks in `payload/`. Operators should strip these artefacts from the final archive before delivery if they don't intend to use them - see [OPSEC → Erebus.Helper Deferred Builds]({{% relref "opsec.md" %}}).
+`erebus_helper.py` is auto-exported as a single-file bundle of the `Erebus.Helper/` suite and shipped alongside the runbooks in `payload/`. Operators should strip these artefacts from the final archive before delivery if they don't intend to use them - see [OPSEC → Erebus.Helper Deferred Builds]({{% relref "/Wrappers/erebus_wrapper/opsec.md" %}}).
 
 ## Templates and agent code structure
 

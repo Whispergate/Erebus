@@ -60,7 +60,7 @@ Then create an Erebus payload from the Mythic UI and tune parameters from the se
 - **[Development]({{% relref "development.md" %}})** - build pipeline, full BuildParameter reference, build-step reference, and how to extend the builder.
 - **[Plugins]({{% relref "plugins.md" %}})** - catalog of the plugins shipped with Erebus, their parameters, and what each one produces.
 - **[Plugin Development]({{% relref "plugin-development.md" %}})** - writing your own plugins against the `ErebusPlugin` base class.
-- **[OPSEC]({{% relref "opsec.md" %}})** - per-component tradecraft considerations and hardening improvements for both operators and developers.
+- **[OPSEC]({{% relref "/Wrappers/erebus_wrapper/opsec.md" %}})** - per-component tradecraft considerations and hardening improvements for both operators and developers.
 
 ## Authors
 
