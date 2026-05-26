@@ -1241,9 +1241,11 @@ NOTE: Loaders are written in C++ - Supplied shellcode format must be raw for `Lo
                 "0 = Disabled (no patch)\n"
                 "1 = Patch AmsiScanBuffer only (default)\n"
                 "2 = + Patch AmsiOpenSession\n"
-                "3 = + InvalidateAmsiContext (heap-walk, aggressive)"
+                "3 = + InvalidateAmsiContext (heap-walk, aggressive)\n"
+                "4 = Patchless (Dr0 HW-BP + VEH, no byte patches; defeats "
+                "PG/CFG integrity scans and signature checks on amsi.dll)"
             ),
-            choices = ["0", "1", "2", "3"],
+            choices = ["0", "1", "2", "3", "4"],
             default_value = "1",
             required = False,
             hide_conditions = [
