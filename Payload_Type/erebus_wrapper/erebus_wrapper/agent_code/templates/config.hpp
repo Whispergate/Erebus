@@ -196,6 +196,7 @@
 // 1 = Patch AmsiScanBuffer only (default)
 // 2 = Patch AmsiScanBuffer + AmsiOpenSession
 // 3 = All + InvalidateAmsiContext (heap walk)
+// 4 = Patchless (Dr0 HW-BP + VEH, no byte patches)
 #ifndef CONFIG_AMSI_BYPASS_TYPE
 #define CONFIG_AMSI_BYPASS_TYPE {{ AMSI_BYPASS_TYPE | default(1) }}
 #endif
