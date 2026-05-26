@@ -3868,7 +3868,7 @@ generated if none have been entered.""",
                 target_ext = _ext_map.get(_fmt, ".xlsm")
         else:
             _raw_trigger_ext = self.get_parameter('0.9 Trigger Type').lower()
-        target_ext = ".vsix" if _raw_trigger_ext == "vscode" else f".{_raw_trigger_ext}"
+            target_ext = ".vsix" if _raw_trigger_ext == "vscode" else f".{_raw_trigger_ext}"
 
 
         match(self.get_parameter("3.0 Container Type")):
