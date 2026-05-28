@@ -168,7 +168,7 @@ ENCODING_METHODS = {
     "ALPHA32" : "alpha",
     "ASCII85" : "ascii85",
     "BASE64"  : "base64",
-    "WORDS256": "words",
+    "WORDS256": "words256",
     "NONE"    : ""
 }
 
