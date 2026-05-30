@@ -70,15 +70,13 @@ async def generate_proxies(dll_file, dll_file_name):
                 lines.append(f"    {name}={forward_target}.{name} @{ordinal}")
                 continue
 
-        # Unnamed (ordinal-only) export, or a name we could not decode.
-        # Synthesize a unique internal name and forward via the `#N`
-        # ordinal-reference syntax so the slot is preserved in our
-        # export table and consumers calling by ordinal still resolve.
-        synthetic = f"Ordinal{ordinal}"
-        if synthetic in seen:
-            continue
-        seen.add(synthetic)
-        lines.append(f"    {synthetic}={forward_target}.#{ordinal} @{ordinal} NONAME")
+        # Skip ordinal-only (unnamed) exports. GNU ld (MinGW cross-compiler)
+        # does not support the MODULE.#N ordinal-reference forwarding syntax
+        # in .def files — it is MSVC link.exe-only — and `#` is treated as a
+        # line comment in GNU linker scripts, causing a hard syntax error at
+        # the first ordinal-only entry and aborting the link. Named exports
+        # cover all practical proxy-hijack targets; ordinal-only slots are
+        # preserved in the original DLL that ships as <name>_orig.dll.
 
     return "\n".join(lines)
 

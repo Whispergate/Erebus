@@ -120,7 +120,7 @@ Erebus is a Mythic C2 wrapper payload type that takes raw shellcode and produces
 ### Pipeline stages
 
 1. **Input & header check** - Mythic passes raw shellcode (or the operator supplies custom shellcode via `0.0a Enable Custom Shellcode`). The builder rejects PE files via an MZ-header check and fails the build cleanly.
-2. **Shellcode obfuscation** - For Shellcode Loader and ClickOnce, Shellcrypt applies compression → encryption → encoding → output formatting in sequence; the key and IV are rendered into the loader config template. For VM Loader this stage is bypassed - raw shellcode bytes are written directly to `shellcode.hpp`; the `vmloader_builder` native tool then XOR-encrypts them with `derive_key(VM_IR_SEED)` and emits `embedded.h`.
+2. **Shellcode obfuscation** - For Shellcode Loader and ClickOnce, Shellcrypt applies compression → encryption → encoding → output formatting in sequence; the key and IV are rendered into the loader config template. For VM Loader this stage is bypassed - raw shellcode bytes are written directly to `shellcode.hpp`; the `vmloader_builder` native tool then XOR-encrypts them with `derive_key(VM_IR_SEED)` and emits `embedded.h`. The VM Loader's `embedded` step and final compile both receive the same per-build random values for `VM_IR_SEED`, opcode forward map (`VM_FWD_0`–`VM_FWD_7`), and key derivation base (`VM_KEY_BASE_0`–`VM_KEY_BASE_5`), ensuring the builder and loader always share the same keying material.
 3. **Loader configuration** - Jinja2 templates in [agent_code/templates/](Payload_Type/erebus_wrapper/erebus_wrapper/agent_code/templates/) (`config.hpp`, `InjectionConfig.cs`, `guardrail.hpp`, `proxy.def`) are rendered with user parameters + obfuscation metadata. VM Loader has no Jinja2 config template - all configuration is encoded in the IR program emitted by `vmloader_builder`.
 4. **Loader compilation** - the Shellcode Loader is built via MinGW-w64 from [Erebus.Loaders/Erebus.Loader/](Payload_Type/erebus_wrapper/erebus_wrapper/agent_code/Erebus.Loaders/Erebus.Loader/); ClickOnce uses `dotnet publish` from [Erebus.Loaders/Erebus.ClickOnce/](Payload_Type/erebus_wrapper/erebus_wrapper/agent_code/Erebus.Loaders/Erebus.ClickOnce/); VM Loader is a two-step build - `make embedded` compiles and runs the native `vmloader_builder` to produce `include/embedded.h`, then `make all` cross-compiles the Windows PE from [Erebus.Loaders/Erebus.VMLoader/](Payload_Type/erebus_wrapper/erebus_wrapper/agent_code/Erebus.Loaders/Erebus.VMLoader/).
 5. **Code signing** - if `6.0 Codesign Loader = True`, the compiled artefact is signed via `osslsigncode` with a self-signed, URL-spoofed, or operator-provided certificate.
@@ -196,9 +196,38 @@ The DLL-hijack path has an equivalent set under `1.1` – `1.1k` (see below).
 
 Shared between the Shellcode Loader, VM Loader, and DLL-hijack paths. ClickOnce path is unaffected.
 
-- **0.5m Syscall Backend** - `TartarusGate` (built-in indirect-syscall shim page, default) or `SysWhispers3` (generated `Sw3Nt*` stubs). Hidden when `0.1 Loader Type = ClickOnce`.
+- **0.5m Syscall Backend** - selects the `Nt*` call dispatch layer. Hidden when `0.1 Loader Type = ClickOnce`.
+  - `TartarusGate` (default, x64) - built-in indirect-syscall shim page. Each stub is `mov r10,rcx; mov eax,<ssn>; jmp <gadget_in_ntdll>`; the actual `syscall` executes from inside ntdll's `.text`. No external files.
+  - `SysWhispers3` (x64) - compile-time generated `Sw3Nt*` stubs from `include/evasion/sw3/Syscalls.h`. Requires the accompanying `Syscalls.c` + `Syscalls-asm.x64.asm` in the loader tree.
+  - `Heaven's Gate` (x86 / WoW64 only) - arms a 32-bit loader to issue native 64-bit syscalls on 64-bit Windows. Switches to code segment `0x33` (64-bit long mode) via a far ret, issues `syscall`, returns to `0x23` (32-bit compat). Resolves SSNs from the 64-bit ntdll mapped by WoW64. No byte patches to any DLL; stubs live in a private RX page. **Requires `0.2a Loader Architecture = x86`.**
 - **0.5n Callstack Spoofing** - enable `SpoofCall()` dispatch for Nt* calls. `InitCallstackSpoof()` runs in `RunEvasionPatches()` and locates an `add rsp, 0x68; ret` gadget inside the configured module list (see `0.5o`). Call sites fill `SpoofContext` and jump through the gadget, leaving a fake return frame pointing at the host module. Hidden for ClickOnce and x86.
 - **0.5o Callstack Spoof Modules** - comma-separated module names scanned, in order, for the gadget. First match wins. PEB-walk only - modules must already be mapped in the host process. Default: `ntdll.dll,kernel32.dll,kernelbase.dll`. Hidden unless `0.5n = True`. Displacement is fixed at `0x68` to match the `sub rsp, 112` frame in `callstack_spoof_gas.S`; changing it requires matching ASM edits. Operators can swap in modules that blend with the target host's benign telemetry (e.g. `user32.dll` in GUI procs, `winhttp.dll` in network tools) so the first spoofed frame above the Nt* call looks unremarkable.
+
+### 0.5p – 0.5v · Sleep obfuscation and runtime evasion patches
+
+- **0.5p Sleep Obfuscation** - technique used for dwell between injection and shellcode execution. `None` disables; alternatives encrypt or exhaust the calling thread for the dwell period:
+  - `None` (default) - plain `Sleep()` call; detectable via ETW sleep event and timing.
+  - `Timer` - arms a waitable timer and busy-loops; avoids `SleepEx` in the call stack.
+  - `Ekko-lite` - AES-encrypts the loader's stack and heap, waits, decrypts; memory is scrambled during dwell.
+  - `Exhaustion` - burns CPU time in a tight loop to mask the dwell from timer-based detectors.
+- **0.5q Sleep Base MS** - base dwell in milliseconds. Default `5000`. Also used as the `ObfuscatedSleep` operand in VM Loader builds.
+- **0.5r Sleep Jitter MS** - maximum random jitter added to the base. Default `3000`. Actual dwell = `base + random(0, jitter)`.
+- **0.5s AMSI Bypass Type** - selects the AMSI neutralisation technique applied by `RunEvasionPatches()`:
+  - `0` - disabled.
+  - `1` (default) - patch `AmsiScanBuffer` to return `E_INVALIDARG` via `xor eax,eax; ret`. XOR-encoded patch decoded onto the stack at runtime.
+  - `2` - type 1 + patch `AmsiOpenSession` to return `S_OK` with a null context pointer, preventing any new session from being initialised.
+  - `3` - types 1 + 2 + walk the process heap looking for live `AMSI_CONTEXT` blocks (signature `0x49534D41`) and zero the signature field, invalidating every already-open context.
+  - `4` - **Patchless** - arms a hardware execute breakpoint (`Dr0`) on `AmsiScanBuffer`'s first instruction and installs a vectored exception handler. On `#DB`, the VEH writes `AMSI_RESULT_CLEAN` to the caller's result pointer (`[RSP+0x30]`), sets `RAX=S_OK`, and performs an in-place `ret`. No bytes in `amsi.dll` are modified; defeats PG/CFG integrity checks and signature scans targeting the classic byte patches. Coverage limited to the loader's own thread.
+- **0.5t ETW Bypass Type** - selects the ETW neutralisation technique:
+  - `0` - disabled.
+  - `1` (default) - patch `EtwEventWrite` to `ret` immediately.
+  - `2` - type 1 + patch `EtwEventWriteFull`.
+  - `3` - types 1 + 2 + walk the TEB chain and call `EtwUnregisterProvider` on every active provider handle found.
+- **0.5u Unhook Scope** - controls ntdll unhook depth applied by `UnhookNtdll()`:
+  - `0` - no unhook.
+  - `1` - map a clean copy of ntdll from `\KnownDlls\ntdll.dll` and overwrite only the `.text` section of the hooked in-memory copy.
+  - `2` - full section restore: overwrite all hooked sections from the clean `\KnownDlls` mapping.
+- **0.5v Single Instance** - arm a named Global mutex (`Global\ErebusLoader`, XOR-decoded at runtime) on startup. Prevents duplicate beacons when persistence mechanisms invoke the loader more than once concurrently.
 
 ### 0.8 · Output Extension Source
 

@@ -526,15 +526,18 @@ The C++ `Erebus.Loader` supports four injection techniques, selected via `0.4 Sh
 
 ### Syscall Backend (`0.5m`)
 
-Two choices, both bypass user-mode hooks on `Nt*` calls:
+Three choices, all bypass user-mode hooks on `Nt*` calls. Controlled via `0.5m Syscall Backend`.
 
-- **TartarusGate** (default) - runtime-generated indirect syscall shim page. Each stub is `mov r10, rcx; mov eax, <ssn>; jmp <gadget_in_ntdll>`; the actual `syscall` instruction executes from inside ntdll's `.text`, which is where kernel telemetry expects it.
-- **SysWhispers3** - compile-time generated `Sw3Nt*` stubs. Requires the `include/evasion/sw3/` tree and the `Syscalls-asm.x{64,86}.asm` sources linked in the loader Makefile.
+- **TartarusGate** (default, x64) - runtime-generated indirect syscall shim page. Each stub is `mov r10, rcx; mov eax, <ssn>; jmp <gadget_in_ntdll>`; the actual `syscall` instruction executes from inside ntdll's `.text`, which is where kernel telemetry expects it. No external files required.
+- **SysWhispers3** (x64) - compile-time generated `Sw3Nt*` stubs. Requires the `include/evasion/sw3/` tree and the `Syscalls-asm.x{64,86}.asm` sources linked in the loader Makefile. Stubs self-initialise their SSN on first call.
+- **Heaven's Gate** (x86 / WoW64 only) - enables a 32-bit loader to issue native 64-bit syscalls on a 64-bit host. The thunk in `src/evasion/heavens_gate.S` uses a far `retf` to switch to code segment `0x33` (64-bit long mode), places all arguments into 64-bit registers / stack slots per Win64 ABI, executes `syscall`, then far-`retf`s back to `0x23` (32-bit compat). SSNs are resolved from the 64-bit ntdll mapped by WoW64 (located via the 32-bit TEB's `fs:[0xF70]` WoW64 extension, which points to the 64-bit TEB). Per-function stubs live in a private RX page; no byte is written to any system DLL. Requires `0.2a Loader Architecture = x86`.
 
 **OPSEC Considerations**
 - SSN resolution walks ntdll's export table; on a process that has already lost ntdll to a deep user-mode hooking engine, the SSN table may be shifted and resolution fails silently.
 - Indirect syscalls bypass user-mode hooks but *not* kernel-mode ETW-TI (`Microsoft-Windows-Threat-Intelligence`). Protected-process EDR still sees the call.
-- `InitIndirectSyscalls()` runs after `UnhookNtdll()` - if unhook fails, the SSN table read is from the hooked ntdll and the generated stubs may carry poisoned SSNs.
+- `InitIndirectSyscalls()` / `InitHeavensGate()` run after `UnhookNtdll()` - if unhook fails, the SSN table read is from the hooked ntdll and the generated stubs may carry poisoned SSNs.
+- Heaven's Gate: the Dr0 register is used by `PatchlessAmsi` (type 4) for the AMSI hardware breakpoint. If both are active simultaneously, the shared debug register must be managed carefully. In the current implementation each runs independently; using both at the same time on the same thread is not supported.
+- Heaven's Gate: the per-stub RX page allocation (`VirtualAlloc` + `VirtualProtect`) is performed in 32-bit mode before the first syscall is issued. This is the only allocation that uses the plain Win32 API rather than a syscall stub.
 
 ### Callstack Spoofing (`0.5n` + `0.5o`)
 
@@ -564,6 +567,55 @@ Two choices, both bypass user-mode hooks on `Nt*` calls:
 - Surface a gadget-search telemetry knob so the operator sees which module / offset was selected per build (ship it in the IOC report).
 - Extend the ASM to accept the displacement as a parameter (currently hardcoded), which would let the search accept any `add rsp, N; ret` found rather than requiring `N == 0x68`.
 - Add a second spoof tier that swaps the gadget host mid-campaign (rebuild with a different `0.5o` list) so two builds from the same operator don't share the exact same first-frame module.
+
+### AMSI Bypass Type (`0.5s`)
+
+Five tiers of AMSI neutralisation, applied before any shellcode decryption. Selected via `0.5s AMSI Bypass Type`.
+
+| Type | Technique | Mechanism |
+|------|-----------|-----------|
+| 0 | Disabled | No AMSI action taken. |
+| 1 | `PatchAmsiScanBuffer` (default) | Overwrites the first 3 bytes of `AmsiScanBuffer` with `xor eax,eax; ret` (XOR-encoded on disk, decoded onto stack at runtime). Every scan returns `E_INVALIDARG`. |
+| 2 | + `PatchAmsiOpenSession` | Adds a patch to `AmsiOpenSession` returning `S_OK` with a null output pointer, preventing any new scan context from being initialised. Complements type 1 for scans issued after patching. |
+| 3 | + `InvalidateAmsiContext` (heap-walk) | Walks every process heap looking for live `AMSI_CONTEXT` blocks (identified by signature `0x49534D41`) and zeros the signature field. Covers already-open contexts that types 1/2 can't reach. Best-effort: contexts allocated after this call are not invalidated. |
+| 4 | Patchless HW-BP + VEH | Arms a hardware execute breakpoint (`Dr0`) on `AmsiScanBuffer`'s first instruction via `SetThreadContext`. Installs a vectored exception handler at the front of the VEH chain. On `EXCEPTION_SINGLE_STEP` at the target address, the VEH writes `AMSI_RESULT_CLEAN` (0) to the caller's result pointer (`[RSP+0x30]` at function entry per Win64 ABI), sets `RAX=S_OK`, pops the return address from the stack into `RIP`, and adjusts `RSP`. No bytes in `amsi.dll` are modified; defeats PG/CFG integrity checks and signature-based detection of the classic `xor eax,eax; ret` patch. Coverage is the loader's own thread only. |
+
+**OPSEC Considerations**
+- Types 1–3 all write to `amsi.dll`'s `.text` section via `NtProtectVirtualMemory` + `RtlCopyMemory`. Any EDR that integrity-checks `amsi.dll` between the patch and the first scan will see the modification.
+- The classic type 1 patch (`\x33\xC0\xC3`) is one of the most-detected byte sequences in the industry. Types 2–4 reduce dependence on it.
+- Type 4 (patchless) leaves `Dr0` armed in the loader's thread context for the loader's lifetime. Any debugger attaching after this point will see `Dr0` set to an unexpected address. `GetThreadContext` from the same thread (e.g. by an introspective EDR module) reveals the breakpoint.
+- Type 3's heap-walk calls `HeapWalk`, which acquires the heap lock. Heavy heap contention during the walk can cause perceptible latency on multi-threaded hosts.
+
+**Improvements - For Operators**
+- On environments known to have PG-protected EDR (`RunAsPPL`), prefer type 4: no memory write to any protected module.
+- Type 3 is aggressive and noisy (heap traversal); reserve it for environments where AMSI contexts persist across a complex .NET execution chain.
+- Types 1 and 4 are mutually redundant — pick one based on the expected detection stack, not both.
+
+**Improvements - For Erebus Developers**
+- Type 4 currently covers the loader thread only. Extend to other threads by enumerating them and calling `SetThreadContext` on each after snapping a `CONTEXT` with `GetThreadContext`.
+- Add a `RemoveVectoredExceptionHandler` cleanup path for type 4 after the payload executes, so the VEH doesn't remain active during the shellcode's lifetime.
+
+### ETW Bypass Type (`0.5t`)
+
+Four tiers of ETW neutralisation, applied by `RunEvasionPatches()`. Selected via `0.5t ETW Bypass Type`.
+
+| Type | Technique | Mechanism |
+|------|-----------|-----------|
+| 0 | Disabled | No ETW action taken. |
+| 1 | `PatchEtwEventWrite` (default) | Overwrites `EtwEventWrite` entry point with `ret`. All user-mode ETW provider writes in this process are silenced. |
+| 2 | + `PatchEtwEventWriteFull` | Patches `EtwEventWriteFull` as well, covering the secondary event-write path used by some providers. |
+| 3 | + `UnregisterEtwProviders` | Walks the TEB chain looking for active ETW provider registration handles and calls `EtwUnregisterProvider` on each, formally de-registering every provider before they can emit further events. |
+
+**OPSEC Considerations**
+- Patching `EtwEventWrite` silences *user-mode* telemetry. Kernel-mode ETW-TI (`Microsoft-Windows-Threat-Intelligence`) is unaffected; it runs in kernel space and does not call `EtwEventWrite`.
+- The patch writes to `ntdll.dll`'s `.text` section - the same module that unhooked for syscall cleanliness. Writing ETW patches after `UnhookNtdll()` may overwrite the clean copy just restored. Order in `RunEvasionPatches()`: unhook → AMSI → ETW.
+- Type 3 (provider unregistration) can break legitimate application functionality if the process has any in-process ETW consumers (e.g. live diagnostic listeners in .NET CLR). Avoid for ClickOnce / managed-code delivery chains.
+
+**Improvements - For Operators**
+- Types 0–2 are adequate for the vast majority of engagements. Type 3 is only needed when a specific ETW provider emits events that survive the type 1/2 patches (this is rare outside of kernel-assisted providers).
+
+**Improvements - For Erebus Developers**
+- Add a patchless ETW variant (similar to AMSI type 4) that redirects `EtwEventWrite` via a Dr1 hardware breakpoint + VEH rather than a byte patch, for consistency with the AMSI approach.
 
 ---
 
@@ -688,19 +740,32 @@ The VM Loader wraps the shellcode execution chain inside an embedded vmkit RISC 
 
 *Three layers sit on top of the underlying injection: opcode byte randomization (256-entry reverse map), per-build XOR of the bytecode at rest (`g_vm_ir_blob`), and per-op context XOR (the `VMLoaderContext` is XOR-scrambled between each opcode dispatch).*
 
+**Per-build randomisation**
+
+The VM Loader now ships three independently-randomised obfuscation surfaces per build, all generated by `builder.py` and passed as `-D` macros to both `vmloader_builder` (the embedded step) and the final cross-compile:
+
+| Macro | What it randomises | Effect |
+|-------|--------------------|--------|
+| `VM_IR_SEED` | 32-bit XOR key derivation seed | `derive_key(seed)` output differs per build; two loaders with different seeds decrypt to different bytecode even from the same IR source |
+| `VM_FWD_0`–`VM_FWD_7` | Opcode forward permutation (random shuffle of `[0..7]`) | Encoded opcode byte for each real op differs per build; the classic `EvasionPatch→ObfuscatedSleep→…` byte sequence is never the same across builds |
+| `VM_KEY_BASE_0`–`VM_KEY_BASE_5` | 6-byte base for `vm_derive_key()` | Even if `VM_IR_SEED` is extracted from the loader, the key derivation output is still unknown without the base |
+
+The `embedded` make step and final compile both receive the same randomised values, ensuring the builder and loader keying material are always in sync.
+
 **OPSEC Considerations**
-- The vmkit reverse map is per-build (it is a static constexpr array compiled into the loader), but it does not change between builds unless `EREBUS_HASH_SEED` differs. If two builds share the same seed, the opcode mapping is identical. The Mythic builder generates a new random `EREBUS_HASH_SEED` per build, so operationally this is fine.
-- The XOR key (`derive_key(VM_IR_SEED)`) is derived from a fixed seed (`VM_IR_SEED = 0xC0DE1337U` default) mixed with a base string. A static analyst who extracts the key derivation logic from the loader image can decrypt `g_vm_ir_blob` offline and reconstruct the IR program.
-- The IR program reveals the full execution plan - evasion, sleep timing, region size, injection type - to a static analyst who decrypts it.
-- Context XOR between ops is keyed to the same `VM_IR_SEED`; it is an anti-memory-scan measure, not a cryptographic one.
+- The XOR key (`derive_key(VM_IR_SEED, VM_KEY_BASE_*)`) is derived from two per-build random inputs now. Both must be extracted from the compiled loader to recover `g_vm_ir_blob` offline. They are compile-time constants in `.rodata`; a static analyst with access to the binary can still recover them, but the approach resists automated YARA rules and generic decryptors.
+- The IR program reveals the full execution plan - evasion, sleep timing, region size, injection type - to a static analyst who decrypts it. Per-build randomisation changes *how* the bytes look, not *what* the plan encodes.
+- Context XOR between ops (`VMLoaderContext` scrambled at `VM_IR_SEED ^ op_index`) is an anti-memory-scan measure, not a cryptographic one. It hides live allocation addresses in memory snapshots between opcode dispatches.
 - The `g_vm_ir_blob` is `inline constexpr` read-only data in `.rodata`. The stack copy in `entry()` is mutable and is decrypted in-place; a debugger breakpointing after the first `vm.execute()` step sees plaintext opcodes in the stack frame.
+- Sleep timing (`ObfuscatedSleep` operands `base_ms`/`jitter_ms`) is now operator-configurable via `0.5q`/`0.5r` and encoded into the IR blob. Both values appear in the decrypted IR, not as static constants in `.text`.
+- AMSI, ETW, and unhook patches are now also applied in VM Loader builds (passed via `CONFIG_AMSI_BYPASS_TYPE`, `CONFIG_ETW_BYPASS_TYPE`, `CONFIG_UNHOOK_SCOPE` to the shared evasion code from `Erebus.Loader`). The `EvasionPatch` opcode calls `RunEvasionPatches()` which respects these config values.
 
 **Improvements - For Operators**
 - Prefer `BUILD=release` always - debug builds retain stack frame metadata and do not apply dead-code strip flags.
 - Vary the loader format per delivery chain (`dll` for sideloading, `exe` for standalone, `xll` for maldoc-adjacent chains) to avoid every VM Loader build sharing the same PE structure.
+- The sleep timing is now encoded in the IR blob rather than hardcoded - tune `0.5q`/`0.5r` to match the target environment's normal inter-process timing so the dwell doesn't stand out in process lifetime histograms.
 
 **Improvements - For Erebus Developers**
-- Expose `VM_IR_SEED` as a per-build random value (`EREBUS_HASH_SEED` already provides this hook) so the key derivation output differs per build.
 - Encrypt the stack blob copy before storing it so a memory dump mid-execution reveals only XOR'd opcodes.
 - Consider a larger IR dispatch table (beyond 8 ops) with no-op padding ops to frustrate IR recovery via size analysis.
 
