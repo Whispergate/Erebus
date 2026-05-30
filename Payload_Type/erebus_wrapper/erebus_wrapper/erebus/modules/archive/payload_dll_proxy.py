@@ -9,6 +9,13 @@ Returns:
 
 import pefile, asyncio
 import os
+import re
+
+# Names that are safe for GNU ld's PE def-file parser.
+# Allows C identifiers, GCC-mangled _Z names, and common Windows export names.
+# Rejects MSVC-mangled names (?-prefix), names with spaces/control chars,
+# '#' (linker-script comment), '=' (assignment), and other ld-breaking chars.
+_GNU_LD_SAFE_NAME = re.compile(r'^[A-Za-z_$][A-Za-z0-9_$@]*$')
 
 
 async def generate_proxies(dll_file, dll_file_name):
@@ -67,7 +74,10 @@ async def generate_proxies(dll_file, dll_file_name):
 
             if name and name not in seen:
                 seen.add(name)
-                lines.append(f"    {name}={forward_target}.{name} @{ordinal}")
+                if _GNU_LD_SAFE_NAME.match(name):
+                    lines.append(f"    {name}={forward_target}.{name} @{ordinal}")
+                # else: name has chars GNU ld def parser can't handle
+                # (e.g. MSVC ?-mangled, spaces, '#', '='); skip silently.
                 continue
 
         # Skip ordinal-only (unnamed) exports. GNU ld (MinGW cross-compiler)
@@ -83,5 +93,5 @@ async def generate_proxies(dll_file, dll_file_name):
 
 # Test to see if the function generates anything
 if __name__ == "__main__":
-    pragmas = asyncio.run(generate_proxies(r"D:\Program Files\KeePass Password Safe 2\KeePassLibN.a64.dll", "KeePassLibN.a64.dll"))
+    pragmas = asyncio.run(generate_proxies(r"E:\CyberSecurity\SharedDisk\Payloads\HandBrake-1.11.1-x86_64-Win_GUI\HandBrake\hb.dll", "hb.dll"))
     print(pragmas)
