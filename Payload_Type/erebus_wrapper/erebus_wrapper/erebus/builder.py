@@ -5118,6 +5118,15 @@ generated if none have been entered.""",
             if payload_type == "Hijack":
                 payload_path = PurePath(agent_build_path) / "payload" / payload_final_name
                 payload_path = str(payload_path)
+
+                if process.returncode != 0:
+                    response.status = BuildStatus.Error
+                    response.payload = b""
+                    response.build_message = "Failed to compile DLL"
+                    response.build_stderr = output
+                    await self._build_step(compile_step_name, "Failed to Compile DLL Payload", success=False)
+                    return response
+
                 shutil.copy(dst=payload_path, src=payload_output_file)
 
                 # Skip PE sanitize + self-hunt on debug builds - see
