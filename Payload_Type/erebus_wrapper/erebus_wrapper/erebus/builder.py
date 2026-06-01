@@ -565,12 +565,13 @@ NOTE: Loaders are written in C++ - Supplied shellcode format must be raw for `Lo
 1 = NtMapViewOfSection (Remote)
 2 = CreateFiber (Self)
 3 = EarlyCascade (Remote)
-4 = PoolParty (Remote)
+4 = PoolParty - RemoteTpDirectInsertion (Remote)
 5 = NtQueueApcThread (Remote)
 6 = ModuleStomp (Self)
 7 = KernelCallbackTable (Self)
-8 = TxfHollow (Remote)""",
-            choices = ["1", "2", "3", "4", "5", "6", "7", "8"],
+8 = TxfHollow (Remote)
+9 = TpJobObjectApc - RemoteTpJobDirectInsertion (Remote)""",
+            choices = ["1", "2", "3", "4", "5", "6", "7", "8", "9"],
             default_value = "3",
             hide_conditions = [
                 HideCondition(name="0.1 Loader Type", operand=HideConditionOperand.EQ, value="ClickOnce"),
@@ -1302,12 +1303,13 @@ NOTE: Loaders are written in C++ - Supplied shellcode format must be raw for `Lo
             parameter_type = BuildParameterType.ChooseOne,
             description = """Select the injection method for ClickOnce:
 earlycascade (remote)
-poolparty (remote)
+poolparty (remote) - RemoteTpDirectInsertion
+tpjobapc (remote)  - RemoteTpJobDirectInsertion / TpJobObjectApc
 classic (remote)
 createfiber (self)
 enumdesktops (self)
 appdomain (self)""",
-            choices = ["createfiber", "earlycascade", "poolparty", "classic", "enumdesktops", "appdomain"],
+            choices = ["createfiber", "earlycascade", "poolparty", "tpjobapc", "classic", "enumdesktops", "appdomain"],
             default_value = "createfiber",
             hide_conditions = [
                 HideCondition(name="0.1 Loader Type", operand=HideConditionOperand.NotEQ, value="ClickOnce"),

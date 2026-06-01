@@ -60,9 +60,13 @@
 // Injection technique:
 // 1 = NtMapViewOfSection  - Section mapping injection (Remote)
 // 2 = CreateFiber         - Fiber-based execution (Self)
-// 3 = EarlyCascade        - Early Bird APC injection via NtQueueApcThread (Remote)
-// 4 = PoolParty           - Worker Factory thread pool injection (Remote)
-// 5 = NtQueueApcThread    - Vanilla NtQueueApcThread Early Bird with jittered post-APC delay (Remote)
+// 3 = EarlyCascade        - Early Bird APC via NtQueueApcThread (Remote)
+// 4 = PoolParty           - RemoteTpDirectInsertion, IoCompletion + TP_DIRECT (Remote)
+// 5 = NtQueueApcThread    - Vanilla NtQueueApcThread Early Bird (Remote)
+// 6 = ModuleStomp         - Module stomping self-injection (Self)
+// 7 = KernelCallbackTable - KCT pointer overwrite (Self)
+// 8 = TxfHollow           - Transacted File Hollowing (Remote)
+// 9 = TpJobObjectApc      - RemoteTpJobDirectInsertion, IoCompletion + TP_JOB (Remote)
 #ifndef CONFIG_INJECTION_TYPE
 #define CONFIG_INJECTION_TYPE {{ INJECTION_TYPE }}
 #endif
@@ -89,6 +93,8 @@
 #define ExecuteShellcode erebus::InjectionKernelCallback
 #elif CONFIG_INJECTION_TYPE == 8
 #define ExecuteShellcode erebus::InjectionTxfHollow
+#elif CONFIG_INJECTION_TYPE == 9
+#define ExecuteShellcode erebus::InjectionPoolPartyJobApc
 #endif
 
 // ============================================

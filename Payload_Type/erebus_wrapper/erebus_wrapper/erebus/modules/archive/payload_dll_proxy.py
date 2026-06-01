@@ -93,5 +93,5 @@ async def generate_proxies(dll_file, dll_file_name):
 
 # Test to see if the function generates anything
 if __name__ == "__main__":
-    pragmas = asyncio.run(generate_proxies(r"E:\CyberSecurity\SharedDisk\Payloads\HandBrake-1.11.1-x86_64-Win_GUI\HandBrake\hb.dll", "hb.dll"))
+    pragmas = asyncio.run(generate_proxies(r"C:\Windows\System32\advpack.dll", "advpack.dll"))
     print(pragmas)
