@@ -221,11 +221,12 @@
 // ============================================
 // UNHOOK SCOPE CONFIGURATION
 // ============================================
-// 0 = ntdll only (default)
-// 1 = ntdll + kernel32 + kernelbase
-// 2 = selective (pre-defined sensitive Nt* function list)
+// 0 = None     - skip all NTDLL unhooking
+// 1 = ntdll    - overlay ntdll .text with clean KnownDlls copy (default)
+// 2 = Extended - ntdll + kernel32 + KernelBase
+// 3 = Selective - per-function prologue restore for Nt* injection stubs
 #ifndef CONFIG_UNHOOK_SCOPE
-#define CONFIG_UNHOOK_SCOPE {{ UNHOOK_SCOPE | default(0) }}
+#define CONFIG_UNHOOK_SCOPE {{ UNHOOK_SCOPE | default(1) }}
 #endif
 
 // XOR key for obfuscating patch byte arrays (single byte, 0x01–0xFF)

