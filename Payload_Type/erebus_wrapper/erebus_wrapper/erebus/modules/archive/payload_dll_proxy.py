@@ -82,7 +82,7 @@ async def generate_proxies(dll_file, dll_file_name):
 
         # Skip ordinal-only (unnamed) exports. GNU ld (MinGW cross-compiler)
         # does not support the MODULE.#N ordinal-reference forwarding syntax
-        # in .def files — it is MSVC link.exe-only — and `#` is treated as a
+        # in .def files - it is MSVC link.exe-only - and `#` is treated as a
         # line comment in GNU linker scripts, causing a hard syntax error at
         # the first ordinal-only entry and aborting the link. Named exports
         # cover all practical proxy-hijack targets; ordinal-only slots are

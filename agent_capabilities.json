@@ -1,5 +1,5 @@
 {
-  "os": ["Windows"],
+  "os": ["Windows", "macOS", "Linux"],
   "languages": [] ,
   "features": {
     "mythic": ["wrapper"],
@@ -9,6 +9,6 @@
   "architectures": ["x86_64"],
   "c2": [],
   "mythic_version": "3.4.13",
-  "agent_version": "0.0.1",
+  "agent_version": "0.1.2",
   "supported_wrappers": []
 }

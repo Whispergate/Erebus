@@ -13,7 +13,7 @@ Plugins extend Erebus without touching the core `builder.py`. The plugin loader 
 
 **When NOT to write a plugin** - you need to change how shellcode is obfuscated (that's shellcrypt), add a new loader injection method (that's C++ source in `agent_code/Erebus.Loaders/`), or reorder build steps (that's `builder.py`).
 
-This page is the developer-facing guide. For the catalog of shipped plugins and their parameters, see [Plugins]({{% relref "plugins.md" %}}). For the full BuildParameter reference, see [Development]({{% relref "development.md" %}}).
+This page is the developer-facing guide. For the catalog of shipped plugins and their parameters, see [Plugins]({{% relref "/wrappers/erebus_wrapper/plugins.md" %}}). For the full BuildParameter reference, see [Development]({{% relref "/wrappers/erebus_wrapper/development.md" %}}).
 
 ## The plugin contract
 
@@ -324,5 +324,5 @@ python __init__.py
 - **Template:** `erebus/modules/plugin_example.py.template`
 - **Example plugin** (short): [plugin_trigger_bat.py](Payload_Type/erebus_wrapper/erebus_wrapper/erebus/modules/plugin_trigger_bat.py)
 - **Example plugin** (long): [plugin_container_electron.py](Payload_Type/erebus_wrapper/erebus_wrapper/erebus/modules/plugin_container_electron.py)
-- **Catalog of shipped plugins:** [Plugins]({{% relref "plugins.md" %}})
-- **Build pipeline that invokes your plugin:** [Development]({{% relref "development.md" %}})
+- **Catalog of shipped plugins:** [Plugins]({{% relref "/wrappers/erebus_wrapper/plugins.md" %}})
+- **Build pipeline that invokes your plugin:** [Development]({{% relref "/wrappers/erebus_wrapper/development.md" %}})
