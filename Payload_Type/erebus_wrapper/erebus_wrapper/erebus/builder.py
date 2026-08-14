@@ -471,7 +471,15 @@ class ErebusWrapper(PayloadType):
                 WrapperPayloadRequirementWhen(build_parameter_name="0.2a-M macOS Architecture", build_parameter_value="universal"),
             ],
             requires=WrapperPayloadRequirementRequires(
-                os=SupportedOS.MacOS, format=PayloadBuildMetadataFormat.Shellcode),
+                os=SupportedOS.MacOS, architecture=PayloadBuildMetadataArchitecture.X64, format=PayloadBuildMetadataFormat.Shellcode),
+        ),
+        WrapperPayloadRequirement(
+            when=[
+                WrapperPayloadRequirementWhen(build_parameter_name="0.0 Target OS", build_parameter_value="macOS"),
+                WrapperPayloadRequirementWhen(build_parameter_name="0.2a-M macOS Architecture", build_parameter_value="universal"),
+            ],
+            requires=WrapperPayloadRequirementRequires(
+                os=SupportedOS.MacOS, architecture=PayloadBuildMetadataArchitecture.Arm64, format=PayloadBuildMetadataFormat.Shellcode),
         ),
     ]
     c2_profiles = []
