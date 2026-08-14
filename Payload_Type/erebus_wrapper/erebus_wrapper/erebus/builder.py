@@ -348,10 +348,132 @@ class ErebusWrapper(PayloadType):
     ]
 
     wrapper = True
-    wrapped_payloads = ["merlin", "kharon", "ceos"
-                        "sliver", "apollo", "athena",
-                        "xenon", "nimplant", "hannibal",
-                        "starburst"]
+    wrapper_payload_requirements = [
+        # Windows — Shellcode Loader x64/x86
+        WrapperPayloadRequirement(
+            when=[
+                WrapperPayloadRequirementWhen(build_parameter_name="0.0 Target OS", build_parameter_value="Windows"),
+                WrapperPayloadRequirementWhen(build_parameter_name="0.0 Main Payload Type", build_parameter_value="Loader"),
+                WrapperPayloadRequirementWhen(build_parameter_name="0.1 Loader Type", build_parameter_value="Shellcode Loader"),
+                WrapperPayloadRequirementWhen(build_parameter_name="0.2a Loader Architecture", build_parameter_value="x64"),
+            ],
+            requires=WrapperPayloadRequirementRequires(
+                os=SupportedOS.Windows, architecture=PayloadBuildMetadataArchitecture.X64, format=PayloadBuildMetadataFormat.Shellcode),
+        ),
+        WrapperPayloadRequirement(
+            when=[
+                WrapperPayloadRequirementWhen(build_parameter_name="0.0 Target OS", build_parameter_value="Windows"),
+                WrapperPayloadRequirementWhen(build_parameter_name="0.0 Main Payload Type", build_parameter_value="Loader"),
+                WrapperPayloadRequirementWhen(build_parameter_name="0.1 Loader Type", build_parameter_value="Shellcode Loader"),
+                WrapperPayloadRequirementWhen(build_parameter_name="0.2a Loader Architecture", build_parameter_value="x86"),
+            ],
+            requires=WrapperPayloadRequirementRequires(
+                os=SupportedOS.Windows, architecture=PayloadBuildMetadataArchitecture.X86, format=PayloadBuildMetadataFormat.Shellcode),
+        ),
+        # Windows — ClickOnce x64/x86
+        WrapperPayloadRequirement(
+            when=[
+                WrapperPayloadRequirementWhen(build_parameter_name="0.0 Target OS", build_parameter_value="Windows"),
+                WrapperPayloadRequirementWhen(build_parameter_name="0.0 Main Payload Type", build_parameter_value="Loader"),
+                WrapperPayloadRequirementWhen(build_parameter_name="0.1 Loader Type", build_parameter_value="ClickOnce"),
+                WrapperPayloadRequirementWhen(build_parameter_name="0.3a ClickOnce Architecture", build_parameter_value="x64"),
+            ],
+            requires=WrapperPayloadRequirementRequires(
+                os=SupportedOS.Windows, architecture=PayloadBuildMetadataArchitecture.X64, format=PayloadBuildMetadataFormat.Shellcode),
+        ),
+        WrapperPayloadRequirement(
+            when=[
+                WrapperPayloadRequirementWhen(build_parameter_name="0.0 Target OS", build_parameter_value="Windows"),
+                WrapperPayloadRequirementWhen(build_parameter_name="0.0 Main Payload Type", build_parameter_value="Loader"),
+                WrapperPayloadRequirementWhen(build_parameter_name="0.1 Loader Type", build_parameter_value="ClickOnce"),
+                WrapperPayloadRequirementWhen(build_parameter_name="0.3a ClickOnce Architecture", build_parameter_value="x86"),
+            ],
+            requires=WrapperPayloadRequirementRequires(
+                os=SupportedOS.Windows, architecture=PayloadBuildMetadataArchitecture.X86, format=PayloadBuildMetadataFormat.Shellcode),
+        ),
+        # Windows — VM Loader x64/x86
+        WrapperPayloadRequirement(
+            when=[
+                WrapperPayloadRequirementWhen(build_parameter_name="0.0 Target OS", build_parameter_value="Windows"),
+                WrapperPayloadRequirementWhen(build_parameter_name="0.0 Main Payload Type", build_parameter_value="Loader"),
+                WrapperPayloadRequirementWhen(build_parameter_name="0.1 Loader Type", build_parameter_value="VM Loader"),
+                WrapperPayloadRequirementWhen(build_parameter_name="0.2a Loader Architecture", build_parameter_value="x64"),
+            ],
+            requires=WrapperPayloadRequirementRequires(
+                os=SupportedOS.Windows, architecture=PayloadBuildMetadataArchitecture.X64, format=PayloadBuildMetadataFormat.Shellcode),
+        ),
+        WrapperPayloadRequirement(
+            when=[
+                WrapperPayloadRequirementWhen(build_parameter_name="0.0 Target OS", build_parameter_value="Windows"),
+                WrapperPayloadRequirementWhen(build_parameter_name="0.0 Main Payload Type", build_parameter_value="Loader"),
+                WrapperPayloadRequirementWhen(build_parameter_name="0.1 Loader Type", build_parameter_value="VM Loader"),
+                WrapperPayloadRequirementWhen(build_parameter_name="0.2a Loader Architecture", build_parameter_value="x86"),
+            ],
+            requires=WrapperPayloadRequirementRequires(
+                os=SupportedOS.Windows, architecture=PayloadBuildMetadataArchitecture.X86, format=PayloadBuildMetadataFormat.Shellcode),
+        ),
+        # Windows — DLL Hijack x64/x86
+        WrapperPayloadRequirement(
+            when=[
+                WrapperPayloadRequirementWhen(build_parameter_name="0.0 Target OS", build_parameter_value="Windows"),
+                WrapperPayloadRequirementWhen(build_parameter_name="0.0 Main Payload Type", build_parameter_value="Hijack"),
+                WrapperPayloadRequirementWhen(build_parameter_name="1.0a Hijack Loader Architecture", build_parameter_value="x64"),
+            ],
+            requires=WrapperPayloadRequirementRequires(
+                os=SupportedOS.Windows, architecture=PayloadBuildMetadataArchitecture.X64, format=PayloadBuildMetadataFormat.Shellcode),
+        ),
+        WrapperPayloadRequirement(
+            when=[
+                WrapperPayloadRequirementWhen(build_parameter_name="0.0 Target OS", build_parameter_value="Windows"),
+                WrapperPayloadRequirementWhen(build_parameter_name="0.0 Main Payload Type", build_parameter_value="Hijack"),
+                WrapperPayloadRequirementWhen(build_parameter_name="1.0a Hijack Loader Architecture", build_parameter_value="x86"),
+            ],
+            requires=WrapperPayloadRequirementRequires(
+                os=SupportedOS.Windows, architecture=PayloadBuildMetadataArchitecture.X86, format=PayloadBuildMetadataFormat.Shellcode),
+        ),
+        # Linux x86_64 / aarch64
+        WrapperPayloadRequirement(
+            when=[
+                WrapperPayloadRequirementWhen(build_parameter_name="0.0 Target OS", build_parameter_value="Linux"),
+                WrapperPayloadRequirementWhen(build_parameter_name="0.2a-L Linux Architecture", build_parameter_value="x86_64"),
+            ],
+            requires=WrapperPayloadRequirementRequires(
+                os=SupportedOS.Linux, architecture=PayloadBuildMetadataArchitecture.X64, format=PayloadBuildMetadataFormat.Shellcode),
+        ),
+        WrapperPayloadRequirement(
+            when=[
+                WrapperPayloadRequirementWhen(build_parameter_name="0.0 Target OS", build_parameter_value="Linux"),
+                WrapperPayloadRequirementWhen(build_parameter_name="0.2a-L Linux Architecture", build_parameter_value="aarch64"),
+            ],
+            requires=WrapperPayloadRequirementRequires(
+                os=SupportedOS.Linux, architecture=PayloadBuildMetadataArchitecture.Arm64, format=PayloadBuildMetadataFormat.Shellcode),
+        ),
+        # macOS x86_64 / arm64 / universal
+        WrapperPayloadRequirement(
+            when=[
+                WrapperPayloadRequirementWhen(build_parameter_name="0.0 Target OS", build_parameter_value="macOS"),
+                WrapperPayloadRequirementWhen(build_parameter_name="0.2a-M macOS Architecture", build_parameter_value="x86_64"),
+            ],
+            requires=WrapperPayloadRequirementRequires(
+                os=SupportedOS.MacOS, architecture=PayloadBuildMetadataArchitecture.X64, format=PayloadBuildMetadataFormat.Shellcode),
+        ),
+        WrapperPayloadRequirement(
+            when=[
+                WrapperPayloadRequirementWhen(build_parameter_name="0.0 Target OS", build_parameter_value="macOS"),
+                WrapperPayloadRequirementWhen(build_parameter_name="0.2a-M macOS Architecture", build_parameter_value="arm64"),
+            ],
+            requires=WrapperPayloadRequirementRequires(
+                os=SupportedOS.MacOS, architecture=PayloadBuildMetadataArchitecture.Arm64, format=PayloadBuildMetadataFormat.Shellcode),
+        ),
+        WrapperPayloadRequirement(
+            when=[
+                WrapperPayloadRequirementWhen(build_parameter_name="0.0 Target OS", build_parameter_value="macOS"),
+                WrapperPayloadRequirementWhen(build_parameter_name="0.2a-M macOS Architecture", build_parameter_value="universal"),
+            ],
+            requires=WrapperPayloadRequirementRequires(
+                os=SupportedOS.MacOS, format=PayloadBuildMetadataFormat.Shellcode),
+        ),
+    ]
     c2_profiles = []
 
     # Plugin validation flag - run only once at startup
@@ -4219,6 +4341,57 @@ generated if none have been entered.""",
 
         return None
 
+    def _resolve_build_metadata(self):
+        _target_os = self.get_parameter("0.0 Target OS")
+        _main_type = self.get_parameter("0.0 Main Payload Type")
+
+        _arch_map = {
+            "x64": PayloadBuildMetadataArchitecture.X64,
+            "x86": PayloadBuildMetadataArchitecture.X86,
+            "x86_64": PayloadBuildMetadataArchitecture.X64,
+            "aarch64": PayloadBuildMetadataArchitecture.Arm64,
+            "arm64": PayloadBuildMetadataArchitecture.Arm64,
+            "universal": PayloadBuildMetadataArchitecture.X64,
+        }
+        _fmt_map = {
+            "exe": PayloadBuildMetadataFormat.Exe,
+            "dll": PayloadBuildMetadataFormat.Dll,
+            "xll": PayloadBuildMetadataFormat.Dll,
+            "elf": PayloadBuildMetadataFormat.Elf,
+            "so": PayloadBuildMetadataFormat.So,
+            "macho": PayloadBuildMetadataFormat.Macho,
+            "dylib": PayloadBuildMetadataFormat.Dylib,
+        }
+
+        if _target_os == "Windows":
+            if _main_type == "Hijack":
+                raw_arch = self.get_parameter("1.0a Hijack Loader Architecture") or "x64"
+                raw_fmt = "dll"
+            else:
+                loader_type = self.get_parameter("0.1 Loader Type")
+                if loader_type == "ClickOnce":
+                    raw_arch = self.get_parameter("0.3a ClickOnce Architecture") or "x64"
+                    raw_fmt = "exe"
+                else:
+                    raw_arch = self.get_parameter("0.2a Loader Architecture") or "x64"
+                    raw_fmt = self.get_parameter("0.2 Loader Format") or "exe"
+        elif _target_os == "Linux":
+            raw_arch = self.get_parameter("0.2a-L Linux Architecture") or "x86_64"
+            lnx_type = self.get_parameter("0.1-L Linux Loader Type") or "ELF"
+            raw_fmt = "so" if lnx_type == "Shared Object" else "elf"
+        elif _target_os == "macOS":
+            raw_arch = self.get_parameter("0.2a-M macOS Architecture") or "x86_64"
+            mac_type = self.get_parameter("0.1-M macOS Loader Type") or "MachO"
+            raw_fmt = "dylib" if mac_type == "Dylib" else "macho"
+        else:
+            raw_arch = "x64"
+            raw_fmt = "exe"
+
+        return PayloadBuildMetadata(
+            architecture=_arch_map.get(raw_arch, PayloadBuildMetadataArchitecture.X64),
+            format=_fmt_map.get(raw_fmt, PayloadBuildMetadataFormat.Exe),
+        )
+
     async def build(self) -> BuildResponse:
         response = BuildResponse(status = BuildStatus.Error)
         output = ""
@@ -4596,6 +4769,8 @@ generated if none have been entered.""",
                 payload_type = "macOS"
 
             print(f'User Selected: {payload_type} (Target OS: {_target_os})')
+
+            response.build_metadata = self._resolve_build_metadata()
 
             if payload_type == "Hijack":
                 # [DLL HIJACK SPECIFIC] Get the DLL target file from Mythic
