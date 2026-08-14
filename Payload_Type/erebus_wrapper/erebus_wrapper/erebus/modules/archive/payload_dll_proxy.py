@@ -9,6 +9,13 @@ Returns:
 
 import pefile, asyncio
 import os
+import re
+
+# Names that are safe for GNU ld's PE def-file parser.
+# Allows C identifiers, GCC-mangled _Z names, and common Windows export names.
+# Rejects MSVC-mangled names (?-prefix), names with spaces/control chars,
+# '#' (linker-script comment), '=' (assignment), and other ld-breaking chars.
+_GNU_LD_SAFE_NAME = re.compile(r'^[A-Za-z_$][A-Za-z0-9_$@]*$')
 
 
 async def generate_proxies(dll_file, dll_file_name):
@@ -67,23 +74,24 @@ async def generate_proxies(dll_file, dll_file_name):
 
             if name and name not in seen:
                 seen.add(name)
-                lines.append(f"    {name}={forward_target}.{name} @{ordinal}")
+                if _GNU_LD_SAFE_NAME.match(name):
+                    lines.append(f"    {name}={forward_target}.{name} @{ordinal}")
+                # else: name has chars GNU ld def parser can't handle
+                # (e.g. MSVC ?-mangled, spaces, '#', '='); skip silently.
                 continue
 
-        # Unnamed (ordinal-only) export, or a name we could not decode.
-        # Synthesize a unique internal name and forward via the `#N`
-        # ordinal-reference syntax so the slot is preserved in our
-        # export table and consumers calling by ordinal still resolve.
-        synthetic = f"Ordinal{ordinal}"
-        if synthetic in seen:
-            continue
-        seen.add(synthetic)
-        lines.append(f"    {synthetic}={forward_target}.#{ordinal} @{ordinal} NONAME")
+        # Skip ordinal-only (unnamed) exports. GNU ld (MinGW cross-compiler)
+        # does not support the MODULE.#N ordinal-reference forwarding syntax
+        # in .def files - it is MSVC link.exe-only - and `#` is treated as a
+        # line comment in GNU linker scripts, causing a hard syntax error at
+        # the first ordinal-only entry and aborting the link. Named exports
+        # cover all practical proxy-hijack targets; ordinal-only slots are
+        # preserved in the original DLL that ships as <name>_orig.dll.
 
     return "\n".join(lines)
 
 
 # Test to see if the function generates anything
 if __name__ == "__main__":
-    pragmas = asyncio.run(generate_proxies(r"D:\Program Files\KeePass Password Safe 2\KeePassLibN.a64.dll", "KeePassLibN.a64.dll"))
+    pragmas = asyncio.run(generate_proxies(r"C:\Windows\System32\advpack.dll", "advpack.dll"))
     print(pragmas)

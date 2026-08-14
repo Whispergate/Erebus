@@ -13,6 +13,17 @@ RUN curl -fsSL https://deb.nodesource.com/setup_20.x | bash - \
     && rm -rf /var/lib/apt/lists/*
 
 # ----------------------------------------------------------------------------
+# VSCode Extension Trigger - vsce prewarm
+# ----------------------------------------------------------------------------
+# Prewarm @vscode/vsce globally so the VSCode extension trigger plugin
+# (plugin_trigger_vscode_ext.py) can package .vsix files without hitting
+# the network on every build. Node.js 20 is already present from the
+# Erebus.Electron install step above.
+# ----------------------------------------------------------------------------
+RUN npm install -g @vscode/vsce --no-audit --no-fund \
+    && vsce --version
+
+# ----------------------------------------------------------------------------
 # .NET SDK 8.0 (official Microsoft container)
 # ----------------------------------------------------------------------------
 # The parent itsafeaturemythic/mythic_python_dotnet base ships an older

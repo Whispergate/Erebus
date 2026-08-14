@@ -14,7 +14,7 @@ Erebus is a Mythic C2 wrapper payload type that takes raw shellcode and produces
 - **Multiple loaders** - Shellcode Loader (C++, 8 injection methods), ClickOnce (.NET 7, 6 injection methods), VM Loader (vmkit RISC-VM-based, 3 self-injection methods), and DLL Hijacking proxy generation.
 - **Obfuscation pipeline** - compression / encryption / encoding chain via Shellcrypt, with RC4, XOR, AES-ECB, and AES-CBC all supported by the C++ loader via BCrypt.
 - **Custom shellcode** - upload raw bytes from any external C2 (Cobalt Strike, Havoc, Sliver, msfvenom) to replace Mythic's payload. PE/DLL/.NET assemblies can be converted to shellcode via the Donut plugin.
-- **Triggers** - Windows: LNK, BAT, MSI, MSC, ClickOnce, HTML Smuggling, ClickFix, HTA, URL shortcut, JScript/WSF, CHM, SVG Smuggling. Linux: Bash (.sh), Desktop (XDG .desktop). macOS: Command (.command), AppleScript (.scpt), PKG installer. Cross-platform: HTML Smuggling, QR. 0.0 Target OS is selected via the `0.0 Target OS` BuildParameter.
+- **Triggers** - Windows: LNK, BAT, MSI, MSC, ClickOnce, HTML Smuggling, ClickFix, HTA, URL shortcut, JScript/WSF, CHM, SVG Smuggling. Linux: Bash (.sh), Desktop (XDG .desktop). macOS: Command (.command), AppleScript (.scpt), PKG installer, AppBundle (unsigned .app bundle), AppBundle-AdHoc (ad-hoc signed .app bundle), DMG (UDZO disk image). Cross-platform: HTML Smuggling, QR. 0.0 Target OS is selected via the `0.0 Target OS` BuildParameter.
 - **Containers** - ISO, VHD, 7z, Zip, MSI, Electron fake-installer, and AppInstaller/MSIX. Any inner container can be wrapped in an outer ISO/VHD/ZIP/7z transport via `3.0T Outer Transport`.
 - **MalDocs** - Linux-native Excel document generation (XLSM/XLSX/XLAM) with a built-in MS-OVBA-compliant `vbaProject.bin` compiler, four VBA loader techniques, runtime payload discovery, XLL add-in generation, and an optional Windows-side COM re-injection path. Word (DOTM remote template injection) and PowerPoint (PPTM/PPAM) formats via the OfficeDocs plugin.
 - **Code signing** - self-signed, URL-spoofed, or operator-supplied PFX/P12 certificates via `osslsigncode`.
@@ -120,7 +120,7 @@ Erebus is a Mythic C2 wrapper payload type that takes raw shellcode and produces
 ### Pipeline stages
 
 1. **Input & header check** - Mythic passes raw shellcode (or the operator supplies custom shellcode via `0.0a Enable Custom Shellcode`). The builder rejects PE files via an MZ-header check and fails the build cleanly.
-2. **Shellcode obfuscation** - For Shellcode Loader and ClickOnce, Shellcrypt applies compression → encryption → encoding → output formatting in sequence; the key and IV are rendered into the loader config template. For VM Loader this stage is bypassed - raw shellcode bytes are written directly to `shellcode.hpp`; the `vmloader_builder` native tool then XOR-encrypts them with `derive_key(VM_IR_SEED)` and emits `embedded.h`.
+2. **Shellcode obfuscation** - For Shellcode Loader and ClickOnce, Shellcrypt applies compression → encryption → encoding → output formatting in sequence; the key and IV are rendered into the loader config template. For VM Loader this stage is bypassed - raw shellcode bytes are written directly to `shellcode.hpp`; the `vmloader_builder` native tool then XOR-encrypts them with `derive_key(VM_IR_SEED)` and emits `embedded.h`. The VM Loader's `embedded` step and final compile both receive the same per-build random values for `VM_IR_SEED`, opcode forward map (`VM_FWD_0`–`VM_FWD_7`), and key derivation base (`VM_KEY_BASE_0`–`VM_KEY_BASE_5`), ensuring the builder and loader always share the same keying material.
 3. **Loader configuration** - Jinja2 templates in [agent_code/templates/](Payload_Type/erebus_wrapper/erebus_wrapper/agent_code/templates/) (`config.hpp`, `InjectionConfig.cs`, `guardrail.hpp`, `proxy.def`) are rendered with user parameters + obfuscation metadata. VM Loader has no Jinja2 config template - all configuration is encoded in the IR program emitted by `vmloader_builder`.
 4. **Loader compilation** - the Shellcode Loader is built via MinGW-w64 from [Erebus.Loaders/Erebus.Loader/](Payload_Type/erebus_wrapper/erebus_wrapper/agent_code/Erebus.Loaders/Erebus.Loader/); ClickOnce uses `dotnet publish` from [Erebus.Loaders/Erebus.ClickOnce/](Payload_Type/erebus_wrapper/erebus_wrapper/agent_code/Erebus.Loaders/Erebus.ClickOnce/); VM Loader is a two-step build - `make embedded` compiles and runs the native `vmloader_builder` to produce `include/embedded.h`, then `make all` cross-compiles the Windows PE from [Erebus.Loaders/Erebus.VMLoader/](Payload_Type/erebus_wrapper/erebus_wrapper/agent_code/Erebus.Loaders/Erebus.VMLoader/).
 5. **Code signing** - if `6.0 Codesign Loader = True`, the compiled artefact is signed via `osslsigncode` with a self-signed, URL-spoofed, or operator-provided certificate.
@@ -129,7 +129,7 @@ Erebus is a Mythic C2 wrapper payload type that takes raw shellcode and produces
 8. **Containerisation** - the `payload/` directory (loader + trigger + decoy) is packaged into the final delivery format: ISO, 7z, Zip, MSI, or Electron portable exe.
 9. **Delivery** - the final container + `IOCs.txt` + optional `build_*.bat` runbooks for deferred Windows-side steps are returned to Mythic.
 
-Each stage reports its progress to Mythic via the Build Step Reference section below. For per-stage tradecraft considerations and hardening suggestions, see [OPSEC]({{% relref "opsec.md" %}}).
+Each stage reports its progress to Mythic via the Build Step Reference section below. For per-stage tradecraft considerations and hardening suggestions, see [OPSEC]({{% relref "/wrappers/erebus_wrapper/opsec.md" %}}).
 
 ## Build parameter reference
 
@@ -164,6 +164,9 @@ Every BuildParameter defined in [builder.py](Payload_Type/erebus_wrapper/erebus_
   - `6` - `ModuleStomp` (self - map a legitimate DLL, overwrite `.text`; VAD shows file-backed memory)
   - `7` - `KernelCallbackTable` (self - overwrite `PEB.KernelCallbackTable` entry, trigger via `SendMessage(WM_COPYDATA)`; no new thread)
   - `8` - `TxfHollow` (remote - transacted NTFS ghost section via `NtCreateTransaction`; rolls back NTFS transaction after mapping, leaving a phantom VAD path)
+  - `9` - `PoolPartyJobApc` (remote - PoolParty variant via I/O completion with job APC delivery)
+  - `10` - `ProcessHollow` (remote - classic process hollowing: NtUnmapViewOfSection + write minimal PE + NtResumeThread) [T1055.012]
+  - `11` - `FunctionStomp` (self - overwrite `ntdll!RtlRaiseStatus` prologue with 14-byte JMP trampoline; NtCreateThreadEx at stomped address) [T1055]
 - **0.4a VM Loader - Injection Type** - the VM Loader's self-injection method. Visible only when `0.1 = VM Loader`. Selects which injection function the `ExecPayload` VM opcode dispatches to at compile time (`CONFIG_INJECTION_TYPE` define):
   - `2` - `CreateFiber` (default; inline fiber self-injection, no extra source file)
   - `6` - `ModuleStomp` (calls `InjectionModuleStomp`; compiles `injection_module_stomp.cpp`)
@@ -196,9 +199,41 @@ The DLL-hijack path has an equivalent set under `1.1` – `1.1k` (see below).
 
 Shared between the Shellcode Loader, VM Loader, and DLL-hijack paths. ClickOnce path is unaffected.
 
-- **0.5m Syscall Backend** - `TartarusGate` (built-in indirect-syscall shim page, default) or `SysWhispers3` (generated `Sw3Nt*` stubs). Hidden when `0.1 Loader Type = ClickOnce`.
+- **0.5m Syscall Backend** - selects the `Nt*` call dispatch layer. Hidden when `0.1 Loader Type = ClickOnce`.
+  - `TartarusGate` (default, x64) - built-in indirect-syscall shim page. Each stub is `mov r10,rcx; mov eax,<ssn>; jmp <gadget_in_ntdll>`; the actual `syscall` executes from inside ntdll's `.text`. No external files.
+  - `SysWhispers3` (x64) - compile-time generated `Sw3Nt*` stubs from `include/evasion/sw3/Syscalls.h`. Requires the accompanying `Syscalls.c` + `Syscalls-asm.x64.asm` in the loader tree.
+  - `Heaven's Gate` (x86 / WoW64 only) - arms a 32-bit loader to issue native 64-bit syscalls on 64-bit Windows. Switches to code segment `0x33` (64-bit long mode) via a far ret, issues `syscall`, returns to `0x23` (32-bit compat). Resolves SSNs from the 64-bit ntdll mapped by WoW64. No byte patches to any DLL; stubs live in a private RX page. **Requires `0.2a Loader Architecture = x86`.**
 - **0.5n Callstack Spoofing** - enable `SpoofCall()` dispatch for Nt* calls. `InitCallstackSpoof()` runs in `RunEvasionPatches()` and locates an `add rsp, 0x68; ret` gadget inside the configured module list (see `0.5o`). Call sites fill `SpoofContext` and jump through the gadget, leaving a fake return frame pointing at the host module. Hidden for ClickOnce and x86.
 - **0.5o Callstack Spoof Modules** - comma-separated module names scanned, in order, for the gadget. First match wins. PEB-walk only - modules must already be mapped in the host process. Default: `ntdll.dll,kernel32.dll,kernelbase.dll`. Hidden unless `0.5n = True`. Displacement is fixed at `0x68` to match the `sub rsp, 112` frame in `callstack_spoof_gas.S`; changing it requires matching ASM edits. Operators can swap in modules that blend with the target host's benign telemetry (e.g. `user32.dll` in GUI procs, `winhttp.dll` in network tools) so the first spoofed frame above the Nt* call looks unremarkable.
+
+### 0.5p – 0.5v · Sleep obfuscation and runtime evasion patches
+
+- **0.5 PPID Spoof** - when enabled, `CreateProcessSuspended()` attaches a `PROC_THREAD_ATTRIBUTE_PARENT_PROCESS` attribute that makes the spawned target process appear as a child of the chosen parent rather than the loader process. Only active for remote injection modes (`CONFIG_INJECTION_MODE == 1`). [T1134.004]
+- **0.5 PPID Spoof Target** - the process to impersonate as parent. Choices: `explorer.exe`, `svchost.exe`, `RuntimeBroker.exe`, `sihost.exe`, `winlogon.exe`. The name is passed as `CONFIG_PPID_SPOOF_TARGET_NAME` and hashed at compile time using the per-build FNV1a seed. Visible only when `0.5 PPID Spoof = True`.
+- **0.5p Sleep Obfuscation** - technique used for dwell between injection and shellcode execution. `None` disables; alternatives encrypt or exhaust the calling thread for the dwell period:
+  - `None` (default) - plain `Sleep()` call; detectable via ETW sleep event and timing.
+  - `Timer` - arms a waitable timer and busy-loops; avoids `SleepEx` in the call stack.
+  - `Ekko-lite` - XOR-encrypts non-`.text` PE sections during wait; hides shellcode/config from memory scanners.
+  - `Exhaustion` - Fibonacci burn + API hammering + large heap alloc before timer; defeats emulator-based sandboxes via compute/memory pressure.
+  - `Full Ekko` - Ekko-lite + stack return-address XOR via `RtlCaptureContext` / `RtlVirtualUnwind` (up to 64 frames) + PE header wipe (`IMAGE_DOS_HEADER` + `IMAGE_NT_HEADERS`, first `0x400` bytes zeroed during sleep). Defeats stack-walk-based scanners and PE-header signature scans.
+- **0.5q Sleep Base MS** - base dwell in milliseconds. Default `5000`. Also used as the `ObfuscatedSleep` operand in VM Loader builds.
+- **0.5r Sleep Jitter MS** - maximum random jitter added to the base. Default `3000`. Actual dwell = `base + random(0, jitter)`.
+- **0.5s AMSI Bypass Type** - selects the AMSI neutralisation technique applied by `RunEvasionPatches()`:
+  - `0` - disabled.
+  - `1` (default) - patch `AmsiScanBuffer` to return `E_INVALIDARG` via `xor eax,eax; ret`. XOR-encoded patch decoded onto the stack at runtime.
+  - `2` - type 1 + patch `AmsiOpenSession` to return `S_OK` with a null context pointer, preventing any new session from being initialised.
+  - `3` - types 1 + 2 + walk the process heap looking for live `AMSI_CONTEXT` blocks (signature `0x49534D41`) and zero the signature field, invalidating every already-open context.
+  - `4` - **Patchless** - arms a hardware execute breakpoint (`Dr0`) on `AmsiScanBuffer`'s first instruction and installs a vectored exception handler. On `#DB`, the VEH writes `AMSI_RESULT_CLEAN` to the caller's result pointer (`[RSP+0x30]`), sets `RAX=S_OK`, and performs an in-place `ret`. No bytes in `amsi.dll` are modified; defeats PG/CFG integrity checks and signature scans targeting the classic byte patches. Coverage limited to the loader's own thread.
+- **0.5t ETW Bypass Type** - selects the ETW neutralisation technique:
+  - `0` - disabled.
+  - `1` (default) - patch `EtwEventWrite` to `ret` immediately.
+  - `2` - type 1 + patch `EtwEventWriteFull`.
+  - `3` - types 1 + 2 + walk the TEB chain and call `EtwUnregisterProvider` on every active provider handle found.
+- **0.5u Unhook Scope** - controls ntdll unhook depth applied by `UnhookNtdll()`:
+  - `0` - no unhook.
+  - `1` - map a clean copy of ntdll from `\KnownDlls\ntdll.dll` and overwrite only the `.text` section of the hooked in-memory copy.
+  - `2` - full section restore: overwrite all hooked sections from the clean `\KnownDlls` mapping.
+- **0.5v Single Instance** - arm a named Global mutex (`Global\ErebusLoader`, XOR-decoded at runtime) on startup. Prevents duplicate beacons when persistence mechanisms invoke the loader more than once concurrently.
 
 ### 0.8 · Output Extension Source
 
@@ -208,8 +243,12 @@ Shared between the Shellcode Loader, VM Loader, and DLL-hijack paths. ClickOnce 
 
 Only visible when `0.8 = Trigger`.
 
-- **0.9 Trigger Type** - `LNK`, `BAT`, `MSI`, `MSC`, `HTML`, `ClickFix`, `ClickOnce`, `HTA`, `URL`, `JScript`, `CHM`, or `SVG`.
-- **0.9a Trigger Binary** - binary invoked by the trigger (hidden for MSI, MSC, HTML, ClickFix, ClickOnce, SVG, URL).
+- **0.9 Trigger Type** - `LNK`, `BAT`, `MSI`, `MSC`, `HTML`, `ClickFix`, `ClickOnce`, `HTA`, `URL`, `JScript`, `CHM`, `SVG`, `OneNote`, `VSCode`, `CMSTP`, `Regsvr32`, `XSL`, or `InstallUtil`.
+  - `CMSTP` (T1218.003) - `.inf` executed via `cmstp.exe /s /ns`; operator sets `0.9a` to the loader binary path.
+  - `Regsvr32` (T1218.010) - `.sct` COM scriptlet via `regsvr32.exe /s /n /u /i:<path> scrobj.dll` (Squiblydoo).
+  - `XSL` (T1220) - XSLT stylesheet executed via `wmic os get /FORMAT:<path>`.
+  - `InstallUtil` (T1218.004) - C# assembly with `[RunInstaller(true)]` executed via `InstallUtil.exe /U`.
+- **0.9a Trigger Binary** - binary invoked by the trigger (hidden for MSI, MSC, HTML, ClickFix, ClickOnce, SVG, URL, XSL).
 - **0.9b Trigger Command** - command-line arguments passed to the trigger binary (also used as the target URL for `URL` type).
 - **0.9c ClickFix Command** - PowerShell or cmd command copied to the victim's clipboard when they click the fake CAPTCHA "verify" button. Only visible when `0.9 = ClickFix`.
 
@@ -264,11 +303,11 @@ Applies to Shellcode Loader and ClickOnce. When `0.1 Loader Type = VM Loader` th
 - **2.2 Encryption Key** - operator-supplied key, or `NONE` to auto-generate. AES keys must match their required length (16/24/32 bytes).
 - **2.3 Encoding Type** - `NONE`, `BASE64`, `ASCII85`, `ALPHA32`, or `WORDS256`.
 
-See [OPSEC]({{% relref "opsec.md" %}}) for the tradecraft considerations on each obfuscation stage.
+See [OPSEC]({{% relref "/wrappers/erebus_wrapper/opsec.md" %}}) for the tradecraft considerations on each obfuscation stage.
 
 ### 3.0 – 3.2 · Container selection
 
-- **3.0 Container Type** - `ISO`, `VHD`, `7z`, `Zip`, `MSI`, `Electron`, or `AppInstaller`. See [Plugins → Container plugins]({{% relref "plugins.md" %}}) for the full per-container description.
+- **3.0 Container Type** - `ISO`, `VHD`, `7z`, `Zip`, `MSI`, `Electron`, or `AppInstaller`. See [Plugins → Container plugins]({{% relref "/wrappers/erebus_wrapper/plugins.md" %}}) for the full per-container description.
 - **3.0T Outer Transport** - `None` (default), `ISO`, `VHD`, `ZIP`, or `7z`. When set to anything other than `None`, the inner container produced by `3.0` is wrapped inside this outer transport layer. Useful for MOTW bypass (Electron inside ISO/VHD) or policy bypass (Electron inside VHD when ISO is blocked). Volume label for ISO/VHD outer transport is taken from `4.0 ISO Volume ID`.
 - **3.1 Compression Level** - `0` – `9`; only visible for `7z` and `Zip`.
 - **3.2 Archive Password** - optional password for `7z` and `Zip` archives.
@@ -363,7 +402,18 @@ Only visible when `6.0 Codesign Loader = True`.
 - **6.5 Codesign Cert** - upload a PFX/P12 file. Only visible when `6.1 = Provide Certificate`.
 - **6.6 Codesign Cert Password** - password for the uploaded cert. Leave empty if the cert has no password.
 
-See [OPSEC → Code Signing]({{% relref "opsec.md" %}}) for what each signing mode actually buys the operator.
+See [OPSEC → Code Signing]({{% relref "/wrappers/erebus_wrapper/opsec.md" %}}) for what each signing mode actually buys the operator.
+
+### 10.0 – 10.2 · Standalone persistence (group 12 - Persistence)
+
+Generate operator-delivered persistence artifacts alongside the payload. Artifacts are placed in `payload/persistence/` and are not automatically installed.
+
+- **10.0 Standalone Persistence** - master toggle.
+- **10.1 Persistence Method** - technique to generate:
+  - `COM Hijack` (T1546.015) - HKCU `InprocServer32` override `.reg` for a curated CLSID.
+  - `WMI Subscription` (T1546.003) - PowerShell installer + MOF for a `CommandLineEventConsumer` subscription.
+  - `LaunchAgent` (T1543.001) - macOS XML plist + `install_agent.sh` / `uninstall_agent.sh`.
+- **10.2 Persistence Target Binary** - full path the persistence mechanism executes. Leave empty to use each plugin's default placeholder path.
 
 ## Build step reference
 
@@ -424,7 +474,7 @@ Windows-only build steps that can't run inside the Linux Docker container emit a
 | `build_chm.bat` | `0.9 Trigger Type = CHM` | Compiles the CHM project tree with `hhc.exe` (HTML Help Workshop) |
 | `build_msix.bat` | `3.0 Container Type = AppInstaller` | Signs and packages the MSIX source tree with `makeappx.exe` + `signtool.exe` (Windows SDK required) |
 
-`erebus_helper.py` is auto-exported as a single-file bundle of the `Erebus.Helper/` suite and shipped alongside the runbooks in `payload/`. Operators should strip these artefacts from the final archive before delivery if they don't intend to use them - see [OPSEC → Erebus.Helper Deferred Builds]({{% relref "opsec.md" %}}).
+`erebus_helper.py` is auto-exported as a single-file bundle of the `Erebus.Helper/` suite and shipped alongside the runbooks in `payload/`. Operators should strip these artefacts from the final archive before delivery if they don't intend to use them - see [OPSEC → Erebus.Helper Deferred Builds]({{% relref "/wrappers/erebus_wrapper/opsec.md" %}}).
 
 ## Templates and agent code structure
 
@@ -484,11 +534,11 @@ BuildParameter(
 )
 ```
 
-Read it at build time with `self.get_parameter("0.9 Example Parameter")`. Use `HideCondition` to gate visibility on other parameter values so the UI doesn't show irrelevant options. Remember to update this documentation file and the matching plugin catalog entry in [Plugins]({{% relref "plugins.md" %}}).
+Read it at build time with `self.get_parameter("0.9 Example Parameter")`. Use `HideCondition` to gate visibility on other parameter values so the UI doesn't show irrelevant options. Remember to update this documentation file and the matching plugin catalog entry in [Plugins]({{% relref "/wrappers/erebus_wrapper/plugins.md" %}}).
 
 ### Adding a new container type
 
-Containers are plugins. See [Plugin Development → Writing a plugin]({{% relref "plugin-development.md" %}}) for the full walkthrough. Short version:
+Containers are plugins. See [Plugin Development → Writing a plugin]({{% relref "/wrappers/erebus_wrapper/plugin-development.md" %}}) for the full walkthrough. Short version:
 
 1. Create `plugin_container_<name>.py` in [erebus/modules/](Payload_Type/erebus_wrapper/erebus_wrapper/erebus/modules/) following the pattern in [plugin_container_iso.py](Payload_Type/erebus_wrapper/erebus_wrapper/erebus/modules/plugin_container_iso.py).
 2. Implement `build_<name>(build_path, ...)` → `pathlib.Path`.

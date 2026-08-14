@@ -233,7 +233,8 @@ A defender with memory-scanning capability inside the target process defeats all
 - Custom shellcode is not wrapped in Mythic's callback infrastructure - Mythic will *never* see a callback. An operator debugging their chain can't use Mythic's "did the payload fire" signal as ground truth.
 - Architecture mismatches (uploading an x64 blob into an x86 loader, or vice versa) fail silently at runtime - there is no compile-time check.
 - The uploaded file replaces `shellcode/payload.bin` in the build tree and goes through the same shellcrypt pipeline; all obfuscation/encryption considerations above apply unchanged.
-- MZ header check at `0.1 Loader Type` rejects PE files, but does *not* validate that the bytes are executable shellcode - uploading a random blob will produce a loader that crashes its target process.
+- When an MZ header is detected in the uploaded file, Erebus treats the upload as a raw PE and uses it directly: shellcrypt obfuscation is skipped, loader compilation is skipped, and the PE is copied straight to the payload output directory. All downstream steps (signing, container, trigger) still run. This bypasses the entire obfuscation pipeline, so the PE's own static properties (imports, strings, entropy) are fully exposed in the final artefact.
+- Uploads that are not PEs and not valid shellcode (random bytes, truncated blobs) will not be detected at build time; the loader will crash its target process at runtime with no error surfaced in Mythic.
 
 **Improvements - For Operators**
 - Always run a throwaway test on a clean VM before delivery to verify the shellcode actually fires; don't rely on compile success.
@@ -417,7 +418,7 @@ Erebus generates macro-enabled Excel documents (XLSM/XLAM) or exports a standalo
 
 ## Shellcode Loader (C++) Injection Methods
 
-The C++ `Erebus.Loader` supports four injection techniques, selected via `0.4 Shellcode Loader - Injection Type`. All four are implemented as indirect-syscall-free C++ using MinGW on Linux - see [Loader Memory Handling](#loader-memory-handling) for the hardening baseline that applies to every method.
+The C++ `Erebus.Loader` supports eleven injection techniques, selected via `0.4 Shellcode Loader - Injection Type`. All are implemented using MinGW on Linux - see [Loader Memory Handling](#loader-memory-handling) for the hardening baseline that applies to every method.
 
 ### Type 1: NtMapViewOfSection
 
@@ -485,6 +486,125 @@ The C++ `Erebus.Loader` supports four injection techniques, selected via `0.4 Sh
 - Add automatic fallback to EarlyCascade when the chosen target process has no thread pool, rather than failing the injection.
 - Expose more target process options than the current hard-coded list in the documentation.
 
+### Type 5: NtQueueApcThread (Vanilla)
+
+*Vanilla Early Bird APC injection - faster than EarlyCascade variant; jittered post-APC delay avoids single-frame detection.*
+
+**OPSEC Considerations**
+- Functionally similar to Type 3 but without the EarlyCascade queue trick; EDR coverage for this variant is comparable.
+- Jitter delay reduces timing-based heuristics but not syscall-level detection.
+
+**Improvements - For Operators**
+- Prefer Type 3 (EarlyCascade) for higher evasion maturity; use Type 5 when Type 3 causes instability in the target process.
+
+### Type 6: ModuleStomp (Self)
+
+*Map a legitimate DLL into memory and overwrite its `.text` section with shellcode. VAD shows a file-backed region.*
+
+**OPSEC Considerations**
+- File-backed memory in the VAD (`IMAGE` type) is significantly less suspicious than anonymous `PRIVATE` RWX allocations.
+- The module chosen for stomping must be present on the target OS; `amsi.dll` and `wldp.dll` are reliable but may be hooked.
+- Overwrites the mapped module's `.text` section - the region becomes executable with non-original bytes; PE-sieve detects this as a module modification.
+
+**Improvements - For Operators**
+- Choose a module that is not subject to EDR hooks (prefer low-level DLLs with no user-mode hooks, or use after the unhooking step).
+
+### Type 7: KernelCallbackTable (Self)
+
+*Overwrite a PEB `KernelCallbackTable` function pointer; trigger execution via `SendMessage`.*
+
+**OPSEC Considerations**
+- No new thread, no APC - triggers shellcode execution through the legitimate Windows message loop.
+- PEB `KernelCallbackTable` writes are detectable by kernel-mode PEB watchers and by ETW-TI `ProcessCreate` / `MemoryRemoteMap` events.
+- Target window must be in the same desktop session.
+
+**Improvements - For Operators**
+- Use when traditional injection paths (APC, section mapping) are specifically blocked by policy; KCT receives less EDR attention.
+
+### Type 8: TxfHollow (Remote)
+
+*Transactional NTFS ghost: create a transaction, overwrite a file inside it, create a section from the transacted file handle, then roll back the transaction. The section's VAD entry shows the original file path.*
+
+**OPSEC Considerations**
+- VAD entry points to a legitimate file path even though the in-memory content is the shellcode PE; defeats most VAD-based scanners.
+- `NtCreateTransaction` / `CreateFileTransacted` are extremely rare in legitimate software - any ETW subscriber that logs NTFS transaction creation will flag this.
+- TxF has been deprecated since Windows 10 1607; availability on modern targets should be confirmed.
+
+**Improvements - For Operators**
+- Pair with PPID spoofing and a plausible target binary (match the session profile) to reduce collateral signals.
+- Best suited for environments with weak ETW coverage but strong signature-based memory scanning.
+
+### Type 9: PoolPartyJobApc (Remote)
+
+*PoolParty variant using I/O completion objects and job APC delivery instead of a worker factory thread.*
+
+**OPSEC Considerations**
+- Similar surface to Type 4 but uses the job APC path which has different (often lower) EDR rule coverage.
+- Requires a target process that is associated with a job object or accepts I/O completion APCs.
+
+**Improvements - For Operators**
+- Use when Type 4 (PoolParty) is detected; the two variants trigger different ETW events.
+
+### Type 10: ProcessHollow (Remote) - T1055.012
+
+*Classic process hollowing: spawn a suspended process, unmap its image, write a minimal PE wrapper containing the shellcode, patch PEB, redirect entry point.*
+
+**OPSEC Considerations**
+- `NtUnmapViewOfSection` on a freshly-created process is a well-known hollowing indicator; many EDRs flag the unmap event on a process-start sequence.
+- PEB `ImageBaseAddress` mismatch (original path vs. new base) is detectable by tools that cross-reference the PEB with the VAD and disk PE.
+- Thread context modification (`SetThreadContext` / `NtSetContextThread`) immediately before `NtResumeThread` is a high-confidence signal in CrowdStrike Falcon and SentinelOne.
+- The minimal PE wrapper created by `_BuildHollowPE` has a non-standard section layout (`PH_HDR_OFFSET=0x40, PH_RAW_OFFSET=0x400`); a strict PE parser will not match any legitimate binary's layout.
+
+**Improvements - For Operators**
+- Target a process whose image base is ASLR-randomised on each run (not fixed) to reduce base-address correlation.
+- Use a freshly-spawned instance of the configured `0.5 Target Process` rather than injecting into an existing one.
+- Pair with PPID spoofing (`0.5 PPID Spoof`) to make the spawned process appear to be a child of Explorer or another low-suspicion parent.
+
+**Improvements - For Erebus Developers**
+- Implement relocation fixup for the shellcode PE so the payload does not need to be position-independent when targeting a non-preferred base.
+- Replace `SetThreadContext` / `NtResumeThread` with a thread-pool APC delivery mechanism to remove the high-signal `SetThreadContext` call.
+
+### Type 11: FunctionStomp (Self) - T1055
+
+*Overwrite a rarely-called `ntdll` export prologue with a 14-byte absolute JMP trampoline; create a thread at the stomped export address, which executes the shellcode.*
+
+**OPSEC Considerations**
+- Modifies `ntdll.dll` `.text` section in-process; any integrity check of ntdll (e.g. PE-sieve, MonitorNTDLL) will detect the patch.
+- `NtCreateThreadEx` at an address inside `ntdll.dll` is unusual - the start address must fall inside ntdll's mapped range, which may be flagged by start-address heuristics.
+- The stomped export (`RtlRaiseStatus`) saves and restores the original 14 bytes inside the shellcode prolog; a race between the thread start and the restore window is theoretically detectable.
+
+**Improvements - For Operators**
+- Choose an export that is legitimately called (briefly) during the loader's own startup so any hook-scan window is narrow.
+- Pair with the unhooking step to ensure the ntdll `.text` region is not being integrity-checked at injection time.
+
+### PPID Spoofing (T1134.004)
+
+*`UpdateProcThreadAttribute(PROC_THREAD_ATTRIBUTE_PARENT_PROCESS)` overrides the parent process field for any process created via the remote injection path (`CONFIG_INJECTION_MODE == 1`).*
+
+**OPSEC Considerations**
+- PPID spoofing is fully visible in Sysmon Event 1 (`ParentProcessId` vs. `ParentProcessGuid` discrepancy) and in ETW-TI process-create events that include the creating process token vs. the recorded parent PID.
+- CrowdStrike Falcon and Carbon Black both flag the mismatch between the kernel-recorded creator PID and the reported parent PID.
+- If the spoof target process (e.g. `explorer.exe`) is not running in the same session, `OpenProcess` will succeed but the created process may inherit the wrong desktop/session token, causing it to fail silently.
+
+**Improvements - For Operators**
+- Prefer `explorer.exe` or `RuntimeBroker.exe` as spoof targets - they are almost always present in interactive sessions and match the expected parent for GUI processes.
+- Avoid `svchost.exe` as a spoof target unless the session type (service vs. interactive) matches - a `svchost.exe`-parented interactive process is unusual.
+- PPID spoofing alone is insufficient against EDRs that track the actual creating process token - combine with callstack spoofing for deeper coverage.
+
+### Sleep Obfuscation Type 4: Full Ekko
+
+*Timer-based sleep with XOR encryption of all non-`.text` PE sections, PE header wipe, and stack return-address XOR via `RtlCaptureContext` + `RtlVirtualUnwind` (up to 64 frames).*
+
+**OPSEC Considerations**
+- PE header wipe (`IMAGE_DOS_HEADER` + `IMAGE_NT_HEADERS`, first `0x400` bytes zeroed) defeats any scanner that reads the MZ signature from the mapped region during the sleep window.
+- Stack frame XOR prevents call-stack based memory attribution during sleep, but the XOR key is stored in a local stack variable which may be visible in a full memory dump.
+- `RtlVirtualUnwind` is legitimate but its use during a thread in a wait state is unusual; if ETW captures the call stack at the time of `NtWaitForSingleObject` entry, the unwind chain may be visible.
+- Type 4 requires resolving `RtlCaptureContext` and `RtlVirtualUnwind` from ntdll at runtime; these are uncommon for injection-adjacent code paths and may appear in behavioural rule sets.
+
+**Improvements - For Operators**
+- Use Type 4 in environments where memory scanners (PE-sieve, Moneta, BeaconEye) run on a timer against all processes - the PE header and section XOR closes the widest gap.
+- For environments with kernel-level call-stack telemetry, Type 4 provides limited additional benefit over Type 2 (Ekko-lite); assess the target EDR's stack-walk depth before choosing.
+
 ---
 
 ## Loader Memory Handling
@@ -526,15 +646,18 @@ The C++ `Erebus.Loader` supports four injection techniques, selected via `0.4 Sh
 
 ### Syscall Backend (`0.5m`)
 
-Two choices, both bypass user-mode hooks on `Nt*` calls:
+Three choices, all bypass user-mode hooks on `Nt*` calls. Controlled via `0.5m Syscall Backend`.
 
-- **TartarusGate** (default) - runtime-generated indirect syscall shim page. Each stub is `mov r10, rcx; mov eax, <ssn>; jmp <gadget_in_ntdll>`; the actual `syscall` instruction executes from inside ntdll's `.text`, which is where kernel telemetry expects it.
-- **SysWhispers3** - compile-time generated `Sw3Nt*` stubs. Requires the `include/evasion/sw3/` tree and the `Syscalls-asm.x{64,86}.asm` sources linked in the loader Makefile.
+- **TartarusGate** (default, x64) - runtime-generated indirect syscall shim page. Each stub is `mov r10, rcx; mov eax, <ssn>; jmp <gadget_in_ntdll>`; the actual `syscall` instruction executes from inside ntdll's `.text`, which is where kernel telemetry expects it. No external files required.
+- **SysWhispers3** (x64) - compile-time generated `Sw3Nt*` stubs. Requires the `include/evasion/sw3/` tree and the `Syscalls-asm.x{64,86}.asm` sources linked in the loader Makefile. Stubs self-initialise their SSN on first call.
+- **Heaven's Gate** (x86 / WoW64 only) - enables a 32-bit loader to issue native 64-bit syscalls on a 64-bit host. The thunk in `src/evasion/heavens_gate.S` uses a far `retf` to switch to code segment `0x33` (64-bit long mode), places all arguments into 64-bit registers / stack slots per Win64 ABI, executes `syscall`, then far-`retf`s back to `0x23` (32-bit compat). SSNs are resolved from the 64-bit ntdll mapped by WoW64 (located via the 32-bit TEB's `fs:[0xF70]` WoW64 extension, which points to the 64-bit TEB). Per-function stubs live in a private RX page; no byte is written to any system DLL. Requires `0.2a Loader Architecture = x86`.
 
 **OPSEC Considerations**
 - SSN resolution walks ntdll's export table; on a process that has already lost ntdll to a deep user-mode hooking engine, the SSN table may be shifted and resolution fails silently.
 - Indirect syscalls bypass user-mode hooks but *not* kernel-mode ETW-TI (`Microsoft-Windows-Threat-Intelligence`). Protected-process EDR still sees the call.
-- `InitIndirectSyscalls()` runs after `UnhookNtdll()` - if unhook fails, the SSN table read is from the hooked ntdll and the generated stubs may carry poisoned SSNs.
+- `InitIndirectSyscalls()` / `InitHeavensGate()` run after `UnhookNtdll()` - if unhook fails, the SSN table read is from the hooked ntdll and the generated stubs may carry poisoned SSNs.
+- Heaven's Gate: the Dr0 register is used by `PatchlessAmsi` (type 4) for the AMSI hardware breakpoint. If both are active simultaneously, the shared debug register must be managed carefully. In the current implementation each runs independently; using both at the same time on the same thread is not supported.
+- Heaven's Gate: the per-stub RX page allocation (`VirtualAlloc` + `VirtualProtect`) is performed in 32-bit mode before the first syscall is issued. This is the only allocation that uses the plain Win32 API rather than a syscall stub.
 
 ### Callstack Spoofing (`0.5n` + `0.5o`)
 
@@ -564,6 +687,55 @@ Two choices, both bypass user-mode hooks on `Nt*` calls:
 - Surface a gadget-search telemetry knob so the operator sees which module / offset was selected per build (ship it in the IOC report).
 - Extend the ASM to accept the displacement as a parameter (currently hardcoded), which would let the search accept any `add rsp, N; ret` found rather than requiring `N == 0x68`.
 - Add a second spoof tier that swaps the gadget host mid-campaign (rebuild with a different `0.5o` list) so two builds from the same operator don't share the exact same first-frame module.
+
+### AMSI Bypass Type (`0.5s`)
+
+Five tiers of AMSI neutralisation, applied before any shellcode decryption. Selected via `0.5s AMSI Bypass Type`.
+
+| Type | Technique | Mechanism |
+|------|-----------|-----------|
+| 0 | Disabled | No AMSI action taken. |
+| 1 | `PatchAmsiScanBuffer` (default) | Overwrites the first 3 bytes of `AmsiScanBuffer` with `xor eax,eax; ret` (XOR-encoded on disk, decoded onto stack at runtime). Every scan returns `E_INVALIDARG`. |
+| 2 | + `PatchAmsiOpenSession` | Adds a patch to `AmsiOpenSession` returning `S_OK` with a null output pointer, preventing any new scan context from being initialised. Complements type 1 for scans issued after patching. |
+| 3 | + `InvalidateAmsiContext` (heap-walk) | Walks every process heap looking for live `AMSI_CONTEXT` blocks (identified by signature `0x49534D41`) and zeros the signature field. Covers already-open contexts that types 1/2 can't reach. Best-effort: contexts allocated after this call are not invalidated. |
+| 4 | Patchless HW-BP + VEH | Arms a hardware execute breakpoint (`Dr0`) on `AmsiScanBuffer`'s first instruction via `SetThreadContext`. Installs a vectored exception handler at the front of the VEH chain. On `EXCEPTION_SINGLE_STEP` at the target address, the VEH writes `AMSI_RESULT_CLEAN` (0) to the caller's result pointer (`[RSP+0x30]` at function entry per Win64 ABI), sets `RAX=S_OK`, pops the return address from the stack into `RIP`, and adjusts `RSP`. No bytes in `amsi.dll` are modified; defeats PG/CFG integrity checks and signature-based detection of the classic `xor eax,eax; ret` patch. Coverage is the loader's own thread only. |
+
+**OPSEC Considerations**
+- Types 1–3 all write to `amsi.dll`'s `.text` section via `NtProtectVirtualMemory` + `RtlCopyMemory`. Any EDR that integrity-checks `amsi.dll` between the patch and the first scan will see the modification.
+- The classic type 1 patch (`\x33\xC0\xC3`) is one of the most-detected byte sequences in the industry. Types 2–4 reduce dependence on it.
+- Type 4 (patchless) leaves `Dr0` armed in the loader's thread context for the loader's lifetime. Any debugger attaching after this point will see `Dr0` set to an unexpected address. `GetThreadContext` from the same thread (e.g. by an introspective EDR module) reveals the breakpoint.
+- Type 3's heap-walk calls `HeapWalk`, which acquires the heap lock. Heavy heap contention during the walk can cause perceptible latency on multi-threaded hosts.
+
+**Improvements - For Operators**
+- On environments known to have PG-protected EDR (`RunAsPPL`), prefer type 4: no memory write to any protected module.
+- Type 3 is aggressive and noisy (heap traversal); reserve it for environments where AMSI contexts persist across a complex .NET execution chain.
+- Types 1 and 4 are mutually redundant - pick one based on the expected detection stack, not both.
+
+**Improvements - For Erebus Developers**
+- Type 4 currently covers the loader thread only. Extend to other threads by enumerating them and calling `SetThreadContext` on each after snapping a `CONTEXT` with `GetThreadContext`.
+- Add a `RemoveVectoredExceptionHandler` cleanup path for type 4 after the payload executes, so the VEH doesn't remain active during the shellcode's lifetime.
+
+### ETW Bypass Type (`0.5t`)
+
+Four tiers of ETW neutralisation, applied by `RunEvasionPatches()`. Selected via `0.5t ETW Bypass Type`.
+
+| Type | Technique | Mechanism |
+|------|-----------|-----------|
+| 0 | Disabled | No ETW action taken. |
+| 1 | `PatchEtwEventWrite` (default) | Overwrites `EtwEventWrite` entry point with `ret`. All user-mode ETW provider writes in this process are silenced. |
+| 2 | + `PatchEtwEventWriteFull` | Patches `EtwEventWriteFull` as well, covering the secondary event-write path used by some providers. |
+| 3 | + `UnregisterEtwProviders` | Walks the TEB chain looking for active ETW provider registration handles and calls `EtwUnregisterProvider` on each, formally de-registering every provider before they can emit further events. |
+
+**OPSEC Considerations**
+- Patching `EtwEventWrite` silences *user-mode* telemetry. Kernel-mode ETW-TI (`Microsoft-Windows-Threat-Intelligence`) is unaffected; it runs in kernel space and does not call `EtwEventWrite`.
+- The patch writes to `ntdll.dll`'s `.text` section - the same module that unhooked for syscall cleanliness. Writing ETW patches after `UnhookNtdll()` may overwrite the clean copy just restored. Order in `RunEvasionPatches()`: unhook → AMSI → ETW.
+- Type 3 (provider unregistration) can break legitimate application functionality if the process has any in-process ETW consumers (e.g. live diagnostic listeners in .NET CLR). Avoid for ClickOnce / managed-code delivery chains.
+
+**Improvements - For Operators**
+- Types 0–2 are adequate for the vast majority of engagements. Type 3 is only needed when a specific ETW provider emits events that survive the type 1/2 patches (this is rare outside of kernel-assisted providers).
+
+**Improvements - For Erebus Developers**
+- Add a patchless ETW variant (similar to AMSI type 4) that redirects `EtwEventWrite` via a Dr1 hardware breakpoint + VEH rather than a byte patch, for consistency with the AMSI approach.
 
 ---
 
@@ -688,19 +860,32 @@ The VM Loader wraps the shellcode execution chain inside an embedded vmkit RISC 
 
 *Three layers sit on top of the underlying injection: opcode byte randomization (256-entry reverse map), per-build XOR of the bytecode at rest (`g_vm_ir_blob`), and per-op context XOR (the `VMLoaderContext` is XOR-scrambled between each opcode dispatch).*
 
+**Per-build randomisation**
+
+The VM Loader now ships three independently-randomised obfuscation surfaces per build, all generated by `builder.py` and passed as `-D` macros to both `vmloader_builder` (the embedded step) and the final cross-compile:
+
+| Macro | What it randomises | Effect |
+|-------|--------------------|--------|
+| `VM_IR_SEED` | 32-bit XOR key derivation seed | `derive_key(seed)` output differs per build; two loaders with different seeds decrypt to different bytecode even from the same IR source |
+| `VM_FWD_0`–`VM_FWD_7` | Opcode forward permutation (random shuffle of `[0..7]`) | Encoded opcode byte for each real op differs per build; the classic `EvasionPatch→ObfuscatedSleep→…` byte sequence is never the same across builds |
+| `VM_KEY_BASE_0`–`VM_KEY_BASE_5` | 6-byte base for `vm_derive_key()` | Even if `VM_IR_SEED` is extracted from the loader, the key derivation output is still unknown without the base |
+
+The `embedded` make step and final compile both receive the same randomised values, ensuring the builder and loader keying material are always in sync.
+
 **OPSEC Considerations**
-- The vmkit reverse map is per-build (it is a static constexpr array compiled into the loader), but it does not change between builds unless `EREBUS_HASH_SEED` differs. If two builds share the same seed, the opcode mapping is identical. The Mythic builder generates a new random `EREBUS_HASH_SEED` per build, so operationally this is fine.
-- The XOR key (`derive_key(VM_IR_SEED)`) is derived from a fixed seed (`VM_IR_SEED = 0xC0DE1337U` default) mixed with a base string. A static analyst who extracts the key derivation logic from the loader image can decrypt `g_vm_ir_blob` offline and reconstruct the IR program.
-- The IR program reveals the full execution plan - evasion, sleep timing, region size, injection type - to a static analyst who decrypts it.
-- Context XOR between ops is keyed to the same `VM_IR_SEED`; it is an anti-memory-scan measure, not a cryptographic one.
+- The XOR key (`derive_key(VM_IR_SEED, VM_KEY_BASE_*)`) is derived from two per-build random inputs now. Both must be extracted from the compiled loader to recover `g_vm_ir_blob` offline. They are compile-time constants in `.rodata`; a static analyst with access to the binary can still recover them, but the approach resists automated YARA rules and generic decryptors.
+- The IR program reveals the full execution plan - evasion, sleep timing, region size, injection type - to a static analyst who decrypts it. Per-build randomisation changes *how* the bytes look, not *what* the plan encodes.
+- Context XOR between ops (`VMLoaderContext` scrambled at `VM_IR_SEED ^ op_index`) is an anti-memory-scan measure, not a cryptographic one. It hides live allocation addresses in memory snapshots between opcode dispatches.
 - The `g_vm_ir_blob` is `inline constexpr` read-only data in `.rodata`. The stack copy in `entry()` is mutable and is decrypted in-place; a debugger breakpointing after the first `vm.execute()` step sees plaintext opcodes in the stack frame.
+- Sleep timing (`ObfuscatedSleep` operands `base_ms`/`jitter_ms`) is now operator-configurable via `0.5q`/`0.5r` and encoded into the IR blob. Both values appear in the decrypted IR, not as static constants in `.text`.
+- AMSI, ETW, and unhook patches are now also applied in VM Loader builds (passed via `CONFIG_AMSI_BYPASS_TYPE`, `CONFIG_ETW_BYPASS_TYPE`, `CONFIG_UNHOOK_SCOPE` to the shared evasion code from `Erebus.Loader`). The `EvasionPatch` opcode calls `RunEvasionPatches()` which respects these config values.
 
 **Improvements - For Operators**
 - Prefer `BUILD=release` always - debug builds retain stack frame metadata and do not apply dead-code strip flags.
 - Vary the loader format per delivery chain (`dll` for sideloading, `exe` for standalone, `xll` for maldoc-adjacent chains) to avoid every VM Loader build sharing the same PE structure.
+- The sleep timing is now encoded in the IR blob rather than hardcoded - tune `0.5q`/`0.5r` to match the target environment's normal inter-process timing so the dwell doesn't stand out in process lifetime histograms.
 
 **Improvements - For Erebus Developers**
-- Expose `VM_IR_SEED` as a per-build random value (`EREBUS_HASH_SEED` already provides this hook) so the key derivation output differs per build.
 - Encrypt the stack blob copy before storing it so a memory dump mid-execution reveals only XOR'd opcodes.
 - Consider a larger IR dispatch table (beyond 8 ops) with no-op padding ops to frustrate IR recovery via size analysis.
 
@@ -1105,6 +1290,139 @@ The VM Loader wraps the shellcode execution chain inside an embedded vmkit RISC 
 - Add `curl` / `Invoke-RestMethod` as command alternatives in the default template so operators rotate through stager verbs.
 - Add a per-build randomised function/variable name pass to the generated HTML/JS so two builds don't share JS fingerprints.
 
+### CMSTP (T1218.003)
+
+*`.inf` Setup Information File executed by `cmstp.exe /s /ns`, a signed Microsoft binary.*
+
+**OPSEC Considerations**
+- Sysmon Event 1 logs the `cmstp.exe /s /ns` command line verbatim; process lineage is `explorer.exe → cmstp.exe → <cmd from RunPreSetupCommandsSection>`.
+- CMSTP is a known AppLocker / WDAC bypass vector - many mature environments block it by policy or monitor it explicitly. Verify CMSTP is not disabled before use.
+- The `.inf` file contains the command in cleartext; static detection is trivial.
+- On Windows 10 21H2+ the CMSTP UAC bypass via `/au` was patched for high mandatory label processes; the `/s /ns` path still works without UAC.
+
+**Improvements - For Operators**
+- Rename the `.inf` file to something plausible (e.g. `update.inf`, `printer.inf`); CMSTP will still execute regardless of file name.
+- Deliver inside an ISO or VHD to bypass MOTW on the `.inf` file.
+- Use the SCT variant if the environment is specifically watching the `RunPreSetupCommandsSection` path.
+
+**Improvements - For Erebus Developers**
+- Add a per-build GUID randomiser for the `[AllUSer_LDIDSection]` key to avoid static INF signatures.
+
+### Regsvr32 / Squiblydoo (T1218.010)
+
+*COM scriptlet (`.sct`) executed via `regsvr32.exe /s /n /u /i:<path> scrobj.dll`.*
+
+**OPSEC Considerations**
+- Sysmon Event 1 captures the full command line including the `.sct` path or URL; the `/i:` argument is the primary detection anchor.
+- When using a URL target (`/i:http://...`), the request appears in network logs with `regsvr32.exe` as the process - a high-confidence network detection signal.
+- When using a local path, no network traffic is generated but the `.sct` file must be placed on disk at a path the victim can reach.
+- `scrobj.dll` COM scriptlet execution generates `COMRuntime` ETW events on Windows 10 RS4+.
+- The `.sct` XML contains the JScript payload in cleartext.
+
+**Improvements - For Operators**
+- Prefer local path mode (avoids network detection) combined with ISO delivery (MOTW bypass).
+- Obfuscate the JScript content using `eval(String.fromCharCode(...))` or a similar technique to break static `.sct` YARA rules.
+
+**Improvements - For Erebus Developers**
+- Add a JScript obfuscation pass (string splitting, eval encoding) to the generated `.sct` content.
+- Add a VBScript `.sct` variant as an alternative; VBScript signatures have less coverage than JScript in some rule sets.
+
+### XSL Transform / WMIC (T1220)
+
+*XSLT stylesheet with JScript execution block, invoked via `wmic.exe /FORMAT:`.*
+
+**OPSEC Considerations**
+- `wmic.exe` is deprecated and disabled by default on Windows 11 22H2+ and Server 2022+ - verify `wmic.exe` is present and not blocked before use.
+- Sysmon Event 1 captures the `/FORMAT:` argument; if the path is local, the `.xsl` file appears in the command line. If a URL is used, the DNS query from `wmic.exe` is a high-confidence signal.
+- `wmic.exe` executes the JScript in-process (no new process spawned for the script itself) - but any `WScript.Shell.Run()` call inside the XSL spawns a visible child process.
+- ETW `Microsoft-Windows-WMI-Activity/Operational` logs the full query including the `/FORMAT:` path.
+
+**Improvements - For Operators**
+- Use `msxsl.exe` as an alternative invocation if it is present - it has different Sysmon signatures and is less commonly monitored.
+- Set the XSL command to spawn a long-lived process in a new session to break the `wmic.exe` parent-child attribution quickly.
+
+**Improvements - For Erebus Developers**
+- Add `msxsl.exe` support as a first-class invocation mode (currently a note in the output).
+
+### InstallUtil (T1218.004)
+
+*C# assembly with `[RunInstaller(true)]` class; `Uninstall()` executes shellcode via `InstallUtil.exe /U`.*
+
+**OPSEC Considerations**
+- Sysmon Event 1 logs the `InstallUtil.exe /logfile= /LogToConsole=false /U <path>` command line - all three flags together are a well-known detection pattern in Sigma rules.
+- The `Uninstall()` method invocation is detectable by `.NET ETW` (`Microsoft-Windows-DotNETRuntime`) - P/Invoke calls to `VirtualAlloc` from managed code appear in ETW assembly load events.
+- Inline shellcode in the `.cs` source is XOR + base64 obfuscated but the decoding loop is still a static detection target.
+- The generated `.cs` source must be compiled on a Windows host (via `csc.exe`) before delivery - the server-side artifact is source, not an executable.
+
+**Improvements - For Operators**
+- Use staged mode when the environment has AMSI/ETW coverage of embedded shellcode byte patterns - the `WebClient.DownloadData()` path delivers shellcode only at runtime.
+- Rename the output assembly to something plausible (`WindowsUpdate.exe`, `DotNetFixer.exe`).
+- Patch ETW and AMSI before the shellcode allocation step (in the `Uninstall()` method body) using the P/Invoke approach to reduce telemetry.
+
+**Improvements - For Erebus Developers**
+- Add an optional pre-shellcode AMSI/ETW patch step in the generated C# `Uninstall()` method.
+- Support direct compilation via `csc.exe` inside the Mythic Docker container when Mono is available, removing the Windows build dependency.
+
+---
+
+## Standalone Persistence
+
+### COM Hijacking (T1546.015)
+
+*HKCU CLSID override that loads the loader DLL when the target application instantiates the hijacked COM object.*
+
+**OPSEC Considerations**
+- Registry writes to `HKCU\Software\Classes\CLSID\{...}\InprocServer32` are visible in Sysmon Event 13 (`RegistryEvent`) and to any EDR monitoring registry modifications.
+- When the hijacked COM object is instantiated, the DLL is loaded into the host process by the COM runtime - the load appears as a `DLL_PROCESS_ATTACH` event; EDR hooks on `LoadLibrary`-family calls will see it.
+- Curated CLSIDs (e.g. `{BCDE0395}`, `{B5F8350B}`) are known-good hijack targets documented in public research; mature detection rule sets include them. Custom CLSIDs require manual research.
+- The loader DLL path is stored in cleartext in the registry value.
+
+**OPSEC Improvements - For Operators**
+- Use a loader DLL with a plausible file name and location (e.g. `%APPDATA%\Microsoft\Office\<random>.dll`) to blend with legitimate Office add-in patterns.
+- Time the registry write and DLL placement to coincide with a low-telemetry window (off-hours, high system load).
+- Use the cleanup `.reg` to remove the key immediately after the payload is resident in memory - reduces forensic persistence of the artefact.
+
+**OPSEC Improvements - For Erebus Developers**
+- Add an auto-research mode that enumerates HKLM CLSIDs with no matching HKCU entry from the current user session, rather than relying on a static curated list.
+- Implement DLL-side self-deletion (mark the file for deletion on close via `FILE_FLAG_DELETE_ON_CLOSE`) to remove the disk artefact after the payload is injected.
+
+### WMI Event Subscription (T1546.003)
+
+*Permanent `CommandLineEventConsumer` subscription triggered by a time-based `__EventFilter`.*
+
+**OPSEC Considerations**
+- All three WMI object types (`__EventFilter`, `CommandLineEventConsumer`, `__FilterToConsumerBinding`) are logged by Sysmon Event 19/20/21 respectively when `wmiActivityService` logging is enabled.
+- The consumer command line (path to the loader executable) is stored in cleartext in the `CommandLineTemplate` attribute of the consumer object.
+- WMI subscriptions survive reboots and user logoffs - high forensic persistence. Post-incident responders routinely enumerate these.
+- PowerShell-based installation (`Set-WmiInstance`) generates PowerShell ScriptBlock Logging events (Event 4104) if module logging is enabled.
+
+**OPSEC Improvements - For Operators**
+- Use the `.mof` deployment path (`mofcomp.exe`) instead of the PS1 installer to avoid PowerShell logging.
+- Set the consumer command to a LOL binary that loads the actual payload (e.g. `wscript.exe payload.vbs`) to add an extra layer between the WMI event and the loader binary.
+- Use a filter interval higher than 3600 seconds to reduce the frequency of execution events (lower noise, lower detection signal, but longer gaps).
+
+**OPSEC Improvements - For Erebus Developers**
+- Add an `ActiveScriptEventConsumer` variant as an alternative to `CommandLineEventConsumer` - it does not log a process creation event (the VBScript runs inside `WMI Provider Host`).
+
+### LaunchAgent (T1543.001, macOS)
+
+*User-scope `launchctl` daemon installed to `~/Library/LaunchAgents/` - runs at login.*
+
+**OPSEC Considerations**
+- `launchctl load` generates an `ES_EVENT_TYPE_NOTIFY_EXEC` event observed by `EndpointSecurity` framework subscribers (CrowdStrike Falcon for Mac, SentinelOne, Jamf Protect).
+- The plist file is a cleartext XML document; any forensic examination of `~/Library/LaunchAgents/` immediately reveals the label and program path.
+- The default label `com.apple.systemupdate.agent` mimics Apple service names but is not a real Apple service - any tool that compares labels against a known-good Apple list will flag it.
+- Gatekeeper quarantine (`com.apple.quarantine` xattr) on the binary can prevent execution even with a valid plist; `install_agent.sh` does not strip the quarantine attribute.
+
+**OPSEC Improvements - For Operators**
+- Use a label that matches the target's legitimate software (e.g. a cloned label from an installed enterprise tool like `com.jamf.management.daemon`).
+- Strip the quarantine xattr from the loader binary before the `launchctl load` call: `xattr -d com.apple.quarantine <binary>`.
+- Copy the binary to `~/Library/Application Support/<vendor>/` to match common macOS app installation conventions.
+
+**OPSEC Improvements - For Erebus Developers**
+- Add a `ThrottleInterval` BuildParameter so operators can tune the respawn delay to match the payload's own sleep interval.
+- Add a quarantine-strip step to `install_agent.sh`.
+
 ---
 
 ## Linux / macOS Trigger Mechanisms
@@ -1210,6 +1528,50 @@ The VM Loader wraps the shellcode execution chain inside an embedded vmkit RISC 
 - Add a BuildParameter for `bundle_id`, `pkg_name`, and `install_location` so operators don't edit the default values manually.
 - Detect when `pkgbuild` is available and surface a build-step message confirming whether a real `.pkg` or a raw project directory was produced.
 - Add a cleanup line to `postinstall` that runs `pkgutil --forget <bundle_id>` after the payload fires so the installation record is removed automatically.
+
+### macOS .app Bundle (AppBundle / AppBundle-AdHoc)
+
+*An unsigned or ad-hoc-signed `.app` bundle whose `Contents/MacOS/launcher` zsh script copies the payload to `/tmp/<random>`, detaches it via `nohup`, and optionally opens a decoy document.*
+
+**OPSEC Considerations**
+- Process lineage is `launchd → zsh (launcher) → nohup → payload`; all three intermediate processes are visible in `EndpointSecurity`-based EDR (`ES_EVENT_TYPE_NOTIFY_EXEC`) and in the Unified Log.
+- The bundle's `CFBundleIdentifier` (`com.apple.systemupdate` by default) is written to the quarantine database (`~/Library/Preferences/com.apple.LaunchServices.QuarantineEventsV2`) on first execution.
+- `codesign -dvv` on an ad-hoc-signed bundle immediately reveals the identity as `ad-hoc` (no team ID, no certificate chain). Any analyst inspecting the bundle sees it was not signed by a registered developer.
+- The payload copy lands in `/tmp/<random10chars>` with no extension; `/tmp` writes are logged by `fseventsd`.
+- Unsigned bundles generate the "Apple cannot check this app for malicious software" Gatekeeper prompt on macOS 12+ when quarantined. Ad-hoc signed bundles suppress the "app is damaged" error but still trigger the "unidentified developer" prompt.
+
+**Improvements - For Operators**
+- Deliver inside a ZIP to control quarantine xattr propagation; macOS < 13 does not propagate the xattr to extracted bundle contents, bypassing the Gatekeeper prompt.
+- Set `CFBundleIdentifier` to a plausible reverse-DNS string matching the lure pretext (e.g. `com.google.Chrome.update`) rather than the default `com.apple.systemupdate`.
+- If a Developer ID certificate is available, sign the bundle with it and notarise; this passes Gatekeeper entirely and removes the unidentified-developer prompt.
+- Right-click > Open as the first-run social-engineering instruction bypasses the Gatekeeper block for unsigned bundles without needing a certificate.
+
+**Improvements - For Erebus Developers**
+- Add BuildParameters for `bundle_id`, `app_name`, and `bundle_version` so operators don't rely on the default `com.apple.systemupdate` / `Update` values.
+- Replace the zsh launcher with a compiled Mach-O stub (thin wrapper that `exec()`s the payload) to remove the intermediate shell from the launchd child tree.
+- Add a `remove_quarantine` option that calls `xattr -d com.apple.quarantine` on the bundle itself at the end of the build step when the operator knows the delivery channel won't re-quarantine it.
+
+### macOS DMG Disk Image
+
+*UDZO-compressed disk image wrapping an inner `.app` bundle. The victim double-clicks the DMG, Finder mounts the volume, and the victim double-clicks the `.app` inside.*
+
+**OPSEC Considerations**
+- DMG mount events are logged by `fseventsd` and by `diskimages-helper` in the Unified Log; the volume name, mount path, and originating file path all appear.
+- The quarantine xattr on the `.dmg` file propagates to the mounted volume's contents when opened from a quarantined download; the inner `.app` still triggers the Gatekeeper prompt unless ad-hoc signed.
+- Volume name (`Installer` by default) is shown in Finder sidebar and recorded in `/var/db/receipts` / quarantine database - a high-fidelity forensic artefact.
+- DMG delivery is a heavily-used technique by both APT groups (Lazarus Group, OceanLotus) and commodity macOS malware (Bundlore, Shlayer); mature macOS EDRs (CrowdStrike Falcon for Mac, SentinelOne) inspect DMG mounts and the execution lineage of apps launched from mounted volumes.
+- The staging directory used by `hdiutil` during DMG assembly is cleaned up by the plugin but its temporary existence may generate fseventsd entries on the build host.
+
+**Improvements - For Operators**
+- Set the volume name to a legitimate product (e.g. `Google Chrome`, `Zoom 5.18.1`) to blend into Finder mount history and victim memory of what they downloaded.
+- Ad-hoc sign the inner `.app` (use AppBundle-AdHoc via the plugin's `ad_hoc_sign=True` path) to suppress the "app is damaged" error; the "unidentified developer" prompt still appears but the victim can right-click > Open.
+- If `hdiutil` is unavailable on the build host, the plugin emits the raw `.app` and a `build_dmg.sh` script; run `build_dmg.sh` on a macOS host before delivery, then optionally sign the DMG with `codesign` + a Developer ID Application certificate.
+- Use `hdiutil create -encryption AES-256` manually (not yet a plugin option) to encrypt the DMG with a password; include the password in the phishing lure body to add an analysis delay.
+
+**Improvements - For Erebus Developers**
+- Add BuildParameters for `volume_name`, `app_name`, `dmg_name`, and `ad_hoc_sign` so operators control the DMG identity without editing plugin defaults.
+- Add an optional Applications symlink inside the staging directory so the volume presents the drag-to-install UX the victim expects.
+- Implement `hdiutil create -encryption AES-256` as a BuildParameter option with operator-supplied password; emit the password to the Mythic build output so the operator can embed it in the lure.
 
 ---
 
