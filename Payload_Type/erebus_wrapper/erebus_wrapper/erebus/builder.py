@@ -336,7 +336,7 @@ DEFAULT_BLOCKED_PROCESSES = [
 class ErebusWrapper(PayloadType):
     name = "erebus_wrapper"
     author = "@Lavender-exe, @hunterino-sec"
-    semver = "0.1.2"
+    semver = "0.2.0"
     
     note = f"An Initial Access Toolkit built to speed up payload development & delivery.\nVersion: {semver}"
 
@@ -351,7 +351,7 @@ class ErebusWrapper(PayloadType):
     wrapped_payloads = ["merlin", "kharon", "ceos"
                         "sliver", "apollo", "athena",
                         "xenon", "nimplant", "hannibal",
-                        "starburst"]
+                        "starburst", "poopsie"]
     c2_profiles = []
 
     # Plugin validation flag - run only once at startup
