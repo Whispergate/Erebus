@@ -1,6 +1,17 @@
 FROM itsafeaturemythic/mythic_python_dotnet:latest
 RUN apt-get clean
 RUN dpkg --add-architecture i386
+
+RUN if grep -q bullseye /etc/apt/sources.list 2>/dev/null; then \
+        sed -i \
+            -e 's|deb.debian.org/debian|archive.debian.org/debian|g' \
+            -e 's|security.debian.org|archive.debian.org|g' \
+            -e '/bullseye-updates/d' -e '/bullseye-backports/d' \
+            /etc/apt/sources.list && \
+        echo 'Acquire::Check-Valid-Until "false";' > /etc/apt/apt.conf.d/99archive; \
+    fi
+
+
 RUN apt-get update && apt-get install python3 python3-pip python3-venv wget curl ca-certificates openssl mingw-w64 git msitools wixl make g++ p7zip-full zip osslsigncode wine wine32 wine64 libcairo2 --no-install-recommends -y
 
 # Node.js 20 LTS - used by the Erebus.Electron fake-installer *container*
