@@ -1,17 +1,14 @@
 {
-  "os": ["Windows", "macOS", "Linux"],
-  "languages": [] ,
-  "os": ["Windows", "Linux", "MacOS"],
-  "languages": ["C", "C#"] ,
+  "os": ["Windows", "Linux", "macOS"],
+  "languages": ["C", "C#"],
   "features": {
     "mythic": ["wrapper"],
     "custom": []
   },
   "payload_output": ["zip", "iso", "msi", "vsix", "7z", "JS"],
-  "architectures": ["x86_64"],
+  "architectures": ["x86", "x64", "arm64"],
   "c2": [],
-  "mythic_version": "3.4.13",
+  "mythic_version": "4.0.0",
   "agent_version": "0.1.2",
-  "agent_version": "0.1.0",
   "supported_wrappers": []
 }
