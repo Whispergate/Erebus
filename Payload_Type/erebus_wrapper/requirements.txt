@@ -1,4 +1,4 @@
-mythic-container==0.7.0rc9
+mythic-container
 argparse
 pycryptodome
 cryptography
